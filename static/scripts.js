@@ -111,4 +111,43 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   setInterval(atualizarStatus, 2500);
+  function atualizarLogs() {
+    fetch("/status_robo")
+      .then((res) => res.json())
+      .then((data) => {
+        // Atualiza o SALDO na barra principal do painel
+        if (document.getElementById("saldo-valor")) {
+          document.getElementById("saldo-valor").innerText =
+            data.saldo.toFixed(2);
+        }
+
+        // Atualiza o TIPO DE CONTA (opcional, se você usar esse campo no HTML)
+        if (data.tipo_conta && document.getElementById("tipo-conta-label")) {
+          document.getElementById(
+            "tipo-conta-label"
+          ).innerText = `Conta: ${data.tipo_conta}`;
+        }
+
+        // Atualiza LOGS no painel (se tiver div de logs com id 'log-operacoes')
+        const logContainer = document.getElementById("log-operacoes");
+        if (logContainer) {
+          logContainer.innerHTML = "";
+          data.logs
+            .slice()
+            .reverse()
+            .forEach((log) => {
+              const div = document.createElement("div");
+              div.className = "log-item";
+              div.innerText = log;
+              logContainer.appendChild(div);
+            });
+        }
+      })
+      .catch((err) => {
+        console.error("Erro ao buscar status do robô:", err);
+      });
+  }
+
+  // Chama a função de 2 em 2 segundos pra atualizar tudo em tempo real
+  setInterval(atualizarLogs, 2000);
 });

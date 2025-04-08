@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Inserir Token - Bot Deriv</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <div class="login-container">
+      <h2>Insira seu Token da Deriv</h2>
+      <form action="/salvar_token" method="POST">
+        <input
+          type="text"
+          name="token"
+          placeholder="0hfU9DKnc0LnCZL"
+          required
+        />
+        <button type="submit">Salvar Token</button>
+      </form>
+      <p style="margin-top: 10px; color: #999">
+        Seu token será salvo de forma segura e criptografada.
+      </p>
+    </div>
+  </body>
+</html>
