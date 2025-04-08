@@ -1,0 +1,6 @@
+flask
+flask-session
+flask-dance
+cryptography
+requests
+websocket-client

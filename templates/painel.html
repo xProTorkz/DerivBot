@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Painel do Robô Deriv</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <!-- Topo -->
+    <div class="top-bar">
+      <form action="/logout" method="get">
+        <button class="logout-btn" type="submit">Desconectar</button>
+      </form>
+    </div>
+
+    <!-- Info de saldo e lucro -->
+    <div class="info-bar">
+      <div class="saldo">
+        <label>Saldo atual</label>
+        <p id="valor-saldo">
+          <span class="rs">R$</span> <span id="saldo-valor">0.00</span>
+        </p>
+      </div>
+
+      <div class="lucro">
+        <label>Lucro total</label>
+        <p id="lucro-valor" class="positivo">0.00</p>
+      </div>
+    </div>
+
+    <!-- Botão de controle -->
+    <div class="start-stop">
+      <button id="bot-control-btn" class="start-btn">✅ Iniciar Robô</button>
+    </div>
+
+    <!-- Campos de modo e meta -->
+    <div class="modo-meta-wrapper">
+      <div id="modo-container">
+        <label for="modo">Modo de Operação</label>
+        <select id="modo" class="modo-select">
+          <option value="iniciante">🌱 Iniciante</option>
+          <option value="conservador">🛡️ Conservador</option>
+          <option value="agressivo">🔥 Agressivo</option>
+        </select>
+      </div>
+
+      <div id="meta-container">
+        <label for="meta">Meta diária (R$)</label>
+        <input type="number" id="meta" class="input-meta" step="0.01" />
+      </div>
+    </div>
+
+    <!-- Etapas visuais -->
+    <div class="status-line">
+      <span class="status" id="bolinha-analisando">Analisando</span>
+      <span class="status" id="bolinha-abrindo">Abrindo contrato</span>
+      <span class="status" id="bolinha-finalizado">Finalizado</span>
+    </div>
+
+    <!-- Barra de progresso -->
+    <div class="barra">
+      <div class="progresso" id="barra-progresso"></div>
+    </div>
+
+    <!-- Log temporário -->
+    <div id="log-temporario" class="log-temp">Aguardando início do robô...</div>
+
+    <!-- Histórico de resultados -->
+    <div class="historico painel-robo">
+      <div class="aba-menu">
+        <span class="aba active">Histórico de Resultados</span>
+        <span class="meta-alvo">Meta: <span id="meta-valor">/0.00</span></span>
+      </div>
+
+      <div class="tabela-wrapper">
+        <table id="historico-tabela">
+          <thead>
+            <tr>
+              <th>Data</th>
+              <th>Hora</th>
+              <th>Par</th>
+              <th>Valor</th>
+              <th>Resultado</th>
+            </tr>
+          </thead>
+          <tbody id="historico-tabela-body">
+            <!-- Resultados virão aqui -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Rodapé -->
+    <div class="footer">
+      <div><span class="dot"></span> Bot conectado à Deriv</div>
+      <div class="timestamp">GMT -3</div>
+    </div>
+
+    <script src="/static/scripts.js"></script>
+  </body>
+</html>

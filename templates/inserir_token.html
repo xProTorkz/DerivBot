@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Inserir Token Deriv</title>
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='style.css') }}"
+    />
+  </head>
+  <body>
+    <div class="container">
+      <h2>🚀 Primeiro acesso: Cole seu token da Deriv</h2>
+      <form action="/salvar_token" method="POST">
+        <label for="token"
+          >Cole aqui o seu token (com permissão de leitura e trade):</label
+        >
+        <input type="text" id="token" name="token" required />
+        <button type="submit">Salvar e iniciar</button>
+      </form>
+    </div>
+  </body>
+</html>

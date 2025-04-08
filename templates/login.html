@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Login - Bot Deriv</title>
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='style.css') }}"
+    />
+    <style>
+      body {
+        background-color: #121212;
+        color: #ffffff;
+        font-family: Arial, sans-serif;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        margin: 0;
+      }
+      .login-container {
+        background-color: #1e1e1e;
+        padding: 40px;
+        border-radius: 10px;
+        box-shadow: 0 0 20px rgba(0, 0, 0, 0.6);
+        text-align: center;
+        width: 300px;
+      }
+      .login-container h2 {
+        margin-bottom: 20px;
+        color: #00b894;
+      }
+      .login-container input {
+        width: 100%;
+        padding: 12px;
+        margin: 10px 0;
+        border: none;
+        border-radius: 6px;
+        background-color: #2a2a2a;
+        color: #fff;
+      }
+      .login-container button {
+        padding: 12px 20px;
+        width: 100%;
+        background-color: #00b894;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        font-weight: bold;
+        cursor: pointer;
+        transition: background 0.3s ease;
+      }
+      .login-container button:hover {
+        background-color: #019270;
+      }
+      .login-container p {
+        font-size: 13px;
+        color: #bbb;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="login-container">
+      <h2>Entrar no Painel</h2>
+      <form action="/login" method="POST">
+        <input
+          type="password"
+          name="senha"
+          placeholder="Senha de acesso"
+          required
+        />
+        <button type="submit">🔐 Entrar</button>
+      </form>
+      <p>Senha padrão: <strong>123</strong></p>
+    </div>
+  </body>
+</html>
