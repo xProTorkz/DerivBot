@@ -8,13 +8,20 @@
   </head>
   <body>
     <!-- Topo -->
+    <div class="tipo-conta">
+      <span id="tipo-conta-label">Conta: Demo</span>
+      <br />
+      <small style="color: #ccc">Usuário: {{ login_id }}</small>
+      <br />
+      <strong style="color: #00ffcc"
+        >Bem-vindo de volta, {{ login_id }} 👋</strong
+      >
+    </div>
+
     <div class="top-bar">
       <form action="/logout" method="get">
         <button class="logout-btn" type="submit">Desconectar</button>
       </form>
-    </div>
-    <div class="tipo-conta">
-      <span id="tipo-conta-label">Conta: Demo</span>
     </div>
 
     <!-- Info de saldo e lucro -->

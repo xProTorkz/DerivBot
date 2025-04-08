@@ -1,10 +1,16 @@
 @echo off
 echo Iniciando servidor Flask...
 
-:: Ativa o ambiente virtual
+REM Ativar o ambiente virtual, se estiver usando (remova se não for o caso)
 call venv\Scripts\activate
 
-:: Inicia o app com o Python certo
-python app.py
+REM Iniciar o app Flask
+start /B cmd /c "python app.py"
 
-pause
+REM Espera 3 segundos pro servidor subir
+timeout /t 3 >nul
+
+REM Abre o navegador padrão na URL do painel
+start http://localhost:5000
+
+exit
