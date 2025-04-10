@@ -1,99 +1,93 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="pt-br">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Login - Bot Deriv</title>
-    <link
-      rel="stylesheet"
-      href="{{ url_for('static', filename='style.css') }}"
-    />
+    <link rel="stylesheet" href="/static/style.css" />
     <style>
       body {
-        background-color: #121212;
-        color: #ffffff;
-        font-family: Arial, sans-serif;
+        background: #0f0f0f;
+        font-family: "Segoe UI", sans-serif;
+        color: #fff;
+        margin: 0;
+        padding: 0;
         display: flex;
         justify-content: center;
         align-items: center;
         height: 100vh;
-        margin: 0;
       }
+
       .login-container {
-        background-color: #1e1e1e;
-        padding: 40px;
-        border-radius: 10px;
-        box-shadow: 0 0 20px rgba(0, 0, 0, 0.6);
+        background: #1a1a1a;
+        padding: 30px 40px;
+        border-radius: 12px;
+        box-shadow: 0 0 20px rgba(0, 255, 128, 0.2);
         text-align: center;
-        width: 300px;
-      }
-      .login-container h2 {
-        margin-bottom: 20px;
-        color: #00b894;
-      }
-      .login-container input {
+        max-width: 400px;
         width: 100%;
-        padding: 12px;
-        margin: 10px 0;
-        border: none;
-        border-radius: 6px;
-        background-color: #2a2a2a;
-        color: #fff;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
       }
-      .login-container button {
-        padding: 12px 20px;
-        width: 100%;
-        background-color: #00b894;
-        color: white;
-        border: none;
-        border-radius: 6px;
-        font-weight: bold;
-        cursor: pointer;
-        transition: background 0.3s ease;
+
+      .login-container h1 {
+        font-size: 22px;
+        margin-bottom: 5px;
       }
-      .login-container button:hover {
-        background-color: #019270;
-      }
+
       .login-container p {
+        font-size: 14px;
+        color: #ccc;
+      }
+
+      .login-button {
+        background: #ff444f;
+        color: white;
+        padding: 12px 20px;
+        font-size: 15px;
+        font-weight: 600;
+        border-radius: 8px;
+        text-decoration: none;
+        transition: background 0.3s ease;
+        display: block;
+        margin: 5px 0;
+      }
+
+      .login-button:hover {
+        background: #d7373f;
+      }
+
+      .floating-tip {
+        margin-top: 15px;
+        background: #222;
+        padding: 12px;
+        border-left: 4px solid #00d67b;
+        border-radius: 6px;
         font-size: 13px;
-        color: #bbb;
+        color: #ccc;
+        text-align: left;
       }
     </style>
   </head>
+
   <body>
     <div class="login-container">
-      <h2>Entrar no Painel</h2>
-      <form action="/login" method="POST">
-        <input
-          type="password"
-          name="senha"
-          placeholder="Senha de acesso"
-          required
-        />
-        <button type="submit">🔐 Entrar</button>
-      </form>
-      <hr style="margin: 20px 0; border-color: #2a2a2a" />
-      <a
-        href="/login/google"
-        style="
-          display: inline-block;
-          background-color: #4285f4;
-          color: white;
-          text-decoration: none;
-          padding: 12px;
-          border-radius: 6px;
-          font-weight: bold;
-          width: 100%;
-          transition: background 0.3s ease;
-        "
-      >
-        <img
-          src="https://img.icons8.com/color/24/000000/google-logo.png"
-          style="vertical-align: middle; margin-right: 8px"
-        />
-        Entrar com Google
+      <h1>Bem-vindo ao Painel do Robô Deriv</h1>
+      <p>Para começar, clique abaixo e crie sua conta:</p>
+
+      <!-- ✅ Apenas o botão de criar conta -->
+      <a href="https://www.deriv.com/" target="_blank" class="login-button">
+        🆕 Criar Conta na Deriv
       </a>
-      <p style="margin-top: 15px">Senha padrão: <strong>123</strong></p>
+
+      <div class="floating-tip">
+        <strong>🧠 Dica rápida:</strong><br />
+        • Após criar a conta, volte ao seu e-mail e clique no segundo botão para
+        conectar seu token.<br />
+        • Essa conexão será usada para liberar seu acesso ao robô.<br />
+        • Não feche o navegador até concluir a ativação ✅
+      </div>
     </div>
   </body>
 </html>

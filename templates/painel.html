@@ -1,113 +1,148 @@
 <!DOCTYPE html>
-<html lang="pt-br">
+<html lang="pt-BR">
   <head>
-    <meta charset="UTF-8" />
+    <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Painel do Robô Deriv</title>
-    <link rel="stylesheet" href="/static/style.css" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Courier+Prime&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="{{ url_for('static', filename='style.css') }}"
+      rel="stylesheet"
+    />
+    <title>Painel Robô Deriv</title>
   </head>
-  <body>
-    <!-- Topo -->
-    <div class="tipo-conta">
-      <span id="tipo-conta-label">Conta: Demo</span>
-      <br />
-      <small style="color: #ccc">Usuário: {{ login_id }}</small>
-      <br />
-      <strong style="color: #00ffcc"
-        >Bem-vindo de volta, {{ login_id }} 👋</strong
-      >
-    </div>
 
+  <body>
     <div class="top-bar">
-      <form action="/logout" method="get">
+      <form action="/logout" method="POST">
         <button class="logout-btn" type="submit">Desconectar</button>
       </form>
     </div>
 
-    <!-- Info de saldo e lucro -->
     <div class="info-bar">
       <div class="saldo">
-        <label>Saldo atual</label>
-        <p id="valor-saldo">
-          <span class="rs">R$</span> <span id="saldo-valor">0.00</span>
+        <label>Saldo</label>
+        <p id="valor-saldo" class="saldo-valor">
+          <span class="rs">$</span>
+          <span id="saldo-valor"
+            >{{ saldo if saldo is not none else '--' }}</span
+          >
+          <span id="moeda">{{ moeda if moeda else 'USD' }}</span>
         </p>
       </div>
 
       <div class="lucro">
-        <label>Lucro total</label>
-        <p id="lucro-valor" class="positivo">0.00</p>
+        <label>Lucro / Meta</label>
+        <p id="lucro-meta">
+          <span class="rs">$</span>
+          <span id="lucro-valor"
+            >{{ lucro if lucro is not none else '--' }}</span
+          >
+          <span id="meta-valor">/{{ meta if meta is not none else '--' }}</span>
+        </p>
       </div>
     </div>
 
-    <!-- Botão de controle -->
-    <div class="start-stop">
+    <div class="painel-robo glass-dark" id="painel-config">
+      <div class="modo-meta-wrapper">
+        <div id="modo-container">
+          <label for="modo">Modo de operação:</label>
+          <select class="modo-select" id="modo">
+            <option value="iniciante">🌱 Iniciante - 95%</option>
+            <option value="conservador">🛡️ Conservador - 85%</option>
+            <option value="agressivo">🔥 Agressivo - 80%</option>
+          </select>
+        </div>
+
+        <div id="meta-container">
+          <label for="meta">Meta diária:</label>
+          <input
+            class="input-meta"
+            id="meta"
+            type="number"
+            min="0"
+            step="0.01"
+          />
+        </div>
+      </div>
+
       <button id="bot-control-btn" class="start-btn">✅ Iniciar Robô</button>
     </div>
 
-    <!-- Campos de modo e meta -->
-    <div class="modo-meta-wrapper">
-      <div id="modo-container">
-        <label for="modo">Modo de Operação</label>
-        <select id="modo" class="modo-select">
-          <option value="iniciante">🌱 Iniciante</option>
-          <option value="conservador">🛡️ Conservador</option>
-          <option value="agressivo">🔥 Agressivo</option>
-        </select>
-      </div>
+    <div class="log-temp" id="log-temporario">Aguardando logs...</div>
 
-      <div id="meta-container">
-        <label for="meta">Meta diária (R$)</label>
-        <input type="number" id="meta" class="input-meta" step="0.01" />
+    <div
+      id="barra-status"
+      style="margin-top: 15px; width: 100%; text-align: center"
+    >
+      <div
+        style="
+          display: flex;
+          justify-content: space-around;
+          align-items: center;
+          position: relative;
+          max-width: 500px;
+          margin: auto;
+        "
+      >
+        <div style="text-align: center">
+          <div class="bolinha" id="bolinha-analisando"></div>
+          <span>Analisando</span>
+        </div>
+        <div style="text-align: center">
+          <div class="bolinha" id="bolinha-abrindo"></div>
+          <span>Abrindo Contrato</span>
+        </div>
+        <div style="text-align: center">
+          <div class="bolinha" id="bolinha-finalizado"></div>
+          <span>Contrato Finalizado</span>
+        </div>
       </div>
+      <div
+        id="barra-progresso"
+        style="
+          height: 5px;
+          background: goldenrod;
+          width: 0%;
+          margin: 10px auto 0 auto;
+          transition: width 0.5s;
+          max-width: 500px;
+        "
+      ></div>
     </div>
 
-    <!-- Etapas visuais -->
-    <div class="status-line">
-      <span class="status" id="bolinha-analisando">Analisando</span>
-      <span class="status" id="bolinha-abrindo">Abrindo contrato</span>
-      <span class="status" id="bolinha-finalizado">Finalizado</span>
-    </div>
-
-    <!-- Barra de progresso -->
-    <div class="barra">
-      <div class="progresso" id="barra-progresso"></div>
-    </div>
-
-    <!-- Log temporário -->
-    <div id="log-temporario" class="log-temp">Aguardando início do robô...</div>
-    <div id="log-operacoes" class="log-painel"></div>
-
-    <!-- Histórico de resultados -->
-    <div class="historico painel-robo">
-      <div class="aba-menu">
-        <span class="aba active">Histórico de Resultados</span>
-        <span class="meta-alvo">Meta: <span id="meta-valor">/0.00</span></span>
-      </div>
-
+    <div class="historico glass-dark">
+      <h2 style="text-align: center">Histórico de Operações</h2>
       <div class="tabela-wrapper">
         <table id="historico-tabela">
           <thead>
             <tr>
               <th>Data</th>
               <th>Hora</th>
-              <th>Par</th>
+              <th>Tipo</th>
               <th>Valor</th>
               <th>Resultado</th>
             </tr>
           </thead>
           <tbody id="historico-tabela-body">
-            <!-- Resultados virão aqui -->
+            {% for op in historico %}
+            <tr>
+              <td>{{ op.data.split(' ')[0] if op.data else '--' }}</td>
+              <td>{{ op.data.split(' ')[1][:5] if op.data else '--' }}</td>
+              <td>{{ op.tipo.upper() if op.tipo else '--' }}</td>
+              <td>${{ "%.2f"|format(op.valor) }}</td>
+              <td class="{{ 'positivo' if op.resultado >= 0 else 'negativo' }}">
+                ${{ "%.2f"|format(op.resultado) }}
+              </td>
+            </tr>
+            {% endfor %}
           </tbody>
         </table>
       </div>
     </div>
 
-    <!-- Rodapé -->
-    <div class="footer">
-      <div><span class="dot"></span> Bot conectado à Deriv</div>
-      <div class="timestamp">GMT -3</div>
-    </div>
-
-    <script src="/static/scripts.js"></script>
+    <script src="{{ url_for('static', filename='scripts.js') }}" defer></script>
   </body>
 </html>
