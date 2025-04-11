@@ -1,24 +1,45 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="pt-br">
   <head>
-    <meta charset="utf-8" />
+    <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Courier+Prime&display=swap"
-      rel="stylesheet"
-    />
-    <link
-      href="{{ url_for('static', filename='style.css') }}"
-      rel="stylesheet"
-    />
-    <title>Painel Robô Deriv</title>
+    <title>Painel Deriv - Robô Inteligente</title>
+    <link rel="stylesheet" href="/static/style.css" />
   </head>
-
   <body>
     <div class="top-bar">
-      <form action="/logout" method="POST">
-        <button class="logout-btn" type="submit">Desconectar</button>
-      </form>
+      <div
+        style="
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          width: 100%;
+        "
+      >
+        <div style="display: flex; gap: 10px; align-items: center">
+          <form action="/trocar_conta" method="POST">
+            <button class="logout-btn" type="submit">🔄 Trocar Conta</button>
+          </form>
+        </div>
+        <form action="/logout" method="POST">
+          <button class="logout-btn" type="submit">🔐 Desconectar</button>
+        </form>
+      </div>
+    </div>
+
+    <div
+      class="licenca-info glass-dark"
+      style="
+        margin-top: 10px;
+        font-size: 13px;
+        line-height: 1.5;
+        padding: 10px 15px;
+        text-align: center;
+      "
+    >
+      🔐 <strong>ID da Conta:</strong> {{ email }} | <strong>Tipo:</strong> {{
+      tipo_conta.upper() }}<br />
+      ⏳ <strong>Validade:</strong> {{ validade }}
     </div>
 
     <div class="info-bar">
@@ -69,6 +90,12 @@
       </div>
 
       <button id="bot-control-btn" class="start-btn">✅ Iniciar Robô</button>
+      <p
+        id="status-deriv"
+        style="font-size: 13px; margin-top: 10px; color: #ccc"
+      >
+        🔄 Conectando ao servidor Deriv...
+      </p>
     </div>
 
     <div class="log-temp" id="log-temporario">Aguardando logs...</div>
@@ -82,20 +109,19 @@
           display: flex;
           justify-content: space-around;
           align-items: center;
-          position: relative;
           max-width: 500px;
           margin: auto;
         "
       >
-        <div style="text-align: center">
+        <div>
           <div class="bolinha" id="bolinha-analisando"></div>
           <span>Analisando</span>
         </div>
-        <div style="text-align: center">
+        <div>
           <div class="bolinha" id="bolinha-abrindo"></div>
           <span>Abrindo Contrato</span>
         </div>
-        <div style="text-align: center">
+        <div>
           <div class="bolinha" id="bolinha-finalizado"></div>
           <span>Contrato Finalizado</span>
         </div>
@@ -142,6 +168,41 @@
         </table>
       </div>
     </div>
+
+    <div
+      style="
+        margin-top: 20px;
+        display: flex;
+        justify-content: space-between;
+        padding: 10px 20px;
+        font-size: 13px;
+        background: #1b1b1b;
+      "
+    >
+      <div style="display: flex; align-items: center; gap: 6px">
+        <div
+          style="
+            width: 10px;
+            height: 10px;
+            background: #00d67b;
+            border-radius: 50%;
+          "
+        ></div>
+        <span>Conectado ao Deriv</span>
+      </div>
+      <div id="hora-atual"></div>
+    </div>
+
+    <script>
+      function atualizarHora() {
+        const agora = new Date();
+        const hora = agora.toLocaleTimeString("pt-BR");
+        const data = agora.toLocaleDateString("pt-BR");
+        document.getElementById("hora-atual").textContent = `${hora} - ${data}`;
+      }
+      setInterval(atualizarHora, 1000);
+      atualizarHora();
+    </script>
 
     <script src="{{ url_for('static', filename='scripts.js') }}" defer></script>
   </body>

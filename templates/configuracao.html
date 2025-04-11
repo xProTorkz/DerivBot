@@ -3,239 +3,124 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Configuração Inicial - Bot Deriv</title>
+    <title>Ativação - Robô Deriv</title>
     <link rel="stylesheet" href="/static/config.css" />
     <style>
       body {
-        margin: 0;
-        padding: 0;
         background: #0f0f0f;
-        color: #fff;
         font-family: "Segoe UI", sans-serif;
+        color: white;
         display: flex;
         justify-content: center;
         align-items: center;
         height: 100vh;
+        margin: 0;
       }
 
-      .config-container {
+      .container {
         background: #1a1a1a;
         padding: 30px 40px;
-        border-radius: 12px;
-        box-shadow: 0 0 20px rgba(255, 68, 79, 0.3);
-        max-width: 480px;
+        border-radius: 14px;
+        max-width: 520px;
         width: 100%;
+        box-shadow: 0 0 20px rgba(255, 68, 79, 0.25);
       }
 
       h2 {
-        margin-bottom: 10px;
         font-size: 22px;
-        color: #ff444f;
+        text-align: center;
+        color: #00d67b;
+        margin-bottom: 10px;
       }
 
-      p {
+      .resumo {
+        background: #232323;
+        padding: 14px;
+        border-radius: 8px;
         font-size: 14px;
-        color: #ccc;
         margin-bottom: 20px;
+        line-height: 1.6;
       }
 
-      .risk-alert {
-        background: #2e2e2e;
-        border-left: 4px solid #ffae42;
+      .resumo strong {
+        color: #ffae42;
+      }
+
+      .resumo .tipo-conta {
+        color: #00d67b;
+        font-weight: bold;
+      }
+
+      .alerta {
+        background: #1e4620;
+        border-left: 5px solid #00d67b;
+        color: #c7f5da;
         padding: 12px;
         border-radius: 8px;
-        font-size: 13px;
-        color: #f2f2f2;
-        margin-bottom: 20px;
-      }
-
-      .opcao-conta {
-        display: flex;
-        gap: 10px;
-        margin-bottom: 20px;
-        justify-content: center;
-        flex-wrap: wrap;
-      }
-
-      .opcao-conta input[type="radio"] {
-        display: none;
-      }
-
-      .opcao-conta label {
-        background: #333;
-        padding: 12px 20px;
-        border-radius: 8px;
-        cursor: pointer;
-        transition: background 0.3s, border 0.3s;
-        border: 2px solid transparent;
-      }
-
-      .opcao-conta input[type="radio"]:checked + label {
-        border-color: #00d67b;
-        background: #222;
-      }
-
-      .alerta-demo,
-      .alerta-token {
-        font-size: 13px;
-        background: #2e2e2e;
-        padding: 8px;
-        border-left: 3px solid;
-        border-radius: 6px;
-        display: none;
-        margin-bottom: 20px;
-      }
-
-      .alerta-demo {
-        color: #ffae42;
-        border-color: #ffae42;
-      }
-
-      .alerta-token {
-        color: #ff5555;
-        border-color: #ff444f;
-      }
-
-      label.aceite {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin-bottom: 20px;
-        font-size: 13px;
-        color: #ddd;
-      }
-
-      input[type="text"] {
-        width: 100%;
-        padding: 10px;
-        border-radius: 8px;
-        border: none;
-        background: #333;
-        color: #fff;
         font-size: 14px;
-        margin-bottom: 15px;
+        margin-bottom: 20px;
+      }
+
+      .termos {
+        background: #292929;
+        border-left: 4px solid #ffae42;
+        padding: 14px;
+        border-radius: 8px;
+        font-size: 13px;
+        line-height: 1.5;
+        margin-bottom: 25px;
       }
 
       button {
         background: #ff444f;
         color: white;
         border: none;
-        padding: 12px;
-        font-size: 15px;
-        font-weight: 600;
-        border-radius: 8px;
+        padding: 12px 18px;
+        font-size: 16px;
+        border-radius: 10px;
+        font-weight: bold;
         cursor: pointer;
         width: 100%;
-        transition: background 0.3s;
+        transition: 0.3s;
       }
 
-      button:disabled {
-        background: #666;
-        cursor: not-allowed;
-      }
-
-      button:hover:enabled {
+      button:hover {
         background: #d7373f;
       }
     </style>
   </head>
 
   <body>
-    <div class="config-container">
-      <h2>Configuração Inicial</h2>
-      <p>Escolha como deseja usar o robô e cole seu token:</p>
+    <div class="container">
+      <h2>✅ Ativação Efetuada com Sucesso</h2>
 
-      <div class="risk-alert">
-        ⚠️ <strong>Aviso:</strong> Operar em plataformas financeiras pode
-        envolver riscos. Nosso robô foi projetado com inteligência para aumentar
-        as chances de acerto, mas resultados passados não garantem ganhos
-        futuros. Use com responsabilidade.
+      <div class="resumo">
+        🎯 <strong>Tipo de conta vinculada:</strong>
+        <span class="tipo-conta">
+          {{ "DEMO" if session.get("tipo_conta") == "demo" else "REAL" }}
+        </span>
+      </div>
+
+      <div class="alerta">
+        🔒 Sua conta foi ativada corretamente. Guarde seu token em um local
+        seguro. Ele será necessário para acessar o robô em outro dispositivo.
+      </div>
+
+      <div class="termos">
+        ⚠️ Ao continuar, você confirma que compreende os riscos associados às
+        operações automáticas. Use o robô com responsabilidade e evite operar
+        com pressa ou impulsividade.
       </div>
 
       <form method="POST" action="/configuracao">
+        <input type="hidden" name="aceite" value="sim" />
         <input
-          type="text"
-          name="token"
-          id="tokenInput"
-          placeholder="Cole aqui seu token Deriv"
-          required
+          type="hidden"
+          name="tipo_conta"
+          value="{{ session.get('tipo_conta') }}"
         />
-
-        <div class="alerta-token" id="avisoToken">
-          ⚠️ Este token parece ser da conta demo.
-        </div>
-
-        <div class="opcao-conta">
-          <input
-            type="radio"
-            name="tipo_conta"
-            id="real"
-            value="real"
-            required
-          />
-          <label for="real">💰 Conta Real</label>
-
-          <input type="radio" name="tipo_conta" id="demo" value="demo" />
-          <label for="demo">🧪 Conta Demo</label>
-        </div>
-
-        <div class="alerta-demo" id="aviso-demo">
-          Você escolheu uma <strong>Conta Demo</strong>. Lembre-se que os
-          resultados podem não refletir o comportamento da conta real.
-        </div>
-
-        <label class="aceite">
-          <input type="checkbox" id="aceite" name="aceite" />
-          Eu aceito os termos de uso e compreendo os riscos da operação.
-        </label>
-
-        <button type="submit" id="btnConfirmar" disabled>
-          Confirmar e Prosseguir
-        </button>
+        <button type="submit">✅ Entendi e desejo continuar</button>
       </form>
     </div>
-
-    <script>
-      const demoRadio = document.getElementById("demo");
-      const realRadio = document.getElementById("real");
-      const avisoDemo = document.getElementById("aviso-demo");
-      const aceiteCheckbox = document.getElementById("aceite");
-      const btnConfirmar = document.getElementById("btnConfirmar");
-      const tokenInput = document.getElementById("tokenInput");
-      const avisoToken = document.getElementById("avisoToken");
-
-      function atualizarBotao() {
-        const tipoSelecionado = demoRadio.checked || realRadio.checked;
-        const aceiteMarcado = aceiteCheckbox.checked;
-        const tokenPreenchido = tokenInput.value.trim().length > 0;
-
-        btnConfirmar.disabled = !(
-          tipoSelecionado &&
-          aceiteMarcado &&
-          tokenPreenchido
-        );
-      }
-
-      demoRadio.addEventListener("change", () => {
-        avisoDemo.style.display = "block";
-        atualizarBotao();
-      });
-
-      realRadio.addEventListener("change", () => {
-        avisoDemo.style.display = "none";
-        atualizarBotao();
-      });
-
-      aceiteCheckbox.addEventListener("change", atualizarBotao);
-      tokenInput.addEventListener("input", () => {
-        const token = tokenInput.value.trim();
-        if (token.startsWith("CR")) {
-          avisoToken.style.display = "block";
-        } else {
-          avisoToken.style.display = "none";
-        }
-        atualizarBotao();
-      });
-    </script>
   </body>
 </html>

@@ -2,110 +2,151 @@ import os
 import json
 import uuid
 from datetime import datetime
-from flask import Flask, render_template, request, redirect, session
+from flask import Flask, render_template, request, redirect, session, jsonify
+from flask_cors import CORS
+from constantes import LICENCAS_PATH, LOGS_PATH
+from app import painel, get_saldo, trocar_conta, status_deriv
+
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "segredo_super_top_do_lucas")
-LICENCAS_PATH = "licencas.json"
+app.add_url_rule("/trocar_conta", "trocar_conta", trocar_conta, methods=["POST"])
+app.add_url_rule("/painel", "painel", painel, methods=["GET"])
+app.add_url_rule("/get_saldo", "get_saldo", get_saldo, methods=["GET"])
+app.add_url_rule("/status_deriv", "status_deriv", status_deriv)
 
-# === UTILITÁRIOS ===
 def get_ip():
     return request.remote_addr
 
 def get_hwid():
     return str(hex(uuid.getnode()))
 
-# === HOME ===
 @app.route("/")
 def home():
     if "token_deriv" in session:
         return redirect("/painel")
     return redirect("/login")
 
-# === LOGIN COM CHAVE ===
 @app.route("/login")
 def login():
-    chave = request.args.get("chave")
-    if chave and os.path.exists(LICENCAS_PATH):
-        with open(LICENCAS_PATH, "r") as f:
-            licencas = json.load(f)
-        if chave in licencas:
+    ip = get_ip()
+    hwid = get_hwid()
+
+    # Nenhum arquivo de licença? Redireciona pro login comum
+    if not os.path.exists(LICENCAS_PATH):
+        return render_template("login.html")
+
+    with open(LICENCAS_PATH, "r") as f:
+        licencas = json.load(f)
+
+    for chave, licenca in licencas.items():
+        # Verifica se o IP ou HWID batem
+        if ip in licenca.get("ips", []) or hwid in licenca.get("hwids", []):
             session["chave_ativacao"] = chave
-            session["ativado_auto"] = True
+
+            # Verifica qual conta está ativa
+            if licenca.get("token_real"):
+                session["token_deriv"] = licenca["token_real"]
+                session["email"] = licenca["deriv_real"]
+                session["tipo_conta"] = "real"
+                return redirect("/painel")
+
+            elif licenca.get("token_demo"):
+                session["token_deriv"] = licenca["token_demo"]
+                session["email"] = licenca["deriv_demo"]
+                session["tipo_conta"] = "demo"
+                return redirect("/painel")
+
+    # Se nenhuma licença com IP ou HWID foi encontrada, mostra o login normal
     return render_template("login.html")
 
-# === REDIRECIONAMENTO PARA O LOGIN COM CHAVE NA URL ===
 @app.route("/ativar")
 def ativar():
     chave = request.args.get("chave")
     return redirect(f"/login?chave={chave}")
 
-# === VALIDAÇÃO AUTOMÁTICA DO TOKEN ===
 @app.route("/validar_token")
 def validar_token():
+    import websocket
+
     token = request.args.get("token1")
-    conta = request.args.get("acct1")
     ip = get_ip()
     hwid = get_hwid()
 
-    if not token or not conta:
-        return "Token ou conta não informados.", 400
+    if not token:
+        return render_template("acesso_negado.html", erro="Token não informado."), 400
 
     chave = session.get("chave_ativacao")
     if not chave or not os.path.exists(LICENCAS_PATH):
-        return render_template("acesso_negado.html"), 403
+        return render_template("acesso_negado.html", erro="Chave de ativação inválida ou não encontrada."), 403
 
     with open(LICENCAS_PATH, "r") as f:
         licencas = json.load(f)
 
     licenca = licencas.get(chave)
     if not licenca:
-        return render_template("acesso_negado.html"), 403
+        return render_template("acesso_negado.html", erro="Licença não encontrada."), 403
 
-    # Garante estrutura mínima
+    # 📡 Detecta tipo de conta via WebSocket da Deriv
+    try:
+        ws = websocket.WebSocket()
+        ws.connect("wss://ws.derivws.com/websockets/v3?app_id=71287")
+        ws.send(json.dumps({"authorize": token}))
+        resposta = json.loads(ws.recv())
+        ws.close()
+
+        if "error" in resposta:
+            return render_template("acesso_negado.html", erro="❌ Token inválido ou expirado."), 403
+
+        conta = resposta["authorize"]["loginid"]
+        tipo_conta = "demo" if conta.startswith("VRTC") else "real"
+
+    except Exception as e:
+        print(f"[ERRO TOKEN] {e}")
+        return render_template("acesso_negado.html", erro="Erro ao validar token com a Deriv."), 500
+
+    # 🛡️ Garante estrutura mínima
+    for campo in ["demo", "real"]:
+        licenca.setdefault(f"token_{campo}", "")
+        licenca.setdefault(f"deriv_{campo}", "")
+        licenca.setdefault(f"ativado_em_{campo}", "")
     licenca.setdefault("ips", [])
     licenca.setdefault("hwids", [])
-    licenca.setdefault("token", "")
-    licenca.setdefault("deriv_account", "")
-    licenca.setdefault("ativado_em", "")
-    licenca.setdefault("usada", False)
 
-    if not licenca["usada"]:
-        # Primeira vez: salva tudo
+    # 🚫 Já ativou esse tipo de conta?
+    if licenca[f"token_{tipo_conta}"]:
+        return render_template("acesso_negado.html", erro=f"⚠️ Esta chave já foi usada para ativar uma conta {tipo_conta.upper()}."), 403
+
+    # 🔐 Bloqueia ativação de um novo tipo de conta por outro dispositivo
+    dispositivo_registrado = ip in licenca["ips"] or hwid in licenca["hwids"]
+    ja_usou_outro_tipo = licenca["token_demo"] or licenca["token_real"]
+
+    if ja_usou_outro_tipo and not dispositivo_registrado:
+        return render_template("acesso_negado.html", erro="🚫 Este dispositivo/IP não está autorizado para usar esta chave."), 403
+
+    # 💾 Registra dados
+    if ip not in licenca["ips"]:
         licenca["ips"].append(ip)
+    if hwid not in licenca["hwids"]:
         licenca["hwids"].append(hwid)
-        licenca["token"] = token
-        licenca["deriv_account"] = conta
-        licenca["ativado_em"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-        licenca["usada"] = True
-    else:
-        # Validação 2 de 3 (token + ip + hwid)
-        token_ok = token == licenca["token"]
-        ip_ok = ip in licenca["ips"]
-        hwid_ok = hwid in licenca["hwids"]
-        validacoes = sum([token_ok, ip_ok, hwid_ok])
 
-        if validacoes < 2:
-            return render_template("acesso_negado.html"), 403
+    licenca[f"token_{tipo_conta}"] = token
+    licenca[f"deriv_{tipo_conta}"] = conta
+    licenca[f"ativado_em_{tipo_conta}"] = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-        # Atualiza IP ou HWID se novo
-        if not ip_ok:
-            licenca["ips"].append(ip)
-        if not hwid_ok:
-            licenca["hwids"].append(hwid)
-
-    # Salva licenças atualizadas
     with open(LICENCAS_PATH, "w") as f:
         json.dump(licencas, f, indent=2)
 
-    # Seta sessão
+    # 🧠 Seta sessão
     session.permanent = True
     session["token_deriv"] = token
     session["email"] = conta
+    session["tipo_conta"] = tipo_conta
 
     return redirect("/configuracao")
 
-# === CONFIGURAÇÃO INICIAL (escolher modo e aceitar termos) ===
+
+
 @app.route("/configuracao", methods=["GET", "POST"])
 def configuracao():
     if "token_deriv" not in session:
@@ -123,31 +164,23 @@ def configuracao():
 
     return render_template("configuracao.html")
 
-# === PAINEL FINAL ===
-@app.route("/painel")
-def painel():
-    if "token_deriv" not in session or "tipo_conta" not in session:
-        return redirect("/")
+@app.route("/saldo_atual")
+def saldo_atual():
+    if "token_deriv" not in session:
+        return jsonify({"status": "erro", "mensagem": "Token não encontrado."})
 
-    chave = session.get("chave_ativacao")
-    if not chave or not os.path.exists(LICENCAS_PATH):
-        return redirect("/")
+    try:
+        saldo = get_saldo(session["token_deriv"])
+        return jsonify({"status": "ok", "saldo": saldo})
+    except Exception as e:
+        return jsonify({"status": "erro", "mensagem": str(e)})
 
-    with open(LICENCAS_PATH, "r") as f:
-        licencas = json.load(f)
+    
 
-    licenca = licencas.get(chave)
-    if not licenca or not licenca.get("usada", False):
-        return render_template("acesso_negado.html"), 403
-
-    return render_template("painel.html")
-
-# === LOGOUT ===
 @app.route("/logout")
 def logout():
     session.clear()
     return redirect("/")
 
-# === EXECUTAR LOCAL ===
 if __name__ == "__main__":
-    app.run(debug=True, host="127.0.0.1", port=5000)
+    app.run(debug=True, host="0.0.0.0", port=5000)

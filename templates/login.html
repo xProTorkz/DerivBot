@@ -24,21 +24,31 @@
         border-radius: 12px;
         box-shadow: 0 0 20px rgba(0, 255, 128, 0.2);
         text-align: center;
-        max-width: 400px;
+        max-width: 420px;
         width: 100%;
         display: flex;
         flex-direction: column;
         gap: 16px;
       }
 
-      .login-container h1 {
+      h1 {
         font-size: 22px;
         margin-bottom: 5px;
       }
 
-      .login-container p {
+      p {
         font-size: 14px;
         color: #ccc;
+      }
+
+      input[type="text"] {
+        padding: 10px;
+        font-size: 14px;
+        border-radius: 8px;
+        border: none;
+        background: #2a2a2a;
+        color: #fff;
+        width: 100%;
       }
 
       .login-button {
@@ -51,7 +61,9 @@
         text-decoration: none;
         transition: background 0.3s ease;
         display: block;
-        margin: 5px 0;
+        cursor: pointer;
+        border: none;
+        width: 100%;
       }
 
       .login-button:hover {
@@ -74,20 +86,51 @@
   <body>
     <div class="login-container">
       <h1>Bem-vindo ao Painel do Robô Deriv</h1>
-      <p>Para começar, clique abaixo e crie sua conta:</p>
+      <p>Crie sua conta ou cole seu token abaixo:</p>
 
-      <!-- ✅ Apenas o botão de criar conta -->
       <a href="https://www.deriv.com/" target="_blank" class="login-button">
         🆕 Criar Conta na Deriv
       </a>
 
+      <input
+        type="text"
+        id="tokenInput"
+        placeholder="Cole aqui seu token Deriv"
+      />
+
+      <button class="login-button" onclick="validarToken()">
+        🚀 Validar e Acessar
+      </button>
+
       <div class="floating-tip">
         <strong>🧠 Dica rápida:</strong><br />
-        • Após criar a conta, volte ao seu e-mail e clique no segundo botão para
-        conectar seu token.<br />
-        • Essa conexão será usada para liberar seu acesso ao robô.<br />
-        • Não feche o navegador até concluir a ativação ✅
+        • Após criar a conta, gere o token no site da Deriv (menu "API Token") e
+        cole acima.<br />
+        • O sistema detecta automaticamente se o token é da Conta Real ou
+        Demo.<br />
+        • Pronto! Você será redirecionado para o robô 🔥
       </div>
     </div>
+
+    <script>
+      function getChaveDaUrl() {
+        const params = new URLSearchParams(window.location.search);
+        return params.get("chave") || "";
+      }
+
+      function validarToken() {
+        const token = document.getElementById("tokenInput").value.trim();
+        const chave = getChaveDaUrl();
+        if (!token) {
+          alert("⚠️ Por favor, cole seu token!");
+          return;
+        }
+
+        const url = `/validar_token?token1=${encodeURIComponent(
+          token
+        )}&chave=${chave}`;
+        window.location.href = url;
+      }
+    </script>
   </body>
 </html>

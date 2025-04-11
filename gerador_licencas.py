@@ -10,7 +10,7 @@ from urllib.parse import quote
 # Configurações
 EMAIL_ORIGEM = "pglucas7@gmail.com"
 SENHA_APP = "hage qhqk czvf slip"  # ok pra testes
-NGROK_URL = "https://2a68-200-152-5-73.ngrok-free.app"
+NGROK_URL = "https://3102-200-152-5-73.ngrok-free.app"
 LICENCAS_PATH = "licencas.json"
 
 # === GERADOR DE CHAVE COM ESPAÇOS REMOVIDOS ===

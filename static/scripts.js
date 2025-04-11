@@ -3,6 +3,7 @@ document.addEventListener("DOMContentLoaded", function () {
   const metaInput = document.getElementById("meta");
   const logTemp = document.getElementById("log-temporario");
   const botaoControle = document.getElementById("bot-control-btn");
+  const statusDeriv = document.getElementById("status-deriv");
 
   const modosConfig = {
     iniciante: { meta: 20, entrada: 1, stop: 10, assertividade: 95 },
@@ -73,5 +74,60 @@ document.addEventListener("DOMContentLoaded", function () {
     }
   }
 
+  function atualizarSaldoEmTempoReal() {
+    fetch("/saldo_atual")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.status === "ok") {
+          document.getElementById("saldo-valor").textContent = parseFloat(
+            data.saldo
+          ).toFixed(2);
+        }
+      })
+      .catch((err) => {
+        console.warn("Erro ao atualizar saldo em tempo real:", err);
+      });
+  }
+
+  function verificarConexaoDeriv() {
+    fetch("/status_deriv")
+      .then((res) => res.json())
+      .then((data) => {
+        if (statusDeriv) {
+          if (data.status === "ok") {
+            statusDeriv.textContent = "🟢 Conectado ao Deriv";
+            statusDeriv.style.color = "#00d67b";
+          } else {
+            statusDeriv.textContent = "🔴 Erro na conexão com Deriv";
+            statusDeriv.style.color = "#ff444f";
+          }
+        }
+      })
+      .catch((err) => {
+        if (statusDeriv) {
+          statusDeriv.textContent = "⚠️ Erro ao verificar conexão.";
+          statusDeriv.style.color = "orange";
+        }
+      });
+  }
+
+  setInterval(atualizarSaldoEmTempoReal, 5000);
+  setInterval(verificarConexaoDeriv, 5000);
+
+  atualizarSaldoEmTempoReal();
+  verificarConexaoDeriv();
   modoSelect.dispatchEvent(new Event("change"));
+
+  const botaoTrocar = document.getElementById("trocar-conta");
+  if (botaoTrocar) {
+    botaoTrocar.addEventListener("click", () => {
+      fetch("/trocar_conta", { method: "POST" })
+        .then(() => {
+          window.location.reload();
+        })
+        .catch(() => {
+          alert("Erro ao trocar de conta.");
+        });
+    });
+  }
 });
