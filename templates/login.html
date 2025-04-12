@@ -42,8 +42,8 @@
       }
 
       input[type="text"] {
-        padding: 10px;
-        font-size: 14px;
+        padding: 12px;
+        font-size: 15px;
         border-radius: 8px;
         border: none;
         background: #2a2a2a;
@@ -54,10 +54,10 @@
       .login-button {
         background: #ff444f;
         color: white;
-        padding: 12px 20px;
-        font-size: 15px;
-        font-weight: 600;
-        border-radius: 8px;
+        padding: 14px 20px;
+        font-size: 16px;
+        font-weight: bold;
+        border-radius: 10px;
         text-decoration: none;
         transition: background 0.3s ease;
         display: block;
@@ -80,13 +80,20 @@
         color: #ccc;
         text-align: left;
       }
+
+      .footer-login {
+        margin-top: 30px;
+        font-size: 12px;
+        text-align: center;
+        color: #888;
+      }
     </style>
   </head>
 
   <body>
     <div class="login-container">
-      <h1>Bem-vindo ao Painel do Robô Deriv</h1>
-      <p>Crie sua conta ou cole seu token abaixo:</p>
+      <h1>🎯 Painel do Robô Deriv</h1>
+      <p>Ative sua licença com seu Token da Deriv ou crie uma conta</p>
 
       <a href="https://www.deriv.com/" target="_blank" class="login-button">
         🆕 Criar Conta na Deriv
@@ -99,17 +106,19 @@
       />
 
       <button class="login-button" onclick="validarToken()">
-        🚀 Validar e Acessar
+        🚀 Validar e Acessar Robô
       </button>
 
       <div class="floating-tip">
-        <strong>🧠 Dica rápida:</strong><br />
-        • Após criar a conta, gere o token no site da Deriv (menu "API Token") e
-        cole acima.<br />
-        • O sistema detecta automaticamente se o token é da Conta Real ou
-        Demo.<br />
-        • Pronto! Você será redirecionado para o robô 🔥
+        <strong>📌 Dica rápida:</strong><br />
+        • Vá até sua conta Deriv, clique em “API Token”, gere e copie um
+        token.<br />
+        • O sistema detecta automaticamente se é conta <strong>DEMO</strong> ou
+        <strong>REAL</strong>.<br />
+        • Após colar o token, clique em "Validar e Acessar".
       </div>
+
+      <div class="footer-login">Desenvolvido por Lucas | Versão Beta 🚀</div>
     </div>
 
     <script>
@@ -121,8 +130,9 @@
       function validarToken() {
         const token = document.getElementById("tokenInput").value.trim();
         const chave = getChaveDaUrl();
+
         if (!token) {
-          alert("⚠️ Por favor, cole seu token!");
+          alert("⚠️ Por favor, cole seu token primeiro.");
           return;
         }
 

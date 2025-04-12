@@ -1,3 +1,4 @@
+<!-- templates/painel_robo.html -->
 <!DOCTYPE html>
 <html lang="pt-br">
   <head>
@@ -7,6 +8,7 @@
     <link rel="stylesheet" href="/static/style.css" />
   </head>
   <body>
+    <!-- TOPO COM TROCA E LOGOUT -->
     <div class="top-bar">
       <div
         style="
@@ -27,6 +29,7 @@
       </div>
     </div>
 
+    <!-- LICENÇA E DADOS -->
     <div
       class="licenca-info glass-dark"
       style="
@@ -42,6 +45,7 @@
       ⏳ <strong>Validade:</strong> {{ validade }}
     </div>
 
+    <!-- SALDO E LUCRO -->
     <div class="info-bar">
       <div class="saldo">
         <label>Saldo</label>
@@ -53,7 +57,6 @@
           <span id="moeda">{{ moeda if moeda else 'USD' }}</span>
         </p>
       </div>
-
       <div class="lucro">
         <label>Lucro / Meta</label>
         <p id="lucro-meta">
@@ -66,6 +69,7 @@
       </div>
     </div>
 
+    <!-- CONTROLES DO ROBO -->
     <div class="painel-robo glass-dark" id="painel-config">
       <div class="modo-meta-wrapper">
         <div id="modo-container">
@@ -98,8 +102,10 @@
       </p>
     </div>
 
+    <!-- LOGS TEMPORÁRIOS -->
     <div class="log-temp" id="log-temporario">Aguardando logs...</div>
 
+    <!-- STATUS DE OPERAÇÃO -->
     <div
       id="barra-status"
       style="margin-top: 15px; width: 100%; text-align: center"
@@ -139,8 +145,24 @@
       ></div>
     </div>
 
+    <!-- HISTÓRICO -->
     <div class="historico glass-dark">
       <h2 style="text-align: center">Histórico de Operações</h2>
+      <div style="text-align: right; margin-bottom: 10px">
+        <button
+          onclick="limparHistorico()"
+          style="
+            padding: 6px 12px;
+            background: #ff444f;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+          "
+        >
+          🗑️ Limpar Histórico
+        </button>
+      </div>
       <div class="tabela-wrapper">
         <table id="historico-tabela">
           <thead>
@@ -159,8 +181,10 @@
               <td>{{ op.data.split(' ')[1][:5] if op.data else '--' }}</td>
               <td>{{ op.tipo.upper() if op.tipo else '--' }}</td>
               <td>${{ "%.2f"|format(op.valor) }}</td>
-              <td class="{{ 'positivo' if op.resultado >= 0 else 'negativo' }}">
-                ${{ "%.2f"|format(op.resultado) }}
+              <td
+                class="{{ 'positivo' if op.resultado_real >= 0 else 'negativo' }}"
+              >
+                ${{ "%.2f"|format(op.resultado_real) }}
               </td>
             </tr>
             {% endfor %}
@@ -169,6 +193,7 @@
       </div>
     </div>
 
+    <!-- RODAPÉ -->
     <div
       style="
         margin-top: 20px;
@@ -203,7 +228,6 @@
       setInterval(atualizarHora, 1000);
       atualizarHora();
     </script>
-
     <script src="{{ url_for('static', filename='scripts.js') }}" defer></script>
   </body>
 </html>

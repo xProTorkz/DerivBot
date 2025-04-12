@@ -5,15 +5,32 @@ from datetime import datetime
 from flask import Flask, render_template, request, redirect, session, jsonify
 from flask_cors import CORS
 from constantes import LICENCAS_PATH, LOGS_PATH
-from app import painel, get_saldo, trocar_conta, status_deriv
+from app import painel, get_saldo, trocar_conta, status_deriv, executar_operacao_sniper, toggle_bot, status_robo_route, historico_resultados
+
+from motor import executar_operacao_sniper  
 
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "segredo_super_top_do_lucas")
-app.add_url_rule("/trocar_conta", "trocar_conta", trocar_conta, methods=["POST"])
-app.add_url_rule("/painel", "painel", painel, methods=["GET"])
+# ROTAS PÚBLICAS (acesso antes do painel)
+
+
+
+
+
+# ROTAS PROTEGIDAS (painel e funções)
+app.add_url_rule("/painel", "painel", painel)
+
+
+# ROBÔ / API
+app.add_url_rule("/toggle_bot", "toggle_bot", toggle_bot, methods=["POST"])
+app.add_url_rule("/status_robo", "status_robo", status_robo_route, methods=["GET"])
+app.add_url_rule("/executar_operacao_sniper", "executar_operacao_sniper", executar_operacao_sniper, methods=["POST"])
 app.add_url_rule("/get_saldo", "get_saldo", get_saldo, methods=["GET"])
 app.add_url_rule("/status_deriv", "status_deriv", status_deriv)
+app.add_url_rule("/trocar_conta", "trocar_conta", trocar_conta, methods=["POST"])
+app.add_url_rule("/historico_resultados", "historico_resultados", historico_resultados, methods=["GET"])
+
 
 def get_ip():
     return request.remote_addr
@@ -175,7 +192,19 @@ def saldo_atual():
     except Exception as e:
         return jsonify({"status": "erro", "mensagem": str(e)})
 
-    
+@app.route("/limpar_historico", methods=["POST"])
+def limpar_historico():
+    try:
+        from constantes import LOGS_PATH
+
+        if os.path.exists(LOGS_PATH):
+            with open(LOGS_PATH, "w") as f:
+                f.write("")
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        return jsonify({"status": "erro", "mensagem": str(e)})
+
+  
 
 @app.route("/logout")
 def logout():

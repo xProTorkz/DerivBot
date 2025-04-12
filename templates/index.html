@@ -1,0 +1,216 @@
+<!-- templates/painel_robo.html -->
+<!DOCTYPE html>
+<html lang="pt-br">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Painel Deriv - Robô Inteligente</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <!-- TOPO COM TROCA E LOGOUT -->
+    <div class="top-bar">
+      <div
+        style="
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          width: 100%;
+        "
+      >
+        <div style="display: flex; gap: 10px; align-items: center">
+          <form action="/trocar_conta" method="POST">
+            <button class="logout-btn" type="submit">🔄 Trocar Conta</button>
+          </form>
+        </div>
+        <form action="/logout" method="POST">
+          <button class="logout-btn" type="submit">🔐 Desconectar</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- LICENÇA E DADOS -->
+    <div
+      class="licenca-info glass-dark"
+      style="
+        margin-top: 10px;
+        font-size: 13px;
+        line-height: 1.5;
+        padding: 10px 15px;
+        text-align: center;
+      "
+    >
+      🔐 <strong>ID da Conta:</strong> {{ email }} | <strong>Tipo:</strong> {{
+      tipo_conta.upper() }}<br />
+      ⏳ <strong>Validade:</strong> {{ validade }}
+    </div>
+
+    <!-- SALDO E LUCRO -->
+    <div class="info-bar">
+      <div class="saldo">
+        <label>Saldo</label>
+        <p id="valor-saldo" class="saldo-valor">
+          <span class="rs">$</span>
+          <span id="saldo-valor"
+            >{{ saldo if saldo is not none else '--' }}</span
+          >
+          <span id="moeda">{{ moeda if moeda else 'USD' }}</span>
+        </p>
+      </div>
+      <div class="lucro">
+        <label>Lucro / Meta</label>
+        <p id="lucro-meta">
+          <span class="rs">$</span>
+          <span id="lucro-valor"
+            >{{ lucro if lucro is not none else '--' }}</span
+          >
+          <span id="meta-valor">/{{ meta if meta is not none else '--' }}</span>
+        </p>
+      </div>
+    </div>
+
+    <!-- CONTROLES DO ROBO -->
+    <div class="painel-robo glass-dark" id="painel-config">
+      <div class="modo-meta-wrapper">
+        <div id="modo-container">
+          <label for="modo">Modo de operação:</label>
+          <select class="modo-select" id="modo">
+            <option value="iniciante">🌱 Iniciante - 95%</option>
+            <option value="conservador">🛡️ Conservador - 85%</option>
+            <option value="agressivo">🔥 Agressivo - 80%</option>
+          </select>
+        </div>
+
+        <div id="meta-container">
+          <label for="meta">Meta diária:</label>
+          <input
+            class="input-meta"
+            id="meta"
+            type="number"
+            min="0"
+            step="0.01"
+          />
+        </div>
+      </div>
+
+      <button id="bot-control-btn" class="start-btn">✅ Iniciar Robô</button>
+      <p
+        id="status-deriv"
+        style="font-size: 13px; margin-top: 10px; color: #ccc"
+      >
+        🔄 Conectando ao servidor Deriv...
+      </p>
+    </div>
+
+    <!-- LOGS TEMPORÁRIOS -->
+    <div class="log-temp" id="log-temporario">Aguardando logs...</div>
+
+    <!-- STATUS DE OPERAÇÃO -->
+    <div
+      id="barra-status"
+      style="margin-top: 15px; width: 100%; text-align: center"
+    >
+      <div
+        style="
+          display: flex;
+          justify-content: space-around;
+          align-items: center;
+          max-width: 500px;
+          margin: auto;
+        "
+      >
+        <div>
+          <div class="bolinha" id="bolinha-analisando"></div>
+          <span>Analisando</span>
+        </div>
+        <div>
+          <div class="bolinha" id="bolinha-abrindo"></div>
+          <span>Abrindo Contrato</span>
+        </div>
+        <div>
+          <div class="bolinha" id="bolinha-finalizado"></div>
+          <span>Contrato Finalizado</span>
+        </div>
+      </div>
+      <div
+        id="barra-progresso"
+        style="
+          height: 5px;
+          background: goldenrod;
+          width: 0%;
+          margin: 10px auto 0 auto;
+          transition: width 0.5s;
+          max-width: 500px;
+        "
+      ></div>
+    </div>
+
+    <!-- HISTÓRICO -->
+    <div class="historico glass-dark">
+      <h2 style="text-align: center">Histórico de Operações</h2>
+      <div class="tabela-wrapper">
+        <table id="historico-tabela">
+          <thead>
+            <tr>
+              <th>Data</th>
+              <th>Hora</th>
+              <th>Tipo</th>
+              <th>Valor</th>
+              <th>Resultado</th>
+            </tr>
+          </thead>
+          <tbody id="historico-tabela-body">
+            {% for op in historico %}
+            <tr>
+              <td>{{ op.data.split(' ')[0] if op.data else '--' }}</td>
+              <td>{{ op.data.split(' ')[1][:5] if op.data else '--' }}</td>
+              <td>{{ op.tipo.upper() if op.tipo else '--' }}</td>
+              <td>${{ "%.2f"|format(op.valor) }}</td>
+              <td class="{{ 'positivo' if op.resultado >= 0 else 'negativo' }}">
+                ${{ "%.2f"|format(op.resultado) }}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- RODAPÉ -->
+    <div
+      style="
+        margin-top: 20px;
+        display: flex;
+        justify-content: space-between;
+        padding: 10px 20px;
+        font-size: 13px;
+        background: #1b1b1b;
+      "
+    >
+      <div style="display: flex; align-items: center; gap: 6px">
+        <div
+          style="
+            width: 10px;
+            height: 10px;
+            background: #00d67b;
+            border-radius: 50%;
+          "
+        ></div>
+        <span>Conectado ao Deriv</span>
+      </div>
+      <div id="hora-atual"></div>
+    </div>
+
+    <script>
+      function atualizarHora() {
+        const agora = new Date();
+        const hora = agora.toLocaleTimeString("pt-BR");
+        const data = agora.toLocaleDateString("pt-BR");
+        document.getElementById("hora-atual").textContent = `${hora} - ${data}`;
+      }
+      setInterval(atualizarHora, 1000);
+      atualizarHora();
+    </script>
+    <script src="{{ url_for('static', filename='scripts.js') }}" defer></script>
+  </body>
+</html>

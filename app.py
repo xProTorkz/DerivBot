@@ -1,12 +1,16 @@
 from flask import render_template, request, jsonify, redirect, session
 from motor import executar_operacao_sniper
+from config import iniciar_robo, status_robo, parar_robo
 import config
 import os
 import json
 from datetime import datetime
 from constantes import LICENCAS_PATH, LOGS_PATH
 import websocket
+import threading
 
+
+robos_em_execucao = {}
 
 def get_saldo(token):
     try:
@@ -61,13 +65,14 @@ def painel():
                     continue
                 try:
                     dado = json.loads(linha)
-                    lucro += dado["valor"] if dado["resultado"] == "lucro" else -abs(dado["valor"])
+                    lucro += dado.get("resultado_real", 0)
                     historico.append({
                         "data": datetime.now().strftime("%Y-%m-%d %H:%M"),
                         "tipo": dado["resultado"],
-                        "valor": dado["valor"],
-                        "resultado": dado["valor"] if dado["resultado"] == "lucro" else -abs(dado["valor"])
+                        "valor": dado["valor"],  # valor da entrada
+                        "resultado_real": dado.get("resultado_real", 0)
                     })
+
                 except:
                     continue
 
@@ -83,20 +88,6 @@ def painel():
         chave=chave,
         ativado_em=ativado_em
     )
-
-
-def iniciar_bot():
-    dados = request.get_json()
-    modo = dados.get("modo")
-    meta = float(dados.get("meta", 0))
-
-    try:
-        config.MODO_ATUAL = modo
-        config.META_ATUAL = meta
-        executar_operacao_sniper()
-        return jsonify({"status": "ok"})
-    except Exception as e:
-        return jsonify({"status": "erro", "mensagem": str(e)})
 
 
 def configuracao():
@@ -186,4 +177,59 @@ def status_deriv():
 
 
     return redirect("/painel")
+
+
+# ========== ROTAS ========
+
+def status_robo_route():
+    return jsonify({"ativo": status_robo()})
+
+
+def toggle_bot():
+    if status_robo():
+        parar_robo()
+        return jsonify({"status": "parado"})
+    else:
+        config.iniciar_robo()  # <- adiciona essa linha
+        print("⚙️ Iniciando robô em thread...")
+
+        modo = config.MODO_ATUAL  # ou você pode puxar do session, se preferir
+        token = session.get("token_deriv")
+        meta = config.MODOS[modo]["meta"]
+        tipo_conta = session.get("tipo_conta")
+
+        thread = threading.Thread(
+            target=executar_operacao_sniper,
+            args=(modo, token, meta, tipo_conta)
+        )
+
+        thread.daemon = True  # Pra encerrar junto com o app
+        thread.start()
+
+        return jsonify({"status": "iniciado"})
+    
+    
+def historico_resultados():
+    if not os.path.exists(LOGS_PATH):
+        return jsonify([])
+
+    historico = []
+
+    with open(LOGS_PATH, "r") as f:
+        for linha in f:
+            if not linha.strip():
+                continue
+            try:
+                dado = json.loads(linha)
+                historico.append({
+                    "data": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    "tipo": dado["resultado"],
+                    "valor": dado["valor"],
+                    "resultado_real": dado.get("resultado_real", 0)
+                })
+
+            except:
+                continue
+
+    return jsonify(historico)
 

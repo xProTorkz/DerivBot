@@ -1,41 +1,26 @@
-# operacoes.py
-
 import websocket
 import json
-import threading
-import time
 
 API_URL = "wss://ws.derivws.com/websockets/v3?app_id=71203"
-TOKEN = "FDWNvKWY67GtGKX"  # Substituir pelo token real
+ativo = "R_100"
 
-ativo = "R_10"
-duracao = 5
-barrier = None  # Não precisa para rise/fall
-
-# Dado global do contrato em aberto
-contrato_aberto = {
-    "contract_id": None,
-    "buy_price": 0,
-    "profit": 0
-}
-
-# === CONEXÃO COM WEBSOCKET ===
+# === Conexão com WebSocket ===
 def conectar_ws():
     ws = websocket.WebSocket()
     ws.connect(API_URL)
     return ws
 
-# === AUTENTICAÇÃO ===
-def autenticar(ws):
-    ws.send(json.dumps({
-        "authorize": TOKEN
-    }))
-    ws.recv()  # só pra confirmar
+# === Autenticação com token ===
+def autenticar(ws, token):
+    ws.send(json.dumps({"authorize": token}))
+    ws.recv()
 
-# === COMPRAR CONTRATO (CALL ou PUT) ===
-def comprar_contrato(valor, direcao="CALL"):
+# === Compra de contrato tipo MULTUP ou MULTDOWN ===
+def comprar_contrato(valor, direcao="CALL", token=None):
     ws = conectar_ws()
-    autenticar(ws)
+    autenticar(ws, token)
+
+    contract_type = "MULTUP" if direcao == "CALL" else "MULTDOWN"
 
     mensagem_compra = {
         "buy": 1,
@@ -43,35 +28,32 @@ def comprar_contrato(valor, direcao="CALL"):
         "parameters": {
             "amount": valor,
             "basis": "stake",
-            "contract_type": direcao,  # "CALL" ou "PUT"
+            "contract_type": contract_type,
             "currency": "USD",
-            "duration": duracao,
-            "duration_unit": "s",
-            "symbol": ativo
+            "symbol": ativo,
+            "multiplier": 100  # ✅ valor aceito pela Deriv
         }
     }
 
     ws.send(json.dumps(mensagem_compra))
     resposta = json.loads(ws.recv())
+    ws.close()
 
     if "error" in resposta:
         raise Exception("Erro ao comprar contrato: " + resposta["error"]["message"])
 
-    contract_id = resposta["buy"]["contract_id"]
-    ws.close()
-    return contract_id
+    return resposta["buy"]["contract_id"]
 
-# === VERIFICAR LUCRO ===
-def verificar_lucro(contract_id):
+
+# === Verificação de lucro ===
+def verificar_lucro(contract_id, token):
     ws = conectar_ws()
-    autenticar(ws)
+    autenticar(ws, token)
 
-    mensagem = {
+    ws.send(json.dumps({
         "proposal_open_contract": 1,
         "contract_id": contract_id
-    }
-
-    ws.send(json.dumps(mensagem))
+    }))
     resposta = json.loads(ws.recv())
     ws.close()
 
@@ -80,17 +62,15 @@ def verificar_lucro(contract_id):
 
     return resposta["proposal_open_contract"]["profit"]
 
-# === ENCERRAR CONTRATO ===
-def encerrar_contrato(contract_id):
+# === Encerramento do contrato manual ===
+def encerrar_contrato(contract_id, token):
     ws = conectar_ws()
-    autenticar(ws)
+    autenticar(ws, token)
 
-    mensagem = {
+    ws.send(json.dumps({
         "sell": contract_id,
-        "price": 0  # vende pelo valor de mercado
-    }
-
-    ws.send(json.dumps(mensagem))
+        "price": 0
+    }))
     resposta = json.loads(ws.recv())
     ws.close()
 

@@ -1,0 +1,16 @@
+{"modo": "iniciante", "resultado": "erro", "valor": 0.0, "hora": "19:32:26"}
+{"modo": "iniciante", "resultado": "erro", "valor": 0.0, "hora": "19:32:38"}
+{"modo": "iniciante", "resultado": "erro", "valor": 0.0, "hora": "19:32:46"}
+{"modo": "iniciante", "resultado": "erro", "valor": 0.0, "hora": "19:32:53"}
+{"modo": "iniciante", "resultado": "erro", "valor": 0.0, "hora": "19:33:03"}
+{"modo": "iniciante", "resultado": "erro", "valor": 0.0, "hora": "19:33:11"}
+{"modo": "iniciante", "resultado": "erro", "valor": 0.0, "hora": "19:33:21"}
+{"modo": "iniciante", "resultado": "erro", "valor": 0.0, "hora": "19:33:30"}
+{"modo": "iniciante", "resultado": "erro", "valor": 0.0, "hora": "19:34:27"}
+{"modo": "iniciante", "resultado": "erro", "valor": 0.0, "hora": "19:41:26"}
+{"modo": "iniciante", "resultado": "erro", "valor": 0.0, "hora": "19:41:36"}
+{"modo": "iniciante", "resultado": "erro", "valor": 0.0, "hora": "19:41:43"}
+{"modo": "iniciante", "resultado": "erro", "valor": 0.0, "hora": "19:41:50"}
+{"modo": "iniciante", "resultado": "erro", "valor": 0.0, "hora": "19:42:06"}
+{"modo": "iniciante", "resultado": "erro", "valor": 0.0, "hora": "19:42:13"}
+{"modo": "iniciante", "resultado": "erro", "valor": 0.0, "hora": "19:42:19"}

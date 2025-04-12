@@ -1,16 +1,15 @@
-# motor.py
-
 import time
 import websocket
 import json
+import config
 
-from config import MODO_ATUAL, MODOS, get_valores_modo
+from config import get_valores_modo
 from logs import registrar_operacao
 from catalogador import analisar_ticks_chatgpt
 from operacoes import comprar_contrato, verificar_lucro, encerrar_contrato
 
 # === Função para pegar últimos ticks do ativo ===
-def obter_ultimos_precos(ativo="R_10", quantidade=20):
+def obter_ultimos_precos(ativo="R_100", quantidade=20):
     try:
         ws = websocket.WebSocket()
         ws.connect("wss://ws.derivws.com/websockets/v3?app_id=71203")
@@ -34,8 +33,7 @@ def obter_ultimos_precos(ativo="R_10", quantidade=20):
         return []
 
 # === MOTOR PRINCIPAL ===
-def executar_operacao_sniper():
-    modo = MODO_ATUAL
+def executar_operacao_sniper(modo, token, meta, tipo_conta):
     valores = get_valores_modo(modo)
 
     entrada = valores["entrada"]
@@ -47,8 +45,8 @@ def executar_operacao_sniper():
 
     print(f"🟢 Iniciando bot no modo {modo.upper()} | Entrada: ${entrada} | Meta: ${meta} | Stop: ${stop}")
 
-    while lucro_total < meta and perdas_total < stop:
-        ticks = obter_ultimos_precos()
+    while config.status_robo() and lucro_total < meta and perdas_total < stop:
+        ticks = obter_ultimos_precos(ativo="R_100")
 
         if not ticks or len(ticks) < 5:
             print("⏳ Aguardando mais ticks...")
@@ -64,31 +62,31 @@ def executar_operacao_sniper():
             continue
 
         try:
-            contract_id = comprar_contrato(entrada, direcao=decisao)
+            contract_id = comprar_contrato(entrada, direcao=decisao, token=token)
             print(f"📩 Contrato comprado: {contract_id}")
             time.sleep(1.5)
 
             while True:
-                lucro = verificar_lucro(contract_id)
+                lucro = verificar_lucro(contract_id, token)
                 print(f"💰 Lucro atual: {lucro}")
 
                 if lucro > 0:
-                    encerrar_contrato(contract_id)
+                    encerrar_contrato(contract_id, token)
                     lucro_total += lucro
-                    registrar_operacao("lucro", lucro)
+                    registrar_operacao("lucro", lucro, modo, entrada)
                     print(f"✅ Operação com lucro: {lucro}")
                     break
                 elif lucro < -entrada:
-                    encerrar_contrato(contract_id)
+                    encerrar_contrato(contract_id, token)
                     perdas_total += entrada
-                    registrar_operacao("prejuizo", lucro)
+                    registrar_operacao("prejuizo", lucro, modo, entrada)
                     print(f"❌ Operação com prejuízo: {lucro}")
                     break
 
                 time.sleep(1)
 
         except Exception as e:
-            registrar_operacao("erro", str(e))
+            registrar_operacao("erro", 0, modo, entrada)
             print(f"[ERRO OPERACIONAL] {e}")
             time.sleep(2)
 
