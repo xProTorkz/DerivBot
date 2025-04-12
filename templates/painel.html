@@ -61,9 +61,13 @@
         <label>Lucro / Meta</label>
         <p id="lucro-meta">
           <span class="rs">$</span>
-          <span id="lucro-valor"
-            >{{ lucro if lucro is not none else '--' }}</span
+          <span
+            id="lucro-valor"
+            class="{{ 'positivo' if lucro >= 0 else 'negativo' }}"
           >
+            {{ "%.2f"|format(lucro) if lucro is not none else '--' }}
+          </span>
+
           <span id="meta-valor">/{{ meta if meta is not none else '--' }}</span>
         </p>
       </div>
@@ -93,7 +97,8 @@
         </div>
       </div>
 
-      <button id="bot-control-btn" class="start-btn">✅ Iniciar Robô</button>
+      <button id="bot-control-btn">Iniciar Robô</button>
+
       <p
         id="status-deriv"
         style="font-size: 13px; margin-top: 10px; color: #ccc"
@@ -147,23 +152,57 @@
 
     <!-- HISTÓRICO -->
     <div class="historico glass-dark">
-      <h2 style="text-align: center">Histórico de Operações</h2>
-      <div style="text-align: right; margin-bottom: 10px">
-        <button
-          onclick="limparHistorico()"
-          style="
-            padding: 6px 12px;
-            background: #ff444f;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-          "
-        >
-          🗑️ Limpar Histórico
-        </button>
+      <div
+        class="linha-titulo-historico"
+        style="
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 10px;
+          padding: 10px 80px;
+        "
+      >
+        <!-- Ícones à esquerda -->
+        <div style="display: flex; gap: 25px">
+          <div class="aba active" onclick="trocarAba('tabela')" title="Tabela">
+            📄
+          </div>
+          <div class="aba" onclick="trocarAba('resumo')" title="Resumo">📊</div>
+        </div>
+
+        <!-- Título central -->
+        <h2 style="margin: 0; font-size: 20px">Histórico de Operações</h2>
+
+        <!-- Ícones à direita -->
+        <div style="display: flex; gap: 25px">
+          <div class="aba" onclick="trocarAba('grafico')" title="Gráfico">
+            📈
+          </div>
+          <div class="aba" onclick="limparHistorico()" title="Limpar Histórico">
+            🗑️
+          </div>
+        </div>
       </div>
-      <div class="tabela-wrapper">
+
+      <!-- RESUMO -->
+      <div id="resumo-diario" style="display: none">
+        <h3>Resumo do Dia</h3>
+        <ul>
+          <li>Total de operações: <span id="resumo-total">--</span></li>
+          <li>Lucros: <span id="resumo-lucros">--</span></li>
+          <li>Prejuízos: <span id="resumo-prejuizos">--</span></li>
+          <li>Assertividade: <span id="resumo-assertividade">--</span>%</li>
+          <li>Lucro total: <span id="resumo-lucro-total">--</span></li>
+        </ul>
+      </div>
+
+      <!-- GRÁFICO (placeholder por enquanto) -->
+      <div id="grafico-diario" style="display: none; text-align: center">
+        <p style="color: gray">📈 Gráficos ainda em construção...</p>
+      </div>
+
+      <!-- TABELA -->
+      <div class="tabela-wrapper" id="tabela-historico">
         <table id="historico-tabela">
           <thead>
             <tr>
@@ -180,9 +219,9 @@
               <td>{{ op.data.split(' ')[0] if op.data else '--' }}</td>
               <td>{{ op.data.split(' ')[1][:5] if op.data else '--' }}</td>
               <td>{{ op.tipo.upper() if op.tipo else '--' }}</td>
-              <td>${{ "%.2f"|format(op.valor) }}</td>
+              <td title="Valor da entrada">${{ "%.2f"|format(op.valor) }}</td>
               <td
-                class="{{ 'positivo' if op.resultado_real >= 0 else 'negativo' }}"
+                class="resultado {{ 'positivo' if op.resultado_real >= 0 else 'negativo' }}"
               >
                 ${{ "%.2f"|format(op.resultado_real) }}
               </td>

@@ -4,12 +4,8 @@
     "email": "pglucas7@gmail.com",
     "token": "",
     "deriv_account": "",
-    "ips": [
-      "127.0.0.1"
-    ],
-    "hwids": [
-      "0x22334d051b1a"
-    ],
+    "ips": ["127.0.0.1"],
+    "hwids": ["0x22334d051b1a"],
     "ativado_em": "",
     "token_demo": "RYMx6qlHahIlC53",
     "deriv_demo": "VRTC13064068",

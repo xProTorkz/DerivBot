@@ -1,0 +1,7 @@
+{
+  "robo_ativo": true,
+  "modo": "iniciante",
+  "meta": 20,
+  "token": "seu_token_aqui",
+  "tipo_conta": "demo"
+}

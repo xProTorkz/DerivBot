@@ -34,6 +34,8 @@ def obter_ultimos_precos(ativo="R_100", quantidade=20):
 
 # === MOTOR PRINCIPAL ===
 def executar_operacao_sniper(modo, token, meta, tipo_conta):
+    config.ROBO_ATIVO = True
+
     valores = get_valores_modo(modo)
 
     entrada = valores["entrada"]
@@ -45,7 +47,8 @@ def executar_operacao_sniper(modo, token, meta, tipo_conta):
 
     print(f"🟢 Iniciando bot no modo {modo.upper()} | Entrada: ${entrada} | Meta: ${meta} | Stop: ${stop}")
 
-    while config.status_robo() and lucro_total < meta and perdas_total < stop:
+    while config.ROBO_ATIVO and lucro_total < meta and perdas_total < stop:
+
         ticks = obter_ultimos_precos(ativo="R_100")
 
         if not ticks or len(ticks) < 5:
@@ -73,13 +76,13 @@ def executar_operacao_sniper(modo, token, meta, tipo_conta):
                 if lucro > 0:
                     encerrar_contrato(contract_id, token)
                     lucro_total += lucro
-                    registrar_operacao("lucro", lucro, modo, entrada)
+                    registrar_operacao(None, lucro, modo, entrada)
                     print(f"✅ Operação com lucro: {lucro}")
                     break
-                elif lucro < -entrada:
+                elif lucro < -0.01:
                     encerrar_contrato(contract_id, token)
                     perdas_total += entrada
-                    registrar_operacao("prejuizo", lucro, modo, entrada)
+                    registrar_operacao(None, lucro, modo, entrada)
                     print(f"❌ Operação com prejuízo: {lucro}")
                     break
 

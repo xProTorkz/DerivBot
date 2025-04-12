@@ -14,12 +14,16 @@ from constantes import LOGS_PATH
 
 def registrar_operacao(resultado, lucro_ou_erro, modo="desconhecido", valor_entrada=0):
     try:
+        resultado_real = round(float(lucro_ou_erro), 2)
+        valor = round(float(valor_entrada), 2)
+
         registro = {
             "modo": modo,
-            "resultado": resultado,
-            "valor": round(float(valor_entrada), 2),
-            "resultado_real": round(float(lucro_ou_erro), 2),
-            "hora": datetime.now().strftime("%H:%M:%S")
+            "resultado": "lucro" if resultado_real > 0 else "prejuízo",
+            "valor": valor,
+            "resultado_real": resultado_real,
+            "hora": datetime.now().strftime("%H:%M:%S"),
+            "data": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
 
         print(f"[LOG] Operação registrada: {registro}")

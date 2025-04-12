@@ -31,7 +31,9 @@ document.addEventListener("DOMContentLoaded", function () {
 
     fetch("/toggle_bot", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json", // 👈 ESSENCIAL
+      },
       body: JSON.stringify({ modo, meta }),
     })
       .then((res) => res.json())
@@ -39,12 +41,18 @@ document.addEventListener("DOMContentLoaded", function () {
         if (data.status === "iniciado") {
           atualizarLogTemp("✅ Robô iniciado com sucesso!");
           atualizarStatusEtapas("contrato");
-        } else {
+          document.getElementById("historico-tabela-body").innerHTML = "";
+        } else if (data.status === "parado") {
           atualizarLogTemp("⛔ Robô foi parado!");
           atualizarStatusEtapas("finalizado");
+        } else {
+          atualizarLogTemp(
+            "❌ Erro: " + (data.mensagem || "ao alternar o status do robô.")
+          );
         }
-        atualizarStatusRobo(); // atualiza o botão
+        atualizarStatusRobo();
       })
+
       .catch(() => {
         atualizarLogTemp("❌ Erro ao alternar o status do robô.");
       });
@@ -72,24 +80,18 @@ document.addEventListener("DOMContentLoaded", function () {
     }
   }
 
-  function atualizarStatusRobo() {
+  window.atualizarTabelaResultadosSeRoboAtivo = function () {
     fetch("/status_robo")
       .then((res) => res.json())
       .then((data) => {
-        if (!botaoControle) return;
         if (data.ativo) {
-          botaoControle.textContent = "⛔ Parar Robô";
-          botaoControle.classList.remove("start-btn");
-          botaoControle.classList.add("stop-btn");
-          roboAtivo = true;
-        } else {
-          botaoControle.textContent = "✅ Iniciar Robô";
-          botaoControle.classList.remove("stop-btn");
-          botaoControle.classList.add("start-btn");
-          roboAtivo = false;
+          atualizarTabelaResultados();
         }
+      })
+      .catch((err) => {
+        console.warn("Erro ao verificar status do robô:", err);
       });
-  }
+  };
 
   function atualizarSaldoEmTempoReal() {
     fetch("/saldo_atual")
@@ -140,9 +142,12 @@ document.addEventListener("DOMContentLoaded", function () {
             <td>${item.data.split(" ")[1].slice(0, 5)}</td>
             <td>${item.tipo.toUpperCase()}</td>
             <td>$${parseFloat(item.valor).toFixed(2)}</td>
-            <td class="${item.resultado_real >= 0 ? "positivo" : "negativo"}">
+            <td class="resultado ${
+              item.resultado_real >= 0 ? "positivo" : "negativo"
+            }">
               $${parseFloat(item.resultado_real).toFixed(2)}
             </td>
+
 
           `;
           tbody.appendChild(row);
@@ -166,17 +171,21 @@ document.addEventListener("DOMContentLoaded", function () {
     });
   }
 
-  function limparHistorico() {
-    console.log("🧹 Clicou em limpar histórico"); // só pra debug
-
+  window.limparHistorico = function () {
     if (!confirm("Tem certeza que deseja limpar o histórico?")) return;
 
-    fetch("/limpar_historico", { method: "POST" })
+    fetch("/limpar_historico", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: "{}", // pode ser um objeto vazio
+    })
       .then((res) => res.json())
       .then((data) => {
         if (data.status === "ok") {
           document.getElementById("historico-tabela-body").innerHTML = "";
-          atualizarLogTemp("🧹 Histórico apagado com sucesso.");
+          console.log("🧹 Histórico apagado com sucesso.");
         } else {
           alert("Erro ao limpar histórico: " + data.mensagem);
         }
@@ -184,6 +193,77 @@ document.addEventListener("DOMContentLoaded", function () {
       .catch(() => {
         alert("Erro ao tentar limpar o histórico.");
       });
+  };
+  function atualizarStatusRobo() {
+    fetch("/status_robo")
+      .then((res) => res.json())
+      .then((data) => {
+        roboAtivo = data.ativo;
+        if (roboAtivo) {
+          atualizarLogTemp("⚙️ Robô está rodando...");
+          atualizarStatusEtapas("contrato");
+          botaoControle.textContent = "⛔ Parar Robô";
+          botaoControle.style.backgroundColor = "#ff3b3b"; // vermelho
+          botaoControle.style.color = "#fff";
+        } else {
+          atualizarLogTemp("🟡 Robô parado.");
+          atualizarStatusEtapas("finalizado");
+          botaoControle.textContent = "✅ Iniciar Robô";
+          botaoControle.style.backgroundColor = "#00d67b"; // verde
+          botaoControle.style.color = "#000";
+        }
+      })
+      .catch(() => {
+        atualizarLogTemp("❌ Erro ao consultar status do robô.");
+      });
+  }
+
+  function atualizarLucroEMeta() {
+    fetch("/lucro_atual")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.status === "ok") {
+          const lucroEl = document.getElementById("lucro-valor");
+          const metaEl = document.getElementById("meta-valor");
+
+          const lucro = parseFloat(data.lucro).toFixed(2);
+          const meta = parseFloat(data.meta).toFixed(2);
+
+          lucroEl.textContent = lucro;
+          metaEl.textContent = "/" + meta;
+
+          lucroEl.className = lucro >= 0 ? "positivo" : "negativo";
+        }
+      });
+  }
+
+  function trocarAba(aba) {
+    // Oculta todos
+    document.getElementById("tabela-historico").style.display = "none";
+    document.getElementById("resumo-diario").style.display = "none";
+    document.getElementById("grafico-diario").style.display = "none";
+
+    // Mostra a selecionada
+    if (aba === "tabela")
+      document.getElementById("tabela-historico").style.display = "block";
+    if (aba === "resumo")
+      document.getElementById("resumo-diario").style.display = "block";
+    if (aba === "grafico")
+      document.getElementById("grafico-diario").style.display = "block";
+
+    // Marca a aba como ativa
+    document
+      .querySelectorAll(".aba")
+      .forEach((el) => el.classList.remove("active"));
+    const icone = {
+      tabela: "📄",
+      resumo: "📊",
+      grafico: "📈",
+    }[aba];
+
+    document.querySelectorAll(".aba").forEach((el) => {
+      if (el.textContent.trim() === icone) el.classList.add("active");
+    });
   }
 
   // Inicializações
@@ -191,15 +271,19 @@ document.addEventListener("DOMContentLoaded", function () {
   atualizarSaldoEmTempoReal();
   verificarConexaoDeriv();
   atualizarStatusRobo();
-  atualizarTabelaResultados();
 
   // Atualizações periódicas
   setInterval(atualizarSaldoEmTempoReal, 5000);
   setInterval(verificarConexaoDeriv, 5000);
   setInterval(atualizarStatusRobo, 4000);
+  setInterval(atualizarLucroEMeta, 4000); // Atualiza a cada 4 segundos
   setInterval(() => {
-    if (roboAtivo) {
-      atualizarTabelaResultados();
-    }
+    fetch("/status_robo")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.ativo) {
+          atualizarTabelaResultados();
+        }
+      });
   }, 5000);
 });
