@@ -25,37 +25,61 @@ document.addEventListener("DOMContentLoaded", function () {
     }
   });
 
-  botaoControle.addEventListener("click", () => {
+  botaoControle.addEventListener("click", async () => {
     const modo = modoSelect.value;
     const meta = parseFloat(metaInput.value);
 
-    fetch("/toggle_bot", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json", // 👈 ESSENCIAL
-      },
-      body: JSON.stringify({ modo, meta }),
-    })
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.status === "iniciado") {
-          atualizarLogTemp("✅ Robô iniciado com sucesso!");
-          atualizarStatusEtapas("contrato");
-          document.getElementById("historico-tabela-body").innerHTML = "";
-        } else if (data.status === "parado") {
-          atualizarLogTemp("⛔ Robô foi parado!");
-          atualizarStatusEtapas("finalizado");
-        } else {
-          atualizarLogTemp(
-            "❌ Erro: " + (data.mensagem || "ao alternar o status do robô.")
-          );
-        }
-        atualizarStatusRobo();
-      })
+    // ✅ Garante que a aba da tabela esteja visível
+    trocarAba("tabela");
 
-      .catch(() => {
-        atualizarLogTemp("❌ Erro ao alternar o status do robô.");
+    // ✅ Limpa somente o corpo da tabela
+    const tabelaBody = document.getElementById("historico-tabela-body");
+    if (tabelaBody) tabelaBody.innerHTML = "";
+
+    // ✅ Limpa os campos de resumo
+    document.getElementById("resumo-total").innerText = "--";
+    document.getElementById("resumo-lucros").innerText = "--";
+    document.getElementById("resumo-prejuizos").innerText = "--";
+    document.getElementById("resumo-assertividade").innerText = "--";
+    document.getElementById("resumo-lucro-total").innerText = "--";
+
+    // ✅ Atualiza texto temporário
+    document.getElementById("log-temporario").textContent = "Robô iniciado!";
+
+    // ✅ Troca pra aba "Histórico 📄" automaticamente
+    if (typeof trocarAba === "function") {
+      trocarAba("tabela");
+    }
+
+    try {
+      const resposta = await fetch("/toggle_bot", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ modo, meta }),
       });
+
+      const dados = await resposta.json();
+
+      // Alterna o estado do botão
+      roboAtivo = dados.status === "iniciado";
+      botaoControle.textContent = roboAtivo ? "Parar Robô" : "Iniciar Robô";
+      botaoControle.classList.toggle("ativo", roboAtivo);
+
+      // 👇 atualiza exibição do modo
+      atualizarExibicaoModo(modo, roboAtivo);
+
+      // 🔄 Atualiza lucro/meta imediatamente após iniciar
+      atualizarLucroEMeta();
+
+      // 🔀 Troca de aba pro histórico
+      if (roboAtivo) {
+        trocarAba("tabela");
+      }
+    } catch (erro) {
+      console.error("Erro ao alternar robô:", erro);
+    }
   });
 
   function atualizarLogTemp(mensagem) {
@@ -219,7 +243,7 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   function atualizarLucroEMeta() {
-    fetch("/lucro_atual")
+    fetch("/lucro_meta")
       .then((res) => res.json())
       .then((data) => {
         if (data.status === "ok") {
@@ -264,6 +288,34 @@ document.addEventListener("DOMContentLoaded", function () {
     document.querySelectorAll(".aba").forEach((el) => {
       if (el.textContent.trim() === icone) el.classList.add("active");
     });
+  }
+
+  function atualizarExibicaoModo(modoSelecionado, roboAtivo) {
+    const containerModoMeta = document.querySelector(".modo-meta-wrapper");
+    const modoSelecionadoBox = document.getElementById("modo-selecionado");
+    const modoTextoSpan = document.getElementById("modo-texto");
+
+    if (!containerModoMeta || !modoSelecionadoBox || !modoTextoSpan) return;
+
+    if (roboAtivo) {
+      containerModoMeta.style.display = "none";
+      modoSelecionadoBox.style.display = "block";
+
+      const emojis = {
+        iniciante: "🌱",
+        conservador: "🛡️",
+        agressivo: "🔥",
+      };
+
+      const modoCapitalizado =
+        modoSelecionado.charAt(0).toUpperCase() + modoSelecionado.slice(1);
+      modoTextoSpan.innerText = `${modoCapitalizado} ${
+        emojis[modoSelecionado] || ""
+      }`;
+    } else {
+      containerModoMeta.style.display = "flex";
+      modoSelecionadoBox.style.display = "none";
+    }
   }
 
   // Inicializações

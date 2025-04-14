@@ -1,25 +1,40 @@
 import os
 import json
 import uuid
+import config
+from motor import estado, executar_operacao_sniper
 from datetime import datetime
 from flask import Flask, render_template, request, redirect, session, jsonify
 from flask_cors import CORS
 from constantes import LICENCAS_PATH, LOGS_PATH
-from app import painel, carregar_status, historico_completo, lucro_atual, iniciar_robo, iniciar_robo_em_thread, get_saldo, trocar_conta, status_deriv, executar_operacao_sniper, toggle_bot, status_robo_route, historico_resultados
+from app import painel, lucro_meta, historico_completo, get_saldo, trocar_conta, status_deriv, toggle_bot, status_robo_route, historico_resultados
 
-from motor import executar_operacao_sniper  
 
-estado = carregar_status()
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "segredo_super_top_do_lucas")
 # ROTAS PÚBLICAS (acesso antes do painel)
 
-if estado["robo_ativo"]:
-    print("⏪ Reiniciando robô automaticamente...")
-    iniciar_robo_em_thread(estado["modo"], estado["token"], estado["meta"], estado["tipo_conta"])
+# if estado["robo_ativo"]:
+#    print("⏪ Reiniciando robô automaticamente...")
+#    iniciar_robo_em_thread(estado["modo"], estado["token"], estado["meta"], estado["tipo_conta"])
+# Resetar o status.json ao iniciar o servidor
+if not config.status_robo():
+    with open("status.json", "w") as f:
+        json.dump({
+            "robo_ativo": False,
+            "lucro": 0,
+            "meta": 0
+        }, f, indent=2)
 
-
+estado = {
+    "robo_ativo": False,
+    "modo": None,
+    "token": None,
+    "meta": 0,
+    "tipo_conta": None,
+    "lucro_total": 0  # <- ESSENCIAL
+}
 
 # ROTAS PROTEGIDAS (painel e funções)
 app.add_url_rule("/painel", "painel", painel)
@@ -33,8 +48,9 @@ app.add_url_rule("/get_saldo", "get_saldo", get_saldo, methods=["GET"])
 app.add_url_rule("/status_deriv", "status_deriv", status_deriv)
 app.add_url_rule("/trocar_conta", "trocar_conta", trocar_conta, methods=["POST"])
 app.add_url_rule("/historico_resultados", "historico_resultados", historico_resultados, methods=["GET"])
-app.add_url_rule("/lucro_atual", "lucro_atual", lambda: jsonify({"lucro": estado["lucro_total"]}), methods=["GET"])
+app.add_url_rule("/lucro_meta", "lucro_meta", lucro_meta, methods=["GET"])
 app.add_url_rule("/historico_completo", "historico_completo", historico_completo, methods=["GET"])
+
 def get_ip():
     return request.remote_addr
 

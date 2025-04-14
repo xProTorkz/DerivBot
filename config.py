@@ -1,17 +1,28 @@
 # config.py
 
+import json
 from resultado import calcular_assertividade
 
-# Modo atual selecionado (isso pode ser alterado dinamicamente no painel)
+# Caminho do arquivo de status
+STATUS_PATH = "status.json"
+
+# Estado global do robô
+estado = {
+    "robo_ativo": False,
+    "modo": None,
+    "token": None,
+    "meta": 0,
+    "tipo_conta": None,
+    "lucro_total": 0
+}
+
+# Modo atual selecionado (pode ser alterado dinamicamente no painel)
 MODO_ATUAL = "iniciante"  # Pode ser: iniciante, conservador, agressivo
 
 # Taxas de assertividade baseadas no histórico de operações (calculadas dinamicamente)
 assertividades = calcular_assertividade()
 
-# Configurações do bot
-ROBO_ATIVO = False
-
-
+# Configurações dos modos do robô
 MODOS = {
     "iniciante": {
         "meta": 20,
@@ -33,25 +44,53 @@ MODOS = {
     }
 }
 
+# Retorna as configurações do modo atual
+
 def get_valores_modo(modo):
     return MODOS.get(modo, MODOS["iniciante"])
-# Configurações do aplicativo
 
-# ==========================
-# Configurações do robô de trading
+# =============================
+# Controle do status do robô
+
+ROBO_ATIVO = False
 
 def iniciar_robo():
     print("⚙️ Robô está sendo iniciado pelo botão...")
     global ROBO_ATIVO
     ROBO_ATIVO = True
     print("🚀 Robô iniciado!")
-    # iniciar loop, thread ou lógica aqui
 
 def parar_robo():
     global ROBO_ATIVO
     ROBO_ATIVO = False
     print("🛑 Robô parado!")
-    # encerrar processos, threads, etc
 
 def status_robo():
     return ROBO_ATIVO
+
+# =============================
+# Persistência de status (usado para sincronizar com frontend)
+
+def salvar_status(lucro_total, meta):
+    try:
+        with open(STATUS_PATH, "w") as f:
+            json.dump({
+                "robo_ativo": True,
+                "lucro": round(lucro_total, 2),
+                "meta": round(meta, 2)
+            }, f, indent=2)
+        print(f"[✔️ STATUS SALVO] Lucro: {lucro_total} | Meta: {meta}")
+    except Exception as e:
+        print(f"[ERRO AO SALVAR STATUS] {e}")
+
+def carregar_status():
+    try:
+        with open(STATUS_PATH, "r") as f:
+            dados = json.load(f)
+        return dados
+    except:
+        return {
+            "robo_ativo": False,
+            "lucro": 0,
+            "meta": 0
+        }

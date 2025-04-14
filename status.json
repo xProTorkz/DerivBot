@@ -1,7 +1,5 @@
 {
   "robo_ativo": true,
-  "modo": "iniciante",
-  "meta": 20,
-  "token": "seu_token_aqui",
-  "tipo_conta": "demo"
+  "lucro": 0.0,
+  "meta": 20.0
 }

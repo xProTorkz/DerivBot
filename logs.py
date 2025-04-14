@@ -5,6 +5,8 @@ from datetime import datetime
 from config import MODO_ATUAL
 import os
 
+
+
 LOGS_PATH = "data/logs.txt"
 
 # logs.py

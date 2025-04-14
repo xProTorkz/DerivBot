@@ -1,6 +1,6 @@
 from flask import render_template, request, jsonify, redirect, session
-from motor import executar_operacao_sniper
-from config import iniciar_robo, status_robo, parar_robo
+from motor import executar_operacao_sniper, estado
+from config import iniciar_robo, status_robo
 from threading import Thread
 import config
 import os
@@ -8,7 +8,6 @@ import json
 from datetime import datetime
 from constantes import LICENCAS_PATH, LOGS_PATH
 import websocket
-import threading
 
 thread_robo = None
 robos_em_execucao = {}
@@ -190,47 +189,56 @@ def status_deriv():
         return jsonify({"status": "erro", "mensagem": str(e)})
 
 
-    return redirect("/painel")
-
 
 # ========== ROTAS ========
+
+def lucro_meta():
+    try:
+        with open("status.json", "r") as f:
+            dados = json.load(f)
+        return jsonify({
+            "status": "ok",
+            "lucro": float(dados.get("lucro", 0)),
+            "meta": float(dados.get("meta", 0))
+        })
+    except Exception as e:
+        print(f"[ERRO LUCRO META] {e}")
+        return jsonify({
+            "status": "erro",
+            "lucro": 0,
+            "meta": 0
+        })
+
 
 def status_robo_route():
     return jsonify({"ativo": status_robo()})
 
 
-def toggle_bot():
+def limpar_arquivo_historico():
     try:
-        dados = request.get_json()
-        if not dados:
-            raise Exception("Nenhum dado recebido ou formato inválido.")
-
-        modo = dados.get("modo", "iniciante")
-        meta = dados.get("meta", 20)
-
-        if status_robo():
-            parar_robo()
-            return jsonify({"status": "parado"})
-        else:
-            token = session.get("token_deriv")
-            tipo_conta = session.get("tipo_conta")
-
-            if not token or not tipo_conta:
-                raise Exception("Token ou tipo de conta não encontrado na sessão.")
-
-            thread = threading.Thread(
-                target=executar_operacao_sniper,
-                args=(modo, token, meta, tipo_conta)
-            )
-            thread.daemon = True
-            thread.start()
-
-            return jsonify({"status": "iniciado"})
-    except Exception as e:
-        print(f"[ERRO TOGGLE BOT]: {e}")
-        return jsonify({"status": "erro", "mensagem": str(e)})
+        open("data/logs.txt", "w").close()
+        print("🧹 Histórico limpo.")
+    except:
+        print("⚠️ Erro ao limpar histórico.")
 
 
+def toggle_bot():
+    global estado
+
+    data = request.get_json()
+    modo = data.get("modo")
+    meta = float(data.get("meta"))
+    token = session.get("token_deriv")
+    tipo_conta = session.get("tipo_conta")
+
+    if not config.ROBO_ATIVO:
+        limpar_arquivo_historico()  # 🧹 limpa os logs!
+        iniciar_robo_em_thread(modo, token, meta, tipo_conta)
+        salvar_status(0, meta)  # Salva o status inicial
+        return jsonify({"status": "iniciado"})
+    else:
+        config.ROBO_ATIVO = False
+        return jsonify({"status": "parado"})
 
     
     
@@ -247,15 +255,14 @@ def historico_resultados():
             try:
                 dado = json.loads(linha)
                 print(f"[DEBUG LOG] Resultado Real Lido: {dado.get('resultado_real')} | Tipo: {dado.get('resultado')}")
-                # Verifica se o resultado é lucro ou prejuízo
 
                 valor = round(float(dado.get("valor", 0)), 2)
                 resultado_real = round(float(dado.get("resultado_real", 0)), 2)
 
-
-
                 historico.append({
-                    "data": dado.get("data", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+                    "data": dado.get("data", "--"),
+                    "hora": dado.get("hora", "--"),
+                    "modo": dado.get("modo", "--"),
                     "tipo": dado.get("resultado", "--"),
                     "valor": valor,
                     "resultado_real": resultado_real
@@ -267,11 +274,11 @@ def historico_resultados():
 
     return jsonify(historico)
 
-from threading import Thread
+
+
 
 def iniciar_robo_em_thread(modo, token, meta, tipo_conta):
     global thread_robo
-    from motor import executar_operacao_sniper  # ou o nome do seu motor
     thread_robo = Thread(target=executar_operacao_sniper, args=(modo, token, meta, tipo_conta))
     thread_robo.daemon = True  # roda em segundo plano
     thread_robo.start()
@@ -283,21 +290,39 @@ def carregar_status():
     except:
         return {"robo_ativo": False}
 
-def salvar_status(dados):
-    with open("status.json", "w") as f:
-        json.dump(dados, f)
-
-def lucro_atual():
+def salvar_status(lucro_total, meta):
     try:
-        with open("status.json", "r") as f:
-            dados = json.load(f)
-        return jsonify({
-            "status": "ok",
-            "lucro": round(dados.get("lucro", 0), 2),
-            "meta": dados.get("meta", 0)
-        })
-    except:
-        return jsonify({"status": "erro", "lucro": 0, "meta": 0})
+        with open("status.json", "w") as f:
+            json.dump({
+                "robo_ativo": True,
+                "lucro": round(lucro_total, 2),
+                "meta": round(meta, 2)
+            }, f, indent=2)
+        print(f"[✔️ STATUS SALVO] Lucro: {lucro_total} | Meta: {meta}")
+    except Exception as e:
+        print(f"[ERRO AO SALVAR STATUS] {e}")
+
+
+
+def salvar_status(lucro_total, meta):
+    try:
+        status_path = "status.json"
+
+        dados = {
+            "robo_ativo": True,
+            "lucro": float(round(lucro_total, 2)),
+            "meta": float(round(meta, 2))
+        }
+
+        with open(status_path, "w") as f:
+            json.dump(dados, f, indent=2)
+
+        print(f"[✔️ STATUS SALVO] Lucro acumulado: ${dados['lucro']} | Meta: ${dados['meta']}")
+    except Exception as e:
+        print(f"[ERRO AO SALVAR STATUS] {e}")
+
+
+
 
 # ========== HISTÓRICO ========
 def historico_completo():

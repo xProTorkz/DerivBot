@@ -61,18 +61,13 @@
         <label>Lucro / Meta</label>
         <p id="lucro-meta">
           <span class="rs">$</span>
-          <span
-            id="lucro-valor"
-            class="{{ 'positivo' if lucro >= 0 else 'negativo' }}"
-          >
-            {{ "%.2f"|format(lucro) if lucro is not none else '--' }}
-          </span>
-
-          <span id="meta-valor">/{{ meta if meta is not none else '--' }}</span>
+          <span id="lucro-valor" class="positivo">0</span>
+          <span id="meta-valor">/0</span>
         </p>
       </div>
     </div>
 
+    <!-- CONTROLES DO ROBO -->
     <!-- CONTROLES DO ROBO -->
     <div class="painel-robo glass-dark" id="painel-config">
       <div class="modo-meta-wrapper">
@@ -98,6 +93,19 @@
       </div>
 
       <button id="bot-control-btn">Iniciar Robô</button>
+
+      <!-- 🔄 MODO SELECIONADO ABAIXO DO BOTÃO -->
+      <div
+        id="modo-selecionado"
+        style="
+          display: none;
+          margin-top: 10px;
+          font-weight: bold;
+          text-align: center;
+        "
+      >
+        🔄 Modo selecionado: <span id="modo-texto"></span>
+      </div>
 
       <p
         id="status-deriv"
@@ -207,6 +215,8 @@
           <thead>
             <tr>
               <th>Data</th>
+              <th>Modo</th>
+
               <th>Hora</th>
               <th>Tipo</th>
               <th>Valor</th>
@@ -216,8 +226,9 @@
           <tbody id="historico-tabela-body">
             {% for op in historico %}
             <tr>
-              <td>{{ op.data.split(' ')[0] if op.data else '--' }}</td>
-              <td>{{ op.data.split(' ')[1][:5] if op.data else '--' }}</td>
+              <td>{{ op.data }}</td>
+              <td>{{ op.hora }}</td>
+              <td>{{ op.modo.upper() if op.modo else '--' }}</td>
               <td>{{ op.tipo.upper() if op.tipo else '--' }}</td>
               <td title="Valor da entrada">${{ "%.2f"|format(op.valor) }}</td>
               <td
