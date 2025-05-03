@@ -162,8 +162,9 @@ document.addEventListener("DOMContentLoaded", function () {
         data.reverse().forEach((item) => {
           const row = document.createElement("tr");
           row.innerHTML = `
-            <td>${item.data.split(" ")[0]}</td>
-            <td>${item.data.split(" ")[1].slice(0, 5)}</td>
+            <td>${item.data}</td>
+            <td>${item.hora}</td>
+
             <td>${item.tipo.toUpperCase()}</td>
             <td>$${parseFloat(item.valor).toFixed(2)}</td>
             <td class="resultado ${

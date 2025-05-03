@@ -1,7 +1,6 @@
 import websocket
 import json
 import time
-import threading
 
 API_URL = "wss://ws.derivws.com/websockets/v3?app_id=71203"
 
@@ -16,19 +15,26 @@ def autenticar(ws, token):
     ws.send(json.dumps({"authorize": token}))
     ws.recv()
 
-# === Compra de contrato tipo CALL ou PUT ===
-def comprar_contrato(valor, ativo="R_100", direcao="CALL", token=None):
+# === Compra de contrato MULTIPLIER ===
+def comprar_contrato(valor, ativo="1HZ100V", token=None, modo="iniciante"):
+
     ws = conectar_ws()
     autenticar(ws, token)
+    multipliers = {
+    "iniciante": 10,
+    "conservador": 20,
+    "agressivo": 100
+    }
+
 
     parametros = {
         "amount": valor,
-        "basis": "stake",          # valor fixo da entrada
-        "contract_type": direcao,  # CALL ou PUT
+        "basis": "stake",
+        "contract_type": "MULTUP",  # Multiplier padrão de alta
+        "symbol": ativo,
         "currency": "USD",
-        "duration": 60,            # duração em segundos (pode alterar)
-        "duration_unit": "s",
-        "symbol": ativo
+        "multiplier": multipliers.get(modo, 50)  # multiplicador baseado no modo
+        
     }
 
     mensagem_compra = {
@@ -37,7 +43,7 @@ def comprar_contrato(valor, ativo="R_100", direcao="CALL", token=None):
         "parameters": parametros
     }
 
-    print(f"[DEBUG] Enviando compra com parâmetros: {json.dumps(mensagem_compra, indent=2)}")
+    print(f"[DEBUG] Comprando MULTIPLIER: {json.dumps(mensagem_compra, indent=2)}")
 
     ws.send(json.dumps(mensagem_compra))
     resposta = json.loads(ws.recv())
@@ -72,14 +78,14 @@ def verificar_lucro(contract_id, token):
 
     return -999  # contrato já foi encerrado
 
-# === Encerramento manual (não necessário para CALL/PUT, mas mantido se quiser forçar encerramento) ===
+# === Encerrar contrato manualmente (obrigatório no Multiplier para sair com lucro) ===
 def encerrar_contrato(contract_id, token):
     ws = conectar_ws()
     autenticar(ws, token)
 
     ws.send(json.dumps({
         "sell": contract_id,
-        "price": 0
+        "price": 0  # aceita qualquer valor atual de venda
     }))
     resposta = json.loads(ws.recv())
     ws.close()

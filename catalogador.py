@@ -3,7 +3,6 @@ from inteligencia import carregar_memoria, salvar_memoria, limpar_memoria, clien
 # === ENTRADA ===
 def analisar_entrada_chatgpt(velas, cliente_id="cliente_padrao"):
     try:
-        # Monta prompt
         nova_mensagem = {
             "role": "user",
             "content": f"Velas recentes:\n{velas}\n\nCom base nessas velas, responda apenas com: CALL, PUT ou AGUARDAR."
@@ -12,10 +11,21 @@ def analisar_entrada_chatgpt(velas, cliente_id="cliente_padrao"):
         mensagens = carregar_memoria(cliente_id)
         mensagens.append(nova_mensagem)
 
-        resposta = client.chat.completions.create(
-            model="gpt-4o",
-            messages=mensagens
-        )
+        try:
+            # Tenta com GPT-4o
+            resposta = client.chat.completions.create(
+                model="gpt-4o",
+                messages=mensagens
+            )
+        except Exception as erro:
+            if "insufficient_quota" in str(erro):
+                print("⚠️ GPT-4o sem créditos. Tentando fallback para GPT-3.5-turbo...")
+                resposta = client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=mensagens
+                )
+            else:
+                raise erro
 
         conteudo = resposta.choices[0].message.content.strip().upper()
         print(f"[🔎 IA ENTRADA] Resposta: '{conteudo}'")
@@ -26,6 +36,7 @@ def analisar_entrada_chatgpt(velas, cliente_id="cliente_padrao"):
     except Exception as e:
         print(f"[ERRO GPT ENTRADA] {e}")
         return "AGUARDAR"
+
 
 
 # === SAÍDA ===

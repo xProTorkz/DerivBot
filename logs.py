@@ -21,7 +21,8 @@ def registrar_operacao(resultado, lucro_ou_erro, modo="desconhecido", valor_entr
 
         registro = {
             "modo": modo,
-            "resultado": "lucro" if resultado_real > 0 else "prejuízo",
+            "resultado": resultado.lower(),  # ← "call", "put" ou "erro"
+            "tipo": "lucro" if resultado_real > 0 else "prejuízo",  # ← agora sim o painel entende!
             "valor": valor,
             "resultado_real": resultado_real,
             "hora": datetime.now().strftime("%H:%M:%S"),
@@ -34,3 +35,4 @@ def registrar_operacao(resultado, lucro_ou_erro, modo="desconhecido", valor_entr
             f.write(json.dumps(registro) + "\n")
     except Exception as e:
         print(f"[ERRO LOG]: {e}")
+

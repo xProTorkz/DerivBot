@@ -29,7 +29,6 @@ def get_saldo(token):
         print(f"[ERRO SALDO] {e}")
         return 0.0
 
-
 def painel():
     if "token_deriv" not in session or "tipo_conta" not in session:
         return redirect("/")
@@ -67,26 +66,27 @@ def painel():
                 try:
                     dado = json.loads(linha)
 
+                    # 🛠️ Corrige resultado_real se for prejuízo e estiver zerado
+                    if dado.get("resultado") == "prejuízo" and float(dado.get("resultado_real", 0)) == 0:
+                        dado["resultado_real"] = -float(dado.get("valor", 0))
+
                     valor = round(float(dado.get("valor", 0)), 2)
                     resultado_real = round(float(dado.get("resultado_real", 0)), 2)
 
+                    saldo_inicial = carregar_status().get("saldo_inicial", saldo)  # usar o saldo salvo na hora de iniciar o robô
+                    lucro = round(saldo - saldo_inicial, 2)
 
-
-                    # Fallback: recalcular se o campo parecer "corrompido" (zero com tipo errado ou ausência de prejuízo)
-                    if resultado_real == 0 and dado.get("resultado") == "prejuízo":
-                        resultado_real = -valor
-
-
-                    lucro += resultado_real
 
                     historico.append({
-                        "data": dado.get("data", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-                        "tipo": dado.get("resultado", "--"),
+                        "data": dado.get("data", datetime.now().strftime("%Y-%m-%d")),
+                        "hora": dado.get("hora", datetime.now().strftime("%H:%M:%S")),
+                        "tipo": dado.get("tipo", dado.get("resultado", "--")),
                         "valor": valor,
                         "resultado_real": resultado_real
                     })
                 except:
                     continue
+
 
 
     return render_template(
@@ -164,8 +164,7 @@ def trocar_conta():
         session["tipo_conta"] = "demo"
 
     return redirect("/painel")
-
-    
+   
 def status_deriv():
     import websocket
     import json
@@ -188,8 +187,6 @@ def status_deriv():
     except Exception as e:
         return jsonify({"status": "erro", "mensagem": str(e)})
 
-
-
 # ========== ROTAS ========
 
 def lucro_meta():
@@ -209,10 +206,8 @@ def lucro_meta():
             "meta": 0
         })
 
-
 def status_robo_route():
     return jsonify({"ativo": status_robo()})
-
 
 def limpar_arquivo_historico():
     try:
@@ -220,7 +215,6 @@ def limpar_arquivo_historico():
         print("🧹 Histórico limpo.")
     except:
         print("⚠️ Erro ao limpar histórico.")
-
 
 def toggle_bot():
     global estado
@@ -232,15 +226,15 @@ def toggle_bot():
     tipo_conta = session.get("tipo_conta")
 
     if not config.ROBO_ATIVO:
-        limpar_arquivo_historico()  # 🧹 limpa os logs!
+        limpar_arquivo_historico()
+        saldo_atual = get_saldo(token)
+        salvar_status_inicial(saldo_atual, 0, meta)
         iniciar_robo_em_thread(modo, token, meta, tipo_conta)
-        salvar_status(0, meta)  # Salva o status inicial
         return jsonify({"status": "iniciado"})
+
     else:
         config.ROBO_ATIVO = False
-        return jsonify({"status": "parado"})
-
-    
+        return jsonify({"status": "parado"})   
     
 def historico_resultados():
     if not os.path.exists(LOGS_PATH):
@@ -262,7 +256,6 @@ def historico_resultados():
                 historico.append({
                     "data": dado.get("data", "--"),
                     "hora": dado.get("hora", "--"),
-                    "modo": dado.get("modo", "--"),
                     "tipo": dado.get("resultado", "--"),
                     "valor": valor,
                     "resultado_real": resultado_real
@@ -273,9 +266,6 @@ def historico_resultados():
                 continue
 
     return jsonify(historico)
-
-
-
 
 def iniciar_robo_em_thread(modo, token, meta, tipo_conta):
     global thread_robo
@@ -289,20 +279,6 @@ def carregar_status():
             return json.load(f)
     except:
         return {"robo_ativo": False}
-
-def salvar_status(lucro_total, meta):
-    try:
-        with open("status.json", "w") as f:
-            json.dump({
-                "robo_ativo": True,
-                "lucro": round(lucro_total, 2),
-                "meta": round(meta, 2)
-            }, f, indent=2)
-        print(f"[✔️ STATUS SALVO] Lucro: {lucro_total} | Meta: {meta}")
-    except Exception as e:
-        print(f"[ERRO AO SALVAR STATUS] {e}")
-
-
 
 def salvar_status(lucro_total, meta):
     try:
@@ -321,10 +297,17 @@ def salvar_status(lucro_total, meta):
     except Exception as e:
         print(f"[ERRO AO SALVAR STATUS] {e}")
 
-
-
+def salvar_status_inicial(saldo_inicial, lucro_total, meta):
+    with open("status.json", "w") as f:
+        json.dump({
+            "robo_ativo": True,
+            "saldo_inicial": round(saldo_inicial, 2),
+            "lucro": round(lucro_total, 2),
+            "meta": round(meta, 2)
+        }, f, indent=2)
 
 # ========== HISTÓRICO ========
+
 def historico_completo():
     if not os.path.exists(LOGS_PATH):
         return render_template("historico_completo.html", historico=[], resumo={})

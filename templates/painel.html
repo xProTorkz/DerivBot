@@ -215,8 +215,6 @@
           <thead>
             <tr>
               <th>Data</th>
-              <th>Modo</th>
-
               <th>Hora</th>
               <th>Tipo</th>
               <th>Valor</th>
@@ -228,7 +226,6 @@
             <tr>
               <td>{{ op.data }}</td>
               <td>{{ op.hora }}</td>
-              <td>{{ op.modo.upper() if op.modo else '--' }}</td>
               <td>{{ op.tipo.upper() if op.tipo else '--' }}</td>
               <td title="Valor da entrada">${{ "%.2f"|format(op.valor) }}</td>
               <td
@@ -237,6 +234,7 @@
                 ${{ "%.2f"|format(op.resultado_real) }}
               </td>
             </tr>
+
             {% endfor %}
           </tbody>
         </table>
