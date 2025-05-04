@@ -181,8 +181,6 @@ def validar_token():
 
     return redirect("/configuracao")
 
-
-
 @app.route("/configuracao", methods=["GET", "POST"])
 def configuracao():
     if "token_deriv" not in session:
@@ -218,11 +216,6 @@ def limpar_historico():
         return jsonify({"status": "ok"})
     except Exception as e:
         return jsonify({"status": "erro", "mensagem": str(e)})
-
-
-
-
-  
 
 @app.route("/logout")
 def logout():

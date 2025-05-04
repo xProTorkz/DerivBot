@@ -13,7 +13,7 @@ estado = {
     "token": None,
     "meta": 0,
     "tipo_conta": None,
-    "lucro_total": 0
+    "lucro_total": 0,
 }
 
 # Modo atual selecionado (pode ser alterado dinamicamente no painel)
@@ -28,60 +28,69 @@ MODOS = {
         "meta": 20,
         "entrada": 1,
         "stop": 10,
-        "nome": f"Iniciante - assertividade média de {assertividades.get('iniciante', 90)}%"
+        "nome": f"Iniciante - assertividade média de {assertividades.get('iniciante', 90)}%",
     },
     "conservador": {
         "meta": 50,
         "entrada": 5,
         "stop": 25,
-        "nome": f"Conservador - assertividade média de {assertividades.get('conservador', 85)}%"
+        "nome": f"Conservador - assertividade média de {assertividades.get('conservador', 85)}%",
     },
     "agressivo": {
         "meta": 100,
         "entrada": 10,
         "stop": 50,
-        "nome": f"Agressivo - assertividade média de {assertividades.get('agressivo', 80)}%"
-    }
+        "nome": f"Agressivo - assertividade média de {assertividades.get('agressivo', 80)}%",
+    },
 }
 
-# Retorna as configurações do modo atual
 
+# Retorna as configurações do modo atual
 def get_valores_modo(modo):
     return MODOS.get(modo, MODOS["iniciante"])
+
 
 # =============================
 # Controle do status do robô
 
-ROBO_ATIVO = False
 
 def iniciar_robo():
     print("⚙️ Robô está sendo iniciado pelo botão...")
-    global ROBO_ATIVO
-    ROBO_ATIVO = True
+    estado["robo_ativo"] = True
+    salvar_status(estado["lucro_total"], estado["meta"])
     print("🚀 Robô iniciado!")
 
+
 def parar_robo():
-    global ROBO_ATIVO
-    ROBO_ATIVO = False
+    estado["robo_ativo"] = False
+    salvar_status(estado["lucro_total"], estado["meta"])
     print("🛑 Robô parado!")
 
+
 def status_robo():
-    return ROBO_ATIVO
+    return estado["robo_ativo"]
+
 
 # =============================
 # Persistência de status (usado para sincronizar com frontend)
 
+
 def salvar_status(lucro_total, meta):
     try:
         with open(STATUS_PATH, "w") as f:
-            json.dump({
-                "robo_ativo": True,
-                "lucro": round(lucro_total, 2),
-                "meta": round(meta, 2)
-            }, f, indent=2)
+            json.dump(
+                {
+                    "robo_ativo": estado["robo_ativo"],
+                    "lucro": round(lucro_total, 2),
+                    "meta": round(meta, 2),
+                },
+                f,
+                indent=2,
+            )
         print(f"[✔️ STATUS SALVO] Lucro: {lucro_total} | Meta: {meta}")
     except Exception as e:
         print(f"[ERRO AO SALVAR STATUS] {e}")
+
 
 def carregar_status():
     try:
@@ -89,8 +98,4 @@ def carregar_status():
             dados = json.load(f)
         return dados
     except:
-        return {
-            "robo_ativo": False,
-            "lucro": 0,
-            "meta": 0
-        }
+        return {"robo_ativo": False, "lucro": 0, "meta": 0}

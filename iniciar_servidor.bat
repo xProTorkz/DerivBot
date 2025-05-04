@@ -9,3 +9,5 @@ start /B python main.py
 timeout /t 2 >nul
 
 start http://192.168.1.18:5000
+
+pause
