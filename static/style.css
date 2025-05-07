@@ -135,7 +135,7 @@ body {
 .card-conta-container {
   position: relative;
   width: auto;
-  max-width: 160px;
+  max-width: 150px;
   z-index: 100;
   margin: 0;
 }
@@ -195,15 +195,15 @@ body {
 
 /* === COMPONENTE: DROPDOWN === */
 .dropdown-seta {
-  font-size: 1em;
+  font-size: 0.85em;
   color: var(--vermelho-claro);
   margin-left: 3px;
   cursor: pointer;
   background: transparent;
   border: none;
   outline: none;
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -297,32 +297,36 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 14px;
+  flex-wrap: nowrap;
+  gap: 10px;
   width: 100%;
 }
 
 .licenca-mini-item {
   display: flex;
   align-items: center;
-  gap: 1px;
+  gap: 3px;
   color: var(--cinza-claro);
   white-space: nowrap;
   border-left: none;
   padding-left: 0;
-  transform: scale(0.9);
+  transform: scale(0.95);
 }
 
 .licenca-mini-icone {
-  font-size: 7px;
+  font-size: 12px;
   color: var(--amarelo-claro);
   line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 14px;
 }
 
 .licenca-mini-text {
   color: var(--cinza-claro);
-  font-size: 0.52rem;
-  margin-right: 0;
+  font-size: 0.58rem;
+  margin-right: 2px;
 }
 
 .licenca-mini-valor {
@@ -332,7 +336,7 @@ body {
   padding: 0px 2px;
   border-radius: 2px;
   color: var(--branco);
-  font-size: 0.52rem;
+  font-size: 0.58rem;
   font-weight: 600;
 }
 
@@ -340,13 +344,11 @@ body {
   display: inline-block;
   width: auto;
   white-space: nowrap;
-  padding: 0px 2px;
-  border-radius: 2px;
+  padding: 1px 4px;
+  border-radius: 3px;
   font-weight: 700;
-  font-size: 0.52rem;
+  font-size: 0.58rem;
 }
-
-/* Estilos de planos mantidos */
 
 /* Estilos dos planos */
 .licenca-mini-plano.free {
@@ -357,7 +359,7 @@ body {
 .licenca-mini-plano.mensal {
   background-color: var(--branco);
   color: var(--preto-texto);
-  padding: 2px 5px;
+  padding: 1px 4px;
 }
 
 /* Estilo específico para validade de plano mensal */
@@ -370,8 +372,8 @@ body {
 .licenca-mini-plano.mensal ~ .licenca-mini-item:last-child .licenca-mini-valor {
   background-color: var(--branco);
   color: var(--preto-texto);
-  padding: 2px 5px;
-  border-radius: 4px;
+  padding: 1px 4px;
+  border-radius: 3px;
 }
 
 .licenca-mini-plano.vitalicio {
@@ -546,83 +548,134 @@ body {
   color: var(--branco);
 }
 
-/* === COMPONENTE: LOG === */
+/* === COMPONENTE: LOG PERSONALIZADO === */
 .log-temp {
-  width: 100%;
-  padding: 0.75rem 1rem;
-  margin: 0.5rem 0;
+  width: calc(100% - var(--espacamento-padrao) * 2);
+  padding: 0.8rem 1rem;
+  margin: 0.75rem auto;
   border-radius: var(--borda-arredondada);
-  background-color: rgba(20, 20, 25, 0.7);
-  color: var(--verde-claro);
-  font-size: 0.9rem;
-  text-align: center;
+  background-color: rgba(20, 20, 25, 0.8);
+  color: var(--branco);
+  font-size: 0.85rem;
+  text-align: left;
   min-height: 2.5rem;
   display: flex;
   align-items: center;
-  justify-content: center;
+  border-left: 3px solid var(--azul-claro);
   transition: all 0.3s ease;
+  line-height: 1.4;
+}
+
+.log-temp.info {
+  border-left-color: var(--azul-claro);
+}
+
+.log-temp.aviso {
+  border-left-color: var(--amarelo-claro);
+}
+
+.log-temp.erro {
+  border-left-color: var(--vermelho-claro);
+}
+
+.log-temp.sucesso {
+  border-left-color: var(--verde-claro);
+}
+
+.log-temp.analise {
+  border-left-color: var(--azul-escuro);
+}
+
+.log-temp.contrato {
+  border-left-color: var(--amarelo-escuro);
+}
+
+.log-temp.espera {
+  border-left-color: #9966cc;
+}
+
+.log-temp.ganho {
+  border-left-color: var(--verde-escuro);
+}
+
+.log-temp.perda {
+  border-left-color: var(--vermelho-escuro);
+}
+
+.log-emoji {
+  margin-right: 10px;
+  font-size: 1.1rem;
+  flex-shrink: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 24px;
+  height: 24px;
+  text-align: center;
 }
 
 /* === COMPONENTE: BARRA DE STATUS === */
 #barra-status {
   display: flex;
   flex-direction: column;
-  width: calc(100% - var(--espacamento-padrao) * 2);
-  margin: 0.75rem auto;
-  padding: 0.75rem;
+  width: calc(100% - var(--espacamento-padrao));
+  margin: 0.5rem auto;
+  padding: 0.5rem;
   border-radius: var(--borda-arredondada);
   background-color: var(--fundo-escuro);
   box-shadow: var(--sombra-padrao);
 }
 
+/* === ETAPAS DE STATUS (CONTAINER PRINCIPAL) === */
 .status-etapas {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 0.75rem;
-  padding: 0 1rem;
+  padding: 0;
   position: relative;
   height: 35px;
 }
 
-/* Linha conectora entre as bolinhas */
+/* Linha base cinza (barra não preenchida) */
 .status-etapas::before {
   content: "";
   position: absolute;
-  top: 9px;
-  left: 1.5rem;
-  right: 1.5rem;
+  top: 8px;
+  left: 16px; /* Centro da primeira bolinha */
+  right: 16px; /* Centro da última bolinha */
   height: 2px;
   background-color: var(--transparente-claro);
   z-index: 1;
 }
 
-/* Barra de progresso */
+/* Barra de progresso amarela (preenchimento) */
 .status-etapas::after {
   content: "";
   position: absolute;
-  top: 9px;
-  left: 1.5rem;
-  width: var(--progresso-barra, 0%);
+  top: 8px;
+  left: 16px; /* Centro da primeira bolinha */
   height: 2px;
-  background-color: var(--amarelo-claro);
+  background-color: var(--amarelo-escuro);
+  box-shadow: 0 0 5px var(--amarelo-claro);
   z-index: 2;
   transition: width 0.5s ease-in-out;
+  /* IMPORTANTE: O width será definido inline pelo JavaScript */
+  width: 0%;
 }
 
-/* Etapas individuais */
+/* Container de cada etapa */
 .status-etapas > div {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.3rem;
   font-size: 0.7rem;
   color: rgba(204, 204, 204, 0.8);
-  z-index: 3;
+  z-index: 3; /* Acima das barras de progresso */
   position: relative;
 }
 
-/* === COMPONENTE: BOLINHAS DE STATUS === */
+/* === BOLINHAS DE STATUS === */
 .bolinha {
   width: 16px;
   height: 16px;
@@ -631,6 +684,7 @@ body {
   border: 2px solid #444;
   transition: all 0.3s ease;
   z-index: 3;
+  position: relative;
 }
 
 .bolinha.grande {
@@ -660,85 +714,26 @@ body {
   100% {
     opacity: 1;
     transform: scale(1);
-    -webkit-transform: scale(1);
-    -moz-transform: scale(1);
-    -ms-transform: scale(1);
   }
   50% {
     opacity: 0.6;
     transform: scale(1.1);
-    -webkit-transform: scale(1.1);
-    -moz-transform: scale(1.1);
-    -ms-transform: scale(1.1);
-  }
-}
-@-webkit-keyframes piscar {
-  0%,
-  100% {
-    opacity: 1;
-    -webkit-transform: scale(1);
-  }
-  50% {
-    opacity: 0.6;
-    -webkit-transform: scale(1.1);
-  }
-}
-@-moz-keyframes piscar {
-  0%,
-  100% {
-    opacity: 1;
-    -moz-transform: scale(1);
-  }
-  50% {
-    opacity: 0.6;
-    -moz-transform: scale(1.1);
-  }
-}
-@-ms-keyframes piscar {
-  0%,
-  100% {
-    opacity: 1;
-    -ms-transform: scale(1);
-  }
-  50% {
-    opacity: 0.6;
-    -ms-transform: scale(1.1);
   }
 }
 
 @keyframes brilhoResultado {
   0% {
     text-shadow: none;
+    opacity: 0.7;
   }
   50% {
-    text-shadow: 0 0 6px var(--brilho-verde);
-    -webkit-text-shadow: 0 0 6px var(--brilho-verde);
-    -moz-text-shadow: 0 0 6px var(--brilho-verde);
+    text-shadow: 0 0 8px var(--verde-claro);
+    color: var(--verde-escuro);
+    opacity: 1;
   }
   100% {
     text-shadow: none;
-  }
-}
-@-webkit-keyframes brilhoResultado {
-  0% {
-    text-shadow: none;
-  }
-  50% {
-    -webkit-text-shadow: 0 0 6px var(--brilho-verde);
-  }
-  100% {
-    text-shadow: none;
-  }
-}
-@-moz-keyframes brilhoResultado {
-  0% {
-    text-shadow: none;
-  }
-  50% {
-    -moz-text-shadow: 0 0 6px var(--brilho-verde);
-  }
-  100% {
-    text-shadow: none;
+    opacity: 1;
   }
 }
 
@@ -753,38 +748,84 @@ body {
     background-position: 0% 0%;
   }
 }
-@-webkit-keyframes gradientShift {
-  0% {
-    background-position: 0% 0%;
+
+@keyframes fadeIn {
+  from {
+    opacity: 0.4;
   }
-  50% {
-    background-position: 100% 100%;
-  }
-  100% {
-    background-position: 0% 0%;
+  to {
+    opacity: 1;
   }
 }
-@-moz-keyframes gradientShift {
+
+@keyframes pulseValue {
   0% {
-    background-position: 0% 0%;
+    transform: scale(1);
   }
   50% {
-    background-position: 100% 100%;
+    transform: scale(1.1);
   }
   100% {
-    background-position: 0% 0%;
+    transform: scale(1);
   }
 }
-@-ms-keyframes gradientShift {
-  0% {
-    background-position: 0% 0%;
-  }
-  50% {
-    background-position: 100% 100%;
-  }
-  100% {
-    background-position: 0% 0%;
-  }
+
+/* === ESTILOS DE ANIMAÇÃO DE VALORES === */
+.valor-animando {
+  transition: color 0.3s ease-in-out;
+}
+
+.positivo {
+  color: var(--verde-claro) !important;
+  text-shadow: 0 0 3px rgba(0, 255, 102, 0.4);
+}
+
+.negativo {
+  color: var(--vermelho-claro) !important;
+  text-shadow: 0 0 3px rgba(255, 68, 79, 0.4);
+}
+
+.neutro {
+  color: var(--branco) !important;
+  font-family: "Courier New", monospace !important;
+  font-weight: normal !important;
+}
+
+.destaque-resultado {
+  animation: brilhoResultado 1.5s, fadeIn 0.5s;
+  font-weight: bold;
+}
+
+#saldo-valor.valor-animando,
+#lucro-valor.valor-animando {
+  animation: pulseValue 0.5s;
+}
+
+/* Efeitos de transição para tabela de resultados */
+#historico-tabela-body tr:last-child {
+  animation: fadeIn 0.8s;
+}
+
+#historico-tabela-body .resultado {
+  transition: all 0.3s ease;
+}
+
+/* Cross-browser para animações */
+.bolinha.pisca,
+.destaque-resultado,
+.valor-animando,
+#saldo-valor.valor-animando,
+#lucro-valor.valor-animando,
+#historico-tabela-body tr:last-child {
+  -webkit-animation-name: piscar, brilhoResultado, fadeIn, pulseValue;
+  -moz-animation-name: piscar, brilhoResultado, fadeIn, pulseValue;
+  -ms-animation-name: piscar, brilhoResultado, fadeIn, pulseValue;
+  animation-name: piscar, brilhoResultado, fadeIn, pulseValue;
+
+  -webkit-animation-duration: 1.5s, 1.5s, 0.8s, 0.5s;
+  -moz-animation-duration: 1.5s, 1.5s, 0.8s, 0.5s;
+  -ms-animation-duration: 1.5s, 1.5s, 0.8s, 0.5s;
+  animation-duration: 1.5s, 1.5s, 0.8s, 0.5s;
 }
 
 /* Cross-browser para propriedades comuns */
@@ -845,10 +886,8 @@ body {
 }
 
 .destaque-resultado {
-  animation: brilhoResultado 0.6s ease-in-out;
-  -webkit-animation: brilhoResultado 0.6s ease-in-out;
-  -moz-animation: brilhoResultado 0.6s ease-in-out;
-  -ms-animation: brilhoResultado 0.6s ease-in-out;
+  animation: brilhoResultado 1.5s;
+  font-weight: bold;
 }
 
 .bg-mapa-mundi-svg::after {
@@ -972,25 +1011,6 @@ body {
   background-color: var(--transparente-claro);
 }
 
-/* Cores para resultados */
-.resultado {
-  font-weight: bold;
-  white-space: normal;
-}
-
-.positivo {
-  color: var(--verde-escuro);
-}
-
-.negativo {
-  color: var(--vermelho-claro);
-}
-
-.destaque-resultado {
-  animation: brilhoResultado 0.6s ease-in-out;
-  text-shadow: 0 0 6px var(--brilho-verde);
-}
-
 /* === COMPONENTE: RODAPÉ === */
 .rodape-painel {
   display: flex;
@@ -1092,6 +1112,29 @@ body {
 
 /* === MEDIA QUERIES === */
 @media (max-width: 768px) {
+  /* Barra de status */
+  .status-etapas {
+    padding: 0;
+    height: 30px;
+    margin-bottom: 0.5rem;
+  }
+
+  .status-etapas > div {
+    font-size: 0.6rem;
+    gap: 0.2rem;
+  }
+
+  .status-etapas::before,
+  .status-etapas::after {
+    top: 6px;
+  }
+
+  #status-deriv {
+    width: 100%;
+    margin: 6px 0;
+    font-size: 0.75rem;
+  }
+
   :root {
     --espacamento-padrao: var(--espacamento-tablet);
   }
@@ -1178,12 +1221,6 @@ body {
     font-size: 16px !important;
   }
 
-  /* Barra de status */
-  #barra-status {
-    width: calc(100% - var(--espacamento-padrao));
-    margin: 0.75rem auto;
-  }
-
   /* Modo e meta */
   .modo-meta-wrapper {
     width: calc(80% - var(--espacamento-padrao)) !important;
@@ -1224,6 +1261,38 @@ body {
 }
 
 @media (max-width: 480px) {
+  /* Barra de status */
+  .status-etapas {
+    padding: 0;
+    height: 30px;
+    margin-bottom: 0.5rem;
+  }
+
+  .status-etapas > div {
+    font-size: 0.6rem;
+    gap: 0.2rem;
+  }
+
+  .status-etapas::before {
+    top: 6px;
+    left: 15px;
+    right: 15px;
+    height: 1.5px;
+  }
+
+  .status-etapas::after {
+    top: 6px;
+    left: 15px;
+    height: 1.5px;
+    /* Largura definida pelo JavaScript */
+  }
+
+  #status-deriv {
+    width: 100%;
+    margin: 5px 0;
+    font-size: 0.7rem;
+  }
+
   :root {
     --espacamento-padrao: var(--espacamento-mobile);
   }
@@ -1295,32 +1364,6 @@ body {
     padding: 0 12px !important;
     margin: 8px auto 12px auto !important;
     font-size: 16px !important;
-  }
-
-  /* Barra de status */
-  #barra-status {
-    width: calc(100% - var(--espacamento-padrao));
-    padding: 0.5rem;
-    margin: 0.5rem auto;
-  }
-
-  .status-etapas {
-    padding: 0 0.5rem;
-    height: 30px;
-    margin-bottom: 0.5rem;
-  }
-
-  .status-etapas > div {
-    font-size: 0.6rem;
-    gap: 0.2rem;
-  }
-
-  .status-etapas::before,
-  .status-etapas::after {
-    top: 6px;
-    left: 1rem;
-    right: 1rem;
-    height: 1.5px;
   }
 
   /* Modo e meta */
@@ -1603,6 +1646,43 @@ body {
     font-size: 0.6rem;
     padding: 1px 3px;
   }
+
+  /* Barra de status - VERSÃO ÚNICA OTIMIZADA */
+  .status-etapas {
+    height: 22px;
+    padding: 0 3px;
+    margin-bottom: 3px;
+  }
+
+  .status-etapas > div {
+    font-size: 0.55rem;
+    gap: 1px;
+  }
+
+  .bolinha {
+    width: 9px;
+    height: 9px;
+    border-width: 1px;
+  }
+
+  .bolinha.pequena {
+    width: 7px;
+    height: 7px;
+    border-width: 1px;
+  }
+
+  .status-etapas::before {
+    top: 4px;
+    left: 9px;
+    right: 9px;
+    height: 1px;
+  }
+
+  .status-etapas::after {
+    top: 4px;
+    left: 9px;
+    height: 1px;
+  }
 }
 
 /* Estilo para a parte secundária do código de licença */
@@ -1615,28 +1695,31 @@ body {
 
 /* Status de conexão da Deriv */
 #status-deriv {
-  display: block;
-  width: calc(100% - var(--espacamento-padrao) * 2);
-  margin: 8px auto;
-  padding: 6px 0;
+  text-align: left;
+  margin: 10px 0;
   font-size: 0.8rem;
   color: var(--cinza-claro);
-  text-align: left;
+  background-color: var(--fundo-escuro);
+  padding: 8px 15px;
+  border-radius: var(--borda-arredondada-pequena);
+  display: block;
+  width: 100%;
+  box-shadow: var(--sombra-padrao);
 }
 
 /* Ajustes para dispositivos móveis */
 @media (max-width: 768px) {
   #status-deriv {
-    width: calc(100% - var(--espacamento-tablet));
-    margin: 6px auto;
+    width: 100%;
+    margin: 6px 0;
     font-size: 0.75rem;
   }
 }
 
 @media (max-width: 480px) {
   #status-deriv {
-    width: calc(100% - var(--espacamento-mobile));
-    margin: 5px auto;
+    width: 100%;
+    margin: 5px 0;
     font-size: 0.7rem;
   }
 }

@@ -36,7 +36,7 @@ document.addEventListener("DOMContentLoaded", function () {
       // Atualiza texto da meta no cabeçalho imediatamente
       const metaHeaderEl = document.getElementById("meta-valor");
       if (metaHeaderEl) metaHeaderEl.textContent = "/" + config.meta;
-      atualizarLogTemp(
+      atualizarLog(
         `Modo selecionado: ${modo.toUpperCase()} - Assertividade média de ${
           config.assertividade
         }%`
@@ -102,50 +102,207 @@ document.addEventListener("DOMContentLoaded", function () {
       if (roboAtivo) {
         trocarAba("tabela");
       }
+
+      // Demonstrar o progresso quando for ativado
+      demonstrarProgresso();
     } catch (erro) {
       console.error("Erro ao alternar robô:", erro);
     }
   });
 
-  function atualizarLogTemp(mensagem) {
-    document.getElementById("log-temporario").textContent = mensagem;
+  function atualizarLog(mensagem, tipo = "info") {
+    const logElement = document.getElementById("log-temporario");
+    const emojis = {
+      info: "🔍",
+      aviso: "⚠️",
+      erro: "❌",
+      sucesso: "✅",
+      analise: "🔎",
+      contrato: "📝",
+      ganho: "💰",
+      perda: "📉",
+      espera: "⏳",
+      conexao: "🔌",
+      servidor: "🖥️",
+      config: "⚙️",
+    };
+
+    // Define o emoji padrão se o tipo não estiver no objeto
+    const emoji = emojis[tipo] || emojis["info"];
+
+    // Limpa classes anteriores
+    logElement.className = "log-temp";
+
+    // Adiciona classe correspondente ao tipo
+    logElement.classList.add(tipo);
+
+    // Atualiza o conteúdo com emoji e mensagem
+    logElement.innerHTML = `
+      <span class="log-emoji">${emoji}</span>
+      <span class="log-texto">${mensagem}</span>
+    `;
   }
 
-  function atualizarStatusEtapas(etapa) {
-    // Remove pisca de todas as bolinhas
-    document
-      .querySelectorAll(".bolinha")
-      .forEach((b) => b.classList.remove("pisca"));
-
-    // Define etapas e índice
-    const etapas = ["analisando", "abrindo", "finalizado", "completo"];
-    const idx = etapas.indexOf(etapa);
-
-    // Atualiza barra de preenchimento
-    const preenchimento = document.getElementById("preenchimento-barra");
-    if (preenchimento) {
-      // 0 etapas = 0%, 1 = 33%, 2 = 66%, 3 = 100%
-      const percentuais = [0, 33, 66, 100];
-      preenchimento.style.width = percentuais[idx] + "%";
+  // Função centralizada para manipular bolinhas e barras de progresso
+  function atualizarProgressoBolinhas(
+    etapa,
+    mensagemLog = null,
+    tipoLog = null
+  ) {
+    // Verifica se o robô está ativo antes de atualizar as bolinhas
+    if (!roboAtivo && etapa !== "parado") {
+      // Se o robô não estiver ativo, ignoramos atualizações exceto para o estado "parado"
+      return;
     }
 
-    // Cores das bolinhas
-    etapas.forEach((nome, i) => {
-      const bolinha = document.getElementById("bolinha-" + nome);
-      if (bolinha) {
-        if (i < idx) {
-          bolinha.style.background = "#ffd700";
-          bolinha.style.borderColor = "#fff";
-        } else if (i === idx) {
-          bolinha.style.background = "#fff";
-          bolinha.style.borderColor = "#ffd700";
-          bolinha.classList.add("pisca");
-        } else {
-          bolinha.style.background = "#fff";
-          bolinha.style.borderColor = "#ffd700";
-        }
-      }
+    // Limpa estado atual
+    document.querySelectorAll(".bolinha").forEach((b) => {
+      b.classList.remove("ativa");
+      b.classList.remove("pisca");
     });
+
+    const statusEtapas = document.querySelector(".status-etapas");
+    let progresso = 0;
+
+    // Configurações de acordo com a etapa
+    switch (etapa) {
+      case "analisando":
+        progresso = 0;
+        ativarBolinha("bolinha-analisando", true); // Com efeito pisca
+        if (!mensagemLog)
+          mensagemLog = "Analisando mercado em busca do melhor momento...";
+        if (!tipoLog) tipoLog = "analise";
+        break;
+
+      case "medio":
+        progresso = 33;
+        ativarBolinha("bolinha-analisando");
+        if (!mensagemLog)
+          mensagemLog = "Sinal identificado, preparando entrada...";
+        if (!tipoLog) tipoLog = "info";
+        break;
+
+      case "abrindo":
+        progresso = 50;
+        ativarBolinha("bolinha-analisando");
+        ativarBolinha("bolinha-abrindo", true); // Com efeito pisca
+        if (!mensagemLog) mensagemLog = "Abrindo contrato agora!";
+        if (!tipoLog) tipoLog = "contrato";
+        break;
+
+      case "aguardando":
+        progresso = 75;
+        ativarBolinha("bolinha-analisando");
+        ativarBolinha("bolinha-abrindo");
+        if (!mensagemLog)
+          mensagemLog = "Contrato aberto, aguardando resultado...";
+        if (!tipoLog) tipoLog = "espera";
+        break;
+
+      case "finalizado":
+      case "finalizado-win":
+      case "finalizado-loss":
+        progresso = 100;
+        ativarBolinha("bolinha-analisando");
+        ativarBolinha("bolinha-abrindo");
+        ativarBolinha(
+          "bolinha-finalizado",
+          etapa === "finalizado-win" || etapa === "finalizado"
+        ); // Pisca no caso de win ou finalizado genérico
+
+        if (etapa === "finalizado-win") {
+          if (!mensagemLog) mensagemLog = "Operação finalizada com GANHO! 💸";
+          if (!tipoLog) tipoLog = "sucesso";
+        } else if (etapa === "finalizado-loss") {
+          if (!mensagemLog)
+            mensagemLog =
+              "Operação finalizada com perda. Preparando recuperação...";
+          if (!tipoLog) tipoLog = "perda";
+        }
+        break;
+
+      case "parado":
+      default:
+        // Quando parado ou estado desconhecido, resetar as bolinhas e a barra
+        resetarProgressoBolinhas();
+        if (!mensagemLog) mensagemLog = "Robô pronto para iniciar operações.";
+        if (!tipoLog) tipoLog = "config";
+        return; // Saímos aqui para não atualizar a barra
+    }
+
+    // Atualiza a barra de progresso - MÉTODO DIRETO
+    if (statusEtapas) {
+      const barraAfter = statusEtapas.querySelector
+        ? statusEtapas.querySelector("::after")
+        : null;
+
+      // Usando o style.setProperty não funciona bem com ::after, então aplicamos diretamente
+      let widthValue;
+
+      // Calcula o valor correto com base no tamanho da tela
+      if (window.innerWidth <= 320) {
+        // Telas muito pequenas
+        widthValue =
+          progresso === 0
+            ? "0"
+            : progresso === 100
+            ? "calc(100% - 18px)"
+            : `calc(${progresso}% * (100% - 18px) / 100)`;
+      } else if (window.innerWidth <= 480) {
+        // Telas pequenas (mobile)
+        widthValue =
+          progresso === 0
+            ? "0"
+            : progresso === 100
+            ? "calc(100% - 30px)"
+            : `calc(${progresso}% * (100% - 30px) / 100)`;
+      } else {
+        // Telas médias e grandes
+        widthValue =
+          progresso === 0
+            ? "0"
+            : progresso === 100
+            ? "calc(100% - 32px)"
+            : `calc(${progresso}% * (100% - 32px) / 100)`;
+      }
+
+      // Aplicar diretamente usando CSS inline
+      const styleElement = document.getElementById("barra-progresso-style");
+      if (!styleElement) {
+        // Criar elemento de estilo se não existir
+        const style = document.createElement("style");
+        style.id = "barra-progresso-style";
+        document.head.appendChild(style);
+      }
+
+      // Atualizar o CSS diretamente
+      const styleSheet = document.getElementById("barra-progresso-style").sheet;
+      // Limpar regras anteriores
+      while (styleSheet.cssRules.length > 0) {
+        styleSheet.deleteRule(0);
+      }
+      // Adicionar nova regra
+      styleSheet.insertRule(
+        `.status-etapas::after { width: ${widthValue}; }`,
+        0
+      );
+    }
+
+    // Atualiza o log se houver mensagem
+    if (mensagemLog && tipoLog) {
+      atualizarLog(mensagemLog, tipoLog);
+    }
+  }
+
+  // Função auxiliar para ativar uma bolinha (com ou sem efeito pisca)
+  function ativarBolinha(id, comPisca = false) {
+    const bolinha = document.getElementById(id);
+    if (bolinha) {
+      bolinha.classList.add("ativa");
+      if (comPisca) {
+        bolinha.classList.add("pisca");
+      }
+    }
   }
 
   window.atualizarTabelaResultadosSeRoboAtivo = function () {
@@ -166,9 +323,12 @@ document.addEventListener("DOMContentLoaded", function () {
       .then((res) => res.json())
       .then((data) => {
         if (data.status === "ok") {
-          document.getElementById("saldo-valor").textContent = parseFloat(
-            data.saldo
-          ).toFixed(2);
+          const saldoEl = document.getElementById("saldo-valor");
+          const saldoAtual = parseFloat(saldoEl.textContent || "0");
+          const novoSaldo = parseFloat(data.saldo);
+
+          // Anima a transição do saldo
+          animarValor(saldoEl, saldoAtual, novoSaldo, 1000);
         }
       })
       .catch((err) => {
@@ -267,25 +427,67 @@ document.addEventListener("DOMContentLoaded", function () {
 
   function atualizarStatusRobo() {
     fetch("/status_robo")
-      .then((res) => res.json())
+      .then((response) => response.json())
       .then((data) => {
         roboAtivo = data.ativo;
-        if (roboAtivo) {
-          atualizarLogTemp("⚙️ Robô está rodando...");
-          atualizarStatusEtapas("analisando");
-          botaoControle.textContent = "⛔ Parar Robô";
-          botaoControle.style.backgroundColor = "#ff3b3b"; // vermelho
-          botaoControle.style.color = "#fff";
-        } else {
-          atualizarLogTemp("🟡 Robô parado.");
-          atualizarStatusEtapas("finalizado");
-          botaoControle.textContent = "✅ Iniciar Robô";
-          botaoControle.style.backgroundColor = "#00d67b"; // verde
-          botaoControle.style.color = "#000";
+
+        // Atualiza o botão de controle
+        if (botaoControle) {
+          botaoControle.disabled = false;
+          if (roboAtivo) {
+            atualizarLog("⚙️ Robô está rodando...", "servidor");
+            // Removemos a atualização automática das bolinhas aqui, elas devem ser atualizadas apenas durante operações
+            botaoControle.textContent = "⛔ Parar Robô";
+            botaoControle.style.backgroundColor = "#ff3b3b"; // vermelho
+            botaoControle.style.color = "#fff";
+          } else {
+            atualizarLog("🟡 Robô parado.", "config");
+            // Quando o robô estiver parado, resetamos as bolinhas e barra
+            resetarProgressoBolinhas();
+            botaoControle.textContent = "✅ Iniciar Robô";
+            botaoControle.style.backgroundColor = "#00d67b"; // verde
+            botaoControle.style.color = "#fff";
+          }
         }
+
+        // Atualiza saldo e lucro com animação
+        if (saldoValor) {
+          const saldoAtual = parseFloat(saldoValor.textContent || "0");
+          animarValor(saldoValor, saldoAtual, data.saldo, 1000);
+        }
+
+        if (lucroValor) {
+          const lucroAtual = parseFloat(lucroValor.textContent || "0");
+          animarValor(lucroValor, lucroAtual, data.lucro, 1200);
+        }
+
+        // Atualiza total de operações
+        if (operacoesDiarias) operacoesDiarias.textContent = data.operacoes;
+
+        // Atualiza progresso da barra
+        const progresso = (data.lucro / metaDiaria) * 100;
+        const barraProgresso = document.getElementById("barra-progresso");
+        if (barraProgresso) {
+          if (progresso < 0) {
+            barraProgresso.style.width = "0%";
+            barraProgresso.style.backgroundColor = "var(--cor-vermelha)";
+          } else if (progresso >= 100) {
+            barraProgresso.style.width = "100%";
+            barraProgresso.style.backgroundColor = "var(--cor-verde)";
+          } else {
+            barraProgresso.style.width = progresso + "%";
+            barraProgresso.style.backgroundColor = "var(--amarelo-dourado)";
+          }
+        }
+
+        // Atualiza exibição de modo
+        atualizarExibicaoModo(data.modo || modoOperacao, roboAtivo);
+
+        // Atualiza histórico se necessário
+        atualizarHistorico();
       })
-      .catch(() => {
-        atualizarLogTemp("❌ Erro ao consultar status do robô.");
+      .catch((error) => {
+        console.error("Erro ao atualizar status:", error);
       });
   }
 
@@ -298,7 +500,8 @@ document.addEventListener("DOMContentLoaded", function () {
           const metaEl = document.getElementById("meta-valor");
           const metaInput = document.getElementById("meta");
 
-          const lucro = parseFloat(data.lucro).toFixed(2);
+          const lucroAtual = parseFloat(lucroEl.textContent || "0");
+          const novoLucro = parseFloat(data.lucro);
 
           // Só atualiza meta se o robô estiver ativo; caso contrário mantemos valor local
           if (roboAtivo) {
@@ -309,8 +512,8 @@ document.addEventListener("DOMContentLoaded", function () {
             }
           }
 
-          lucroEl.textContent = lucro;
-          lucroEl.className = lucro >= 0 ? "positivo" : "negativo";
+          // Animação do lucro
+          animarValor(lucroEl, lucroAtual, novoLucro, 1200);
         }
       });
   }
@@ -405,7 +608,7 @@ document.addEventListener("DOMContentLoaded", function () {
       .then((data) => {
         // Atualiza o log personalizado
         if (data.mensagem_log) {
-          atualizarLogTemp(data.mensagem_log);
+          atualizarLog(data.mensagem_log);
         }
 
         // Atualiza a barra de progresso e as bolinhas
@@ -418,90 +621,170 @@ document.addEventListener("DOMContentLoaded", function () {
 
   function atualizarStatusOperacao(statusOp) {
     if (!statusOp) return;
-
     const etapa = statusOp.etapa;
-    const progresso = statusOp.progresso;
-
-    // Atualiza a barra de progresso
-    const barraProgresso = document.getElementById("barra-progresso");
-    if (barraProgresso) {
-      // Cria ou atualiza a barra de preenchimento
-      let preenchimento = document.getElementById("preenchimento-barra");
-      if (!preenchimento) {
-        preenchimento = document.createElement("div");
-        preenchimento.id = "preenchimento-barra";
-        preenchimento.style.height = "100%";
-        preenchimento.style.backgroundColor = "#00d67b";
-        preenchimento.style.borderRadius = "3px";
-        preenchimento.style.transition = "width 0.5s ease-in-out";
-        barraProgresso.appendChild(preenchimento);
-      }
-      preenchimento.style.width = progresso + "%";
-      barraProgresso.setAttribute("aria-valuenow", progresso);
-    }
-
-    // Atualiza as bolinhas indicativas
-    atualizarBolinhasStatus(etapa);
+    // Usa a função centralizada para atualizar bolinhas e barra de progresso
+    atualizarProgressoBolinhas(etapa);
   }
 
   function atualizarBolinhasStatus(etapa) {
-    // Remove todas as classes ativas
-    document.querySelectorAll(".bolinha").forEach((bolinha) => {
-      bolinha.classList.remove("ativa");
-      bolinha.classList.remove("pisca");
+    // Usa a função centralizada para atualizar bolinhas e barra de progresso
+    atualizarProgressoBolinhas(etapa);
+  }
+
+  // Função para resetar as bolinhas e barra de progresso para o estado inicial
+  function resetarProgressoBolinhas() {
+    // Limpa estado atual de todas as bolinhas
+    document.querySelectorAll(".bolinha").forEach((b) => {
+      b.classList.remove("ativa");
+      b.classList.remove("pisca");
     });
 
-    // Define progresso da barra conectora com base na etapa
+    // Reseta a barra de progresso para 0%
     const statusEtapas = document.querySelector(".status-etapas");
-    let progresso = 0;
-
-    // Define qual etapa está ativa baseada no status
-    switch (etapa) {
-      case "parado":
-        // Nenhuma bolinha ativa
-        progresso = 0;
-        break;
-      case "analisando":
-        progresso = 0;
-        ativarBolinha("bolinha-analisando");
-        document.getElementById("bolinha-analisando").classList.add("pisca");
-        break;
-      case "abrindo":
-        progresso = 50;
-        ativarBolinha("bolinha-analisando");
-        ativarBolinha("bolinha-abrindo");
-        document.getElementById("bolinha-abrindo").classList.add("pisca");
-        break;
-      case "finalizado":
-        progresso = 100;
-        ativarBolinha("bolinha-analisando");
-        ativarBolinha("bolinha-abrindo");
-        ativarBolinha("bolinha-finalizado");
-        document.getElementById("bolinha-finalizado").classList.add("pisca");
-        break;
-    }
-
-    // Atualiza a largura da barra de progresso
     if (statusEtapas) {
-      statusEtapas.style.setProperty("--progresso-barra", `${progresso}%`);
+      // Aplica diretamente usando CSS inline
+      const styleElement = document.getElementById("barra-progresso-style");
+      if (!styleElement) {
+        // Criar elemento de estilo se não existir
+        const style = document.createElement("style");
+        style.id = "barra-progresso-style";
+        document.head.appendChild(style);
+      }
+
+      // Atualizar o CSS diretamente para 0%
+      const styleSheet = document.getElementById("barra-progresso-style").sheet;
+      // Limpar regras anteriores
+      while (styleSheet.cssRules.length > 0) {
+        styleSheet.deleteRule(0);
+      }
+      // Adicionar nova regra
+      styleSheet.insertRule(`.status-etapas::after { width: 0; }`, 0);
     }
   }
 
-  function ativarBolinha(id) {
-    const bolinha = document.getElementById(id);
-    if (bolinha) {
-      bolinha.classList.add("ativa");
+  // Função para animar transição de valores numéricos
+  function animarValor(
+    elemento,
+    valorInicial,
+    valorFinal,
+    duracaoMS = 1000,
+    prefixo = "",
+    sufixo = "",
+    formatoDecimais = 2
+  ) {
+    if (!elemento) return;
+
+    // Converte para números para garantir cálculo correto
+    valorInicial = parseFloat(valorInicial);
+    valorFinal = parseFloat(valorFinal);
+
+    // Se os valores forem iguais, não precisamos animar
+    if (valorInicial === valorFinal) {
+      elemento.textContent =
+        prefixo + valorFinal.toFixed(formatoDecimais) + sufixo;
+      return;
     }
+
+    // Se o elemento já tiver uma animação em andamento, cancela
+    if (elemento._animacaoTimer) {
+      clearInterval(elemento._animacaoTimer);
+    }
+
+    const inicio = Date.now();
+    const incremento = valorFinal - valorInicial;
+    const passos = duracaoMS / 16; // ~60fps
+    const incrementoPorPasso = incremento / passos;
+
+    // Aplica classe de animação
+    elemento.classList.add("valor-animando");
+
+    // Remove classes de cores anteriores
+    elemento.classList.remove("positivo", "negativo", "neutro");
+
+    // Adiciona classe baseada no valor
+    if (valorFinal > 0) {
+      elemento.classList.add("positivo");
+    } else if (valorFinal < 0) {
+      elemento.classList.add("negativo");
+    } else {
+      elemento.classList.add("neutro");
+    }
+
+    // Função de animação
+    elemento._animacaoTimer = setInterval(() => {
+      const decorrido = Date.now() - inicio;
+      const fracao = Math.min(decorrido / duracaoMS, 1);
+
+      // Efeito de ease-out para suavizar o final
+      const progresso = 1 - Math.pow(1 - fracao, 3);
+      const valorAtual = valorInicial + incremento * progresso;
+
+      // Atualiza o texto
+      elemento.textContent =
+        prefixo + valorAtual.toFixed(formatoDecimais) + sufixo;
+
+      // Se chegou ao fim, limpa o timer
+      if (fracao === 1) {
+        clearInterval(elemento._animacaoTimer);
+        elemento._animacaoTimer = null;
+
+        // Garante que o valor final seja exatamente o que queremos
+        elemento.textContent =
+          prefixo + valorFinal.toFixed(formatoDecimais) + sufixo;
+
+        // Remove a classe de animação
+        setTimeout(() => {
+          elemento.classList.remove("valor-animando");
+        }, 300);
+      }
+    }, 16);
   }
 
-  // Inicializações
+  // Função para animar resultados com fade
+  function animarResultado(elemento, valor, formatoDecimais = 2) {
+    if (!elemento) return;
+
+    // Remove animações anteriores
+    elemento.classList.remove("destaque-resultado");
+
+    // Converte para número
+    const valorNum = parseFloat(valor);
+
+    // Limpa classes de cor anteriores
+    elemento.classList.remove("positivo", "negativo", "neutro");
+
+    // Formata valor com $ e aplica classes
+    if (valorNum > 0) {
+      elemento.classList.add("positivo");
+      elemento.innerHTML = `$${valorNum.toFixed(formatoDecimais)}`;
+    } else if (valorNum < 0) {
+      elemento.classList.add("negativo");
+      elemento.innerHTML = `$${valorNum.toFixed(formatoDecimais)}`;
+    } else {
+      elemento.classList.add("neutro");
+      elemento.innerHTML = `$${valorNum.toFixed(formatoDecimais)}`;
+      // Aplica estilo courier new para zero
+      elemento.style.fontFamily = "'Courier New', monospace";
+      elemento.style.fontWeight = "normal";
+    }
+
+    // Aplica animação
+    requestAnimationFrame(() => {
+      elemento.classList.add("destaque-resultado");
+    });
+  }
+
+  // Inicializações - Modificado para garantir que as bolinhas estejam desativadas no início
   modoSelect.dispatchEvent(new Event("change"));
   atualizarSaldoEmTempoReal();
   verificarConexaoDeriv();
   atualizarStatusRobo();
   atualizarLucroEMeta();
   atualizarOperacoesDiarias();
-  atualizarStatusDetalhado(); // Inicializa status detalhado
+  // Resetamos explicitamente as bolinhas no início
+  resetarProgressoBolinhas();
+  // Verificamos o status detalhado depois, mas só atualizará bolinhas se o robô estiver ativo
+  atualizarStatusDetalhado();
 
   // Atualizações periódicas
   setInterval(atualizarSaldoEmTempoReal, 5000);
@@ -752,51 +1035,6 @@ document.addEventListener("DOMContentLoaded", function () {
       });
   }
 
-  // Atualiza informações em tempo real
-  function atualizarStatusRobo() {
-    fetch("/status_robo")
-      .then((response) => response.json())
-      .then((data) => {
-        // Atualiza saldo e lucro
-        if (saldoValor) saldoValor.textContent = data.saldo.toFixed(2);
-        if (lucroValor) {
-          lucroValor.textContent = data.lucro.toFixed(2);
-          if (data.lucro > 0) {
-            lucroValor.classList.add("positivo");
-            lucroValor.classList.remove("negativo");
-          } else if (data.lucro < 0) {
-            lucroValor.classList.add("negativo");
-            lucroValor.classList.remove("positivo");
-          }
-        }
-
-        // Atualiza total de operações
-        if (operacoesDiarias) operacoesDiarias.textContent = data.operacoes;
-
-        // Atualiza progresso da barra
-        const progresso = (data.lucro / metaDiaria) * 100;
-        const barraProgresso = document.getElementById("barra-progresso");
-        if (barraProgresso) {
-          if (progresso < 0) {
-            barraProgresso.style.width = "0%";
-            barraProgresso.style.backgroundColor = "var(--cor-vermelha)";
-          } else if (progresso >= 100) {
-            barraProgresso.style.width = "100%";
-            barraProgresso.style.backgroundColor = "var(--cor-verde)";
-          } else {
-            barraProgresso.style.width = progresso + "%";
-            barraProgresso.style.backgroundColor = "var(--amarelo-dourado)";
-          }
-        }
-
-        // Atualiza histórico se necessário
-        atualizarHistorico();
-      })
-      .catch((error) => {
-        console.error("Erro ao atualizar status:", error);
-      });
-  }
-
   // Verifica status da conexão com Deriv
   function verificarStatusDeriv() {
     fetch("/status_deriv")
@@ -886,17 +1124,13 @@ document.addEventListener("DOMContentLoaded", function () {
                 celulaValor.textContent = "$" + op.valor.toFixed(2);
                 linha.appendChild(celulaValor);
 
-                // Resultado
+                // Resultado - Agora com animação
                 const celulaResultado = document.createElement("td");
-                celulaResultado.textContent =
-                  "$" + op.resultado_real.toFixed(2);
                 celulaResultado.classList.add("resultado");
-                if (op.resultado_real > 0) {
-                  celulaResultado.classList.add("positivo");
-                  celulaResultado.classList.add("destaque-resultado");
-                } else if (op.resultado_real < 0) {
-                  celulaResultado.classList.add("negativo");
-                }
+
+                // Aplicar animação do resultado
+                animarResultado(celulaResultado, op.resultado_real);
+
                 linha.appendChild(celulaResultado);
 
                 // Adiciona linha na tabela
@@ -932,4 +1166,104 @@ document.addEventListener("DOMContentLoaded", function () {
 
   // Inicializa a página
   inicializar();
+
+  // Simular sequência de operações para demonstração (remover em produção)
+  function demonstrarProgresso() {
+    // Não executamos a demonstração se o robô não estiver ativo
+    if (!roboAtivo) {
+      return;
+    }
+
+    // Etapas com pontos de progresso e tipos de feedback
+    const etapasDemo = [
+      {
+        nome: "analisando",
+        progresso: 0,
+        tipo: "analise",
+        mensagem: "Analisando mercado em busca de oportunidades ideais...",
+      },
+      {
+        nome: "medio",
+        progresso: 33,
+        tipo: "info",
+        mensagem: "Sinal identificado! Padrão de alta detectado em EUR/USD",
+      },
+      {
+        nome: "abrindo",
+        progresso: 50,
+        tipo: "contrato",
+        mensagem: "Abrindo contrato CALL de $5.00 com expiração de 1 minuto",
+      },
+      {
+        nome: "aguardando",
+        progresso: 75,
+        tipo: "espera",
+        mensagem: "Contrato aberto! Aguardando resultado (30s restantes)",
+      },
+      {
+        nome: "finalizado-win",
+        progresso: 100,
+        tipo: "ganho",
+        mensagem: "✅ Operação finalizada com GANHO! +$4.30 (86% de lucro)",
+      },
+      {
+        nome: "parado",
+        progresso: 0,
+        tipo: "config",
+        mensagem: "Robô pronto para nova análise de mercado",
+      },
+    ];
+
+    let etapaAtual = 0;
+
+    // Limpa qualquer intervalo anterior
+    if (window.demoInterval) clearInterval(window.demoInterval);
+
+    // Atualiza o contador de operações
+    if (document.getElementById("operacoes-diarias")) {
+      const operacoes = parseInt(
+        document.getElementById("operacoes-diarias").textContent || "0"
+      );
+      document.getElementById("operacoes-diarias").textContent = operacoes + 1;
+    }
+
+    // Inicia o ciclo de demonstração
+    window.demoInterval = setInterval(() => {
+      // Verifica novamente se o robô está ativo
+      if (!roboAtivo) {
+        clearInterval(window.demoInterval);
+        resetarProgressoBolinhas();
+        return;
+      }
+
+      const etapa = etapasDemo[etapaAtual];
+
+      // Usa a função centralizada para atualizar bolinhas e barra de progresso
+      atualizarProgressoBolinhas(etapa.nome, etapa.mensagem, etapa.tipo);
+
+      // Se for etapa de ganho, atualiza o lucro no cabeçalho
+      if (etapa.nome === "finalizado-win") {
+        const lucroEl = document.getElementById("lucro-valor");
+        if (lucroEl) {
+          const lucroAtual = parseFloat(lucroEl.textContent || "0");
+          lucroEl.textContent = (lucroAtual + 4.3).toFixed(2);
+          lucroEl.classList.add("destaque-resultado");
+
+          // Remove a classe após a animação
+          setTimeout(() => {
+            lucroEl.classList.remove("destaque-resultado");
+          }, 2000);
+        }
+      }
+
+      // Avança para a próxima etapa
+      etapaAtual = (etapaAtual + 1) % etapasDemo.length;
+
+      // Se chegarmos à etapa final (parado), fazemos uma pausa maior
+      if (etapaAtual === 0) {
+        clearInterval(window.demoInterval);
+        setTimeout(() => demonstrarProgresso(), 3000);
+      }
+    }, 2000);
+  }
 });

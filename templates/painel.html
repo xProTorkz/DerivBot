@@ -197,7 +197,8 @@
 
       <!-- Logs -->
       <div class="log-temp" id="log-temporario" role="log" aria-live="polite">
-        Aguardando logs...
+        <span class="log-emoji">⏳</span>
+        <span class="log-texto">Aguardando início das operações...</span>
       </div>
 
       <!-- Status de Operação -->
@@ -350,64 +351,6 @@
       }
       setInterval(atualizarHora, 1000);
       atualizarHora();
-
-      // Função para atualizar a barra de progresso entre as bolinhas
-      function atualizarProgressoBarra(etapa) {
-        const statusEtapas = document.querySelector(".status-etapas");
-        let progresso = 0;
-
-        if (etapa === "analisando") {
-          progresso = 0;
-          ativarBolinha("bolinha-analisando");
-          desativarBolinha("bolinha-abrindo");
-          desativarBolinha("bolinha-finalizado");
-        } else if (etapa === "abrindo") {
-          progresso = 50;
-          ativarBolinha("bolinha-analisando");
-          ativarBolinha("bolinha-abrindo");
-          desativarBolinha("bolinha-finalizado");
-        } else if (etapa === "finalizado") {
-          progresso = 100;
-          ativarBolinha("bolinha-analisando");
-          ativarBolinha("bolinha-abrindo");
-          ativarBolinha("bolinha-finalizado");
-        } else {
-          // Etapa "parado" ou indefinida
-          desativarBolinha("bolinha-analisando");
-          desativarBolinha("bolinha-abrindo");
-          desativarBolinha("bolinha-finalizado");
-        }
-
-        // Atualiza a largura da barra de progresso
-        statusEtapas.style.setProperty("--progresso-barra", `${progresso}%`);
-      }
-
-      function ativarBolinha(id) {
-        document.getElementById(id).classList.add("ativa");
-      }
-
-      function desativarBolinha(id) {
-        document.getElementById(id).classList.remove("ativa");
-      }
-
-      // Controle do botão
-      document.addEventListener("DOMContentLoaded", function () {
-        const botaoControle = document.getElementById("bot-control-btn");
-        let botaoAtivo = false;
-
-        // Alternância do botão
-        botaoControle.addEventListener("click", function () {
-          botaoAtivo = !botaoAtivo;
-
-          if (botaoAtivo) {
-            this.textContent = "Parar Robô";
-            this.classList.add("ativo");
-          } else {
-            this.textContent = "Iniciar Robô";
-            this.classList.remove("ativo");
-          }
-        });
-      });
 
       // Forçar recarregamento do CSS para evitar problemas de cache
       function forcarRecarregamentoCSS() {
