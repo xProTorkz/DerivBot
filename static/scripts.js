@@ -17,12 +17,21 @@ document.addEventListener("DOMContentLoaded", function () {
     const config = modosConfig[modo];
     if (config) {
       metaInput.value = config.meta;
+      // Atualiza texto da meta no cabeçalho imediatamente
+      const metaHeaderEl = document.getElementById("meta-valor");
+      if (metaHeaderEl) metaHeaderEl.textContent = "/" + config.meta;
       atualizarLogTemp(
         `Modo selecionado: ${modo.toUpperCase()} - Assertividade média de ${
           config.assertividade
         }%`
       );
     }
+  });
+
+  // Se o usuário editar manualmente a meta, refletir no cabeçalho
+  metaInput.addEventListener("input", () => {
+    const metaHeaderEl = document.getElementById("meta-valor");
+    if (metaHeaderEl) metaHeaderEl.textContent = "/" + metaInput.value;
   });
 
   botaoControle.addEventListener("click", async () => {
@@ -160,7 +169,8 @@ document.addEventListener("DOMContentLoaded", function () {
             statusDeriv.textContent = "🟢 Conectado ao Deriv";
             statusDeriv.style.color = "#00d67b";
           } else {
-            statusDeriv.textContent = "🔴 Erro na conexão com Deriv";
+            const msg = data.mensagem ? ` (${data.mensagem})` : "";
+            statusDeriv.textContent = `🔴 Erro na conexão com Deriv${msg}`;
             statusDeriv.style.color = "#ff444f";
           }
         }
@@ -272,16 +282,17 @@ document.addEventListener("DOMContentLoaded", function () {
           const metaInput = document.getElementById("meta");
 
           const lucro = parseFloat(data.lucro).toFixed(2);
-          const meta = parseFloat(data.meta).toFixed(2);
 
-          lucroEl.textContent = lucro;
-          metaEl.textContent = "/" + meta;
-
-          // Atualiza o input de meta para refletir o valor real do backend
-          if (metaInput && !roboAtivo) {
-            metaInput.value = meta;
+          // Só atualiza meta se o robô estiver ativo; caso contrário mantemos valor local
+          if (roboAtivo) {
+            const meta = parseFloat(data.meta).toFixed(2);
+            metaEl.textContent = "/" + meta;
+            if (metaInput && !roboAtivo) {
+              metaInput.value = meta;
+            }
           }
 
+          lucroEl.textContent = lucro;
           lucroEl.className = lucro >= 0 ? "positivo" : "negativo";
         }
       });
@@ -366,17 +377,20 @@ document.addEventListener("DOMContentLoaded", function () {
       });
   }, 5000);
 
-  document.getElementById("btn-conectar-demo").onclick = function () {
-    fetch("/conectar_demo", { method: "POST" })
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.status === "ok") {
-          window.location.reload();
-        } else {
-          alert(data.mensagem || "Erro ao conectar à conta demo.");
-        }
-      });
-  };
+  const btnConectarDemo = document.getElementById("btn-conectar-demo");
+  if (btnConectarDemo) {
+    btnConectarDemo.addEventListener("click", () => {
+      fetch("/conectar_demo", { method: "POST" })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.status === "ok") {
+            window.location.reload();
+          } else {
+            alert(data.mensagem || "Erro ao conectar à conta demo.");
+          }
+        });
+    });
+  }
 
   function trocarContaDemo() {
     fetch("/conectar_demo", { method: "POST" })
@@ -392,5 +406,31 @@ document.addEventListener("DOMContentLoaded", function () {
     fetch("/trocar_conta", { method: "POST" }).then(
       () => (window.location.href = "/login")
     );
+  }
+
+  // ---------- Dropdown Conta ---------
+  const dropdownSeta = document.querySelector(".dropdown-seta");
+  const dropdownEl = document.getElementById("dropdown-conta");
+
+  if (dropdownSeta && dropdownEl) {
+    dropdownSeta.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const visivel = dropdownEl.style.display === "flex";
+      dropdownEl.style.display = visivel ? "none" : "flex";
+      if (!visivel) {
+        // Fechar ao clicar fora
+        setTimeout(() => {
+          document.addEventListener(
+            "click",
+            function fechar(e2) {
+              if (!dropdownEl.contains(e2.target)) {
+                dropdownEl.style.display = "none";
+              }
+            },
+            { once: true }
+          );
+        }, 10);
+      }
+    });
   }
 });

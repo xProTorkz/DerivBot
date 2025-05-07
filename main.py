@@ -28,9 +28,14 @@ def painel():
     if "email" not in session:
         return redirect(url_for("login"))
 
-    motor = Motor()
-    token = session.get("token")  # ou pegue do JSON/licença
-    motor.conectar(token)
+    # Recupera o token salvo na sessão
+    token = session.get("token")
+
+    # Conecta o motor global da aplicação se ainda não estiver conectado ou se o token mudou
+    if token and (not trading_app.motor.conectado or trading_app.motor.token != token):
+        # Garante que qualquer conexão anterior seja encerrada
+        trading_app.motor.desconectar()
+        trading_app.motor.conectar(token)
 
     return render_template(
         "painel.html",
@@ -105,11 +110,14 @@ def toggle_bot():
     meta = float(dados.get("meta", config.TAKE_PROFIT))
     meta_diaria = meta
 
+    # Obtém token da sessão para uso no robô
+    token = session.get("token")
+
     if trading_app.rodando:
         trading_app.parar()
         return jsonify({"status": "parado"})
     else:
-        if trading_app.iniciar():
+        if trading_app.iniciar(token):
             return jsonify({"status": "iniciado"})
         return jsonify({"status": "erro", "mensagem": "Falha ao iniciar robô"})
 
@@ -130,8 +138,8 @@ def status_robo():
 
 @app.route("/status_deriv")
 def status_deriv():
-    status = "ok" if trading_app.motor.conectado else "erro"
-    return jsonify({"status": status})
+    status_flag = "ok" if trading_app.motor.conectado else "erro"
+    return jsonify({"status": status_flag, "mensagem": trading_app.motor.ultimo_erro})
 
 
 @app.route("/saldo_atual")
@@ -380,6 +388,23 @@ def debug_licencas():
         licencas = carregar_licencas()
         return jsonify(licencas)
     return "Acesso negado", 403
+
+
+# ---------------- CONECTAR REAL -----------------
+
+
+@app.route("/conectar_real", methods=["POST"])
+def conectar_real():
+    """Troca para a conta real se o token real estiver salvo na licença."""
+    if "licenca_id" in session:
+        licencas = carregar_licencas()
+        lic = licencas[session["licenca_id"]]
+        token_real = lic.get("token_deriv_real")
+        if token_real:
+            session["token"] = token_real
+            session["tipo_conta"] = "real"
+            return jsonify({"status": "ok"})
+    return jsonify({"status": "erro", "mensagem": "Token real não cadastrado."})
 
 
 if __name__ == "__main__":

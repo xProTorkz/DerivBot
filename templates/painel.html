@@ -4,7 +4,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Painel de controle do robô inteligente para Deriv" />
+    <meta
+      name="description"
+      content="Painel de controle do robô inteligente para Deriv"
+    />
     <title>Painel Deriv - Robô Inteligente</title>
     <link rel="stylesheet" href="/static/style.css" />
     <style>
@@ -33,10 +36,13 @@
           {{ "Conta Virtual" if tipo_conta == "demo" else "Conta Real" }}
         </div>
         <div class="numero-conta">
-          {{ session.get("deriv_account", "VRTCxxxxxxx") }} - {{ moeda or "USD" }}
+          {{ session.get("deriv_account", "VRTCxxxxxxx") }} - {{ moeda or "USD"
+          }}
         </div>
       </div>
-      <button class="dropdown-seta" onclick="toggleDropdownConta()" aria-label="Abrir menu de contas">&#9660;</button>
+      <button class="dropdown-seta" aria-label="Abrir menu de contas">
+        &#9660;
+      </button>
       <div class="dropdown-conta" id="dropdown-conta" style="display: none">
         {% if tipo_conta == 'real' and session.get('token_deriv_demo') %}
         <button type="button" class="dropdown-btn" onclick="trocarContaDemo()">
@@ -52,8 +58,20 @@
 
     <main class="painel-central">
       <!-- Informações da Licença -->
-      <div class="licenca-info glass-dark" style="margin-top: 10px; font-size: 13px; line-height: 1.5; padding: 10px 15px; text-align: center;">
-        <p>🔐 <strong>ID da Conta:</strong> {{ email }} | <strong>Tipo:</strong> {{ tipo_conta.upper() }}</p>
+      <div
+        class="licenca-info glass-dark"
+        style="
+          margin-top: 10px;
+          font-size: 13px;
+          line-height: 1.5;
+          padding: 10px 15px;
+          text-align: center;
+        "
+      >
+        <p>
+          🔐 <strong>ID da Conta:</strong> {{ email }} |
+          <strong>Tipo:</strong> {{ tipo_conta.upper() }}
+        </p>
         <p>⏳ <strong>Validade:</strong> {{ validade }}</p>
       </div>
 
@@ -63,7 +81,9 @@
           <label for="saldo-valor">Saldo</label>
           <p id="valor-saldo" class="saldo-valor">
             <span class="rs">$</span>
-            <span id="saldo-valor">{{ saldo if saldo is not none else '--' }}</span>
+            <span id="saldo-valor"
+              >{{ saldo if saldo is not none else '--' }}</span
+            >
             <span id="moeda">{{ moeda if moeda else 'USD' }}</span>
           </p>
         </div>
@@ -90,57 +110,131 @@
           </div>
           <div id="meta-container">
             <label for="meta">Meta diária:</label>
-            <input class="input-meta" id="meta" type="number" min="0" step="0.01" aria-label="Meta diária em dólares" />
+            <input
+              class="input-meta"
+              id="meta"
+              type="number"
+              min="0"
+              step="0.01"
+              aria-label="Meta diária em dólares"
+            />
           </div>
         </div>
-        <button id="bot-control-btn" aria-label="Controle do robô">Iniciar Robô</button>
-        <div id="modo-selecionado" style="display: none; margin-top: 10px; font-weight: bold; text-align: center;">
+        <button id="bot-control-btn" aria-label="Controle do robô">
+          Iniciar Robô
+        </button>
+        <div
+          id="modo-selecionado"
+          style="
+            display: none;
+            margin-top: 10px;
+            font-weight: bold;
+            text-align: center;
+          "
+        >
           🔄 Modo selecionado: <span id="modo-texto"></span>
         </div>
-        <p id="status-deriv" style="font-size: 13px; margin-top: 10px; color: #ccc">
+        <p
+          id="status-deriv"
+          style="font-size: 13px; margin-top: 10px; color: #ccc"
+        >
           🔄 Conectando ao servidor Deriv...
         </p>
-        <button id="btn-conectar-demo" class="btn-ativar" style="background: #00d67b; color: #000">
-          Conectar à Conta Demo
-        </button>
       </div>
 
       <!-- Logs -->
-      <div class="log-temp" id="log-temporario" role="log" aria-live="polite">Aguardando logs...</div>
+      <div class="log-temp" id="log-temporario" role="log" aria-live="polite">
+        Aguardando logs...
+      </div>
 
       <!-- Status de Operação -->
       <div id="barra-status" role="status">
         <div class="status-etapas">
           <div>
-            <div class="bolinha" id="bolinha-analisando" aria-label="Status analisando"></div>
+            <div
+              class="bolinha"
+              id="bolinha-analisando"
+              aria-label="Status analisando"
+            ></div>
             <span>Analisando</span>
           </div>
           <div>
-            <div class="bolinha" id="bolinha-abrindo" aria-label="Status abrindo contrato"></div>
+            <div
+              class="bolinha"
+              id="bolinha-abrindo"
+              aria-label="Status abrindo contrato"
+            ></div>
             <span>Abrindo Contrato</span>
           </div>
           <div>
-            <div class="bolinha" id="bolinha-finalizado" aria-label="Status finalizado"></div>
+            <div
+              class="bolinha"
+              id="bolinha-finalizado"
+              aria-label="Status finalizado"
+            ></div>
             <span>Contrato Finalizado</span>
           </div>
         </div>
-        <div id="barra-progresso" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+        <div
+          id="barra-progresso"
+          role="progressbar"
+          aria-valuenow="0"
+          aria-valuemin="0"
+          aria-valuemax="100"
+        ></div>
       </div>
 
       <!-- Histórico -->
       <div class="historico glass-dark">
-        <div class="linha-titulo-historico" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding: 10px 80px;">
+        <div
+          class="linha-titulo-historico"
+          style="
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            padding: 10px 80px;
+          "
+        >
           <div style="display: flex; gap: 25px">
-            <button class="aba active" onclick="trocarAba('tabela')" title="Tabela" aria-label="Ver tabela">📄</button>
-            <button class="aba" onclick="trocarAba('resumo')" title="Resumo" aria-label="Ver resumo">📊</button>
+            <button
+              class="aba active"
+              onclick="trocarAba('tabela')"
+              title="Tabela"
+              aria-label="Ver tabela"
+            >
+              📄
+            </button>
+            <button
+              class="aba"
+              onclick="trocarAba('resumo')"
+              title="Resumo"
+              aria-label="Ver resumo"
+            >
+              📊
+            </button>
           </div>
           <h2 style="margin: 0; font-size: 20px">Histórico de Operações</h2>
           <div style="display: flex; gap: 25px">
-            <button class="aba" onclick="trocarAba('grafico')" title="Gráfico" aria-label="Ver gráfico">📈</button>
-            <button class="aba" onclick="limparHistorico()" title="Limpar Histórico" aria-label="Limpar histórico">🗑️</button>
+            <button
+              class="aba"
+              onclick="trocarAba('grafico')"
+              title="Gráfico"
+              aria-label="Ver gráfico"
+            >
+              📈
+            </button>
+            <button
+              class="aba"
+              onclick="limparHistorico()"
+              title="Limpar Histórico"
+              aria-label="Limpar histórico"
+            >
+              🗑️
+            </button>
           </div>
         </div>
-        
+
         <div id="resumo-diario" style="display: none">
           <h3>Resumo do Dia</h3>
           <ul>
@@ -174,7 +268,9 @@
                 <td>{{ op.hora }}</td>
                 <td>{{ op.tipo.upper() if op.tipo else '--' }}</td>
                 <td title="Valor da entrada">${{ "%.2f"|format(op.valor) }}</td>
-                <td class="resultado {{ 'positivo' if op.resultado_real >= 0 else 'negativo' }}">
+                <td
+                  class="resultado {{ 'positivo' if op.resultado_real >= 0 else 'negativo' }}"
+                >
                   ${{ "%.2f"|format(op.resultado_real) }}
                 </td>
               </tr>
@@ -187,7 +283,11 @@
       <!-- Rodapé -->
       <footer class="rodape-painel">
         <div>
-          <div class="status-dot" style="background: #00d67b" aria-hidden="true"></div>
+          <div
+            class="status-dot"
+            style="background: #00d67b"
+            aria-hidden="true"
+          ></div>
           <span>Conectado ao Deriv</span>
         </div>
         <div id="hora-atual" role="timer"></div>
@@ -206,24 +306,7 @@
     </script>
     <script src="{{ url_for('static', filename='scripts.js') }}" defer></script>
     <script>
-      function toggleDropdownConta() {
-        const el = document.getElementById("dropdown-conta");
-        if (el.style.display === "none" || el.style.display === "") {
-          el.style.display = "flex";
-          setTimeout(() => {
-            document.addEventListener("click", fecharDropdownConta, { once: true });
-          }, 10);
-        } else {
-          el.style.display = "none";
-        }
-      }
-
-      function fecharDropdownConta(e) {
-        const el = document.getElementById("dropdown-conta");
-        if (!el.contains(e.target)) {
-          el.style.display = "none";
-        }
-      }
+      /* Controle do dropdown agora está em static/scripts.js */
     </script>
   </body>
 </html>

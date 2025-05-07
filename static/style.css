@@ -417,15 +417,23 @@ td.resultado.negativo {
 }
 
 .dropdown-seta {
-  font-size: 1.2em;
-  color: #fff;
+  font-size: 1.4em;
+  color: #ff444f;
   margin-left: 10px;
   cursor: pointer;
-  transition: color 0.2s;
+  transition: transform 0.2s;
+  background: transparent;
+  border: none;
+  outline: none;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .dropdown-seta:hover {
-  color: #ff444f;
+  transform: scale(1.1);
 }
 
 .dropdown-conta {

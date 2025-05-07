@@ -31,9 +31,14 @@ class Motor:
         self.saldo_inicial = 0.0
         self.lock = threading.Lock()
 
+        # Armazena último erro de autenticação/conexão recebido da Deriv
+        self.ultimo_erro = None
+
     def conectar(self, token):
         self.token = token
-        ws_url = "wss://ws.deriv.com/websockets/v3?app_id=71203"
+        # Cloudflare 530/1016 indica que ws.deriv.com não resolve em algumas regiões.
+        # Domínio oficial conforme documentação: ws.derivws.com
+        ws_url = "wss://ws.derivws.com/websockets/v3?app_id=71203"
         self.ws = websocket.WebSocketApp(
             ws_url,
             on_open=self._on_open,
@@ -129,6 +134,13 @@ class Motor:
                         print("🎯 Meta diária atingida!")
                         self.meta_atingida = True
                         self.rodando = False
+
+            # Captura erros retornados pela API
+            if "error" in data:
+                self.ultimo_erro = data["error"].get("message", "Erro desconhecido")
+                print(f"[DERIV ERROR] {self.ultimo_erro}")
+                # Mantém conectado False para sinalizar falha
+                self.conectado = False
 
         except Exception as e:
             print(f"Erro ao processar mensagem: {e}")

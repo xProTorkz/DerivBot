@@ -31,13 +31,23 @@ class App:
         self.hora_inicio = None
         self.entradas_recentes = []
 
-    def iniciar(self) -> bool:
+    def iniciar(self, token: str = None) -> bool:
         try:
             self.logger.info("Iniciando aplicação de scalping...")
 
-            if not self.motor.conectar():
-                self.logger.error("Falha ao conectar ao motor")
+            # Tenta conectar o motor utilizando o token fornecido ou o configurado como padrão
+            token_utilizado = token or config.ACTIVE_TOKEN
+            if not token_utilizado:
+                self.logger.error("Nenhum token Deriv informado para conexão.")
                 return False
+
+            # Conecta somente se ainda não houver uma conexão ativa ou se o token mudou
+            if not self.motor.conectado or self.motor.token != token_utilizado:
+                if not self.motor.conectar(token_utilizado):
+                    self.logger.error(
+                        "Falha ao conectar ao motor com o token informado"
+                    )
+                    return False
 
             self.motor.registrar_callback_tick(self._processar_tick)
             self.motor.rodando = True
