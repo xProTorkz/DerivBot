@@ -1,0 +1,623 @@
+/* === ESTILOS RESPONSIVOS PARA DISPOSITIVOS MÓVEIS === */
+/* Arquivo separado para melhor desempenho e manutenção */
+
+/* === TABLETS (768px e abaixo) === */
+@media (max-width: 768px) {
+  :root {
+    --espacamento-padrao: 12px;
+    --espacamento-tablet: 20px;
+  }
+
+  /* Layout geral */
+  .painel-central {
+    padding: var(--espacamento-tablet) 0 15px;
+  }
+
+  .painel-central > * {
+    width: calc(100% - var(--espacamento-tablet) * 2);
+  }
+
+  /* Barra superior */
+  .navbar-topo {
+    margin: var(--espacamento-tablet) auto;
+    width: calc(100% - var(--espacamento-tablet) * 2);
+  }
+
+  /* Status e etapas */
+  .status-etapas {
+    padding: 15px 20px;
+    margin-bottom: 15px;
+  }
+
+  .status-etapas > div {
+    font-size: 0.85em;
+  }
+
+  .status-etapas::before,
+  .status-etapas::after {
+    height: 4px;
+  }
+
+  /* Informações de licença */
+  .licenca-wrapper {
+    margin-top: 10px;
+  }
+
+  .licenca-mini {
+    padding: 8px 10px;
+    gap: 10px;
+  }
+
+  .licenca-mini-item {
+    font-size: 0.85em;
+  }
+
+  .licenca-mini-icone {
+    font-size: 0.9em;
+  }
+
+  .licenca-mini-text,
+  .licenca-mini-valor {
+    font-size: 0.85em;
+  }
+
+  .licenca-mini-text {
+    margin-right: 3px;
+  }
+
+  .licenca-mini-plano {
+    font-size: 0.75em;
+  }
+
+  /* Informações de saldo e lucro */
+  .info-bar {
+    flex-direction: row;
+    padding: 10px 15px;
+  }
+
+  .info-bar .saldo,
+  .info-bar .lucro {
+    margin-bottom: 0;
+    padding: 8px;
+  }
+
+  .info-bar .saldo label,
+  .info-bar .lucro label {
+    font-size: 0.85em;
+  }
+
+  #saldo-valor,
+  #lucro-valor,
+  #meta-valor {
+    font-size: 1.2em;
+  }
+
+  /* Botão principal */
+  #bot-control-btn {
+    padding: 12px 20px;
+    font-size: 1em;
+    height: auto;
+    margin-top: 15px;
+  }
+
+  /* Modo e meta */
+  .modo-meta-wrapper {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  /* Log temporário */
+  .log-temp {
+    font-size: 0.9em;
+    padding: 8px 12px;
+    margin: 10px 0;
+  }
+
+  /* Rodapé */
+  .rodape-painel {
+    padding: 8px 15px;
+    font-size: 0.85em;
+  }
+
+  .status-conexao {
+    font-size: 0.85em;
+  }
+
+  .hora-data {
+    font-size: 0.85em;
+  }
+
+  /* Status do servidor */
+  #status-deriv {
+    font-size: 0.85em;
+    margin-top: 10px;
+    padding: 5px 10px;
+  }
+}
+
+/* === CELULARES (480px e abaixo) === */
+@media (max-width: 480px) {
+  :root {
+    --espacamento-padrao: 10px;
+    --espacamento-mobile: 15px;
+  }
+
+  /* Layout geral */
+  .painel-central {
+    padding: var(--espacamento-mobile) 0 10px;
+  }
+
+  .painel-central > * {
+    width: calc(100% - var(--espacamento-mobile) * 2);
+  }
+
+  /* Barra superior */
+  .navbar-topo {
+    margin: var(--espacamento-mobile) auto;
+    width: calc(100% - var(--espacamento-mobile) * 2);
+  }
+
+  /* Status e etapas */
+  .status-etapas {
+    padding: 12px 15px;
+    margin-bottom: 12px;
+  }
+
+  .status-etapas > div {
+    font-size: 0.75em;
+  }
+
+  .status-etapas::before {
+    height: 3px;
+  }
+
+  .status-etapas::after {
+    height: 3px;
+  }
+
+  /* Informações de licença */
+  .licenca-wrapper {
+    margin-top: 8px;
+  }
+
+  .licenca-mini {
+    padding: 6px 8px;
+    gap: 8px;
+  }
+
+  .licenca-mini-item {
+    font-size: 0.75em;
+  }
+
+  .licenca-mini-icone {
+    font-size: 0.8em;
+    margin-right: 3px;
+  }
+
+  .licenca-mini-text,
+  .licenca-mini-valor {
+    font-size: 0.75em;
+  }
+
+  .licenca-mini-text {
+    display: none;
+  }
+
+  /* Informações de saldo e lucro */
+  .info-bar {
+    flex-direction: row;
+    padding: 8px 10px;
+  }
+
+  .info-bar .saldo label,
+  .info-bar .lucro label {
+    font-size: 0.75em;
+  }
+
+  /* Botão principal */
+  #bot-control-btn {
+    padding: 10px 15px;
+    font-size: 0.9em;
+    margin-top: 12px;
+  }
+
+  /* Modo e meta */
+  .modo-meta-wrapper {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  /* Log temporário */
+  .log-temp {
+    font-size: 0.8em;
+    padding: 6px 10px;
+    margin: 8px 0;
+  }
+
+  /* Rodapé */
+  .rodape-painel {
+    padding: 6px 10px;
+    font-size: 0.75em;
+  }
+
+  .status-conexao {
+    font-size: 0.75em;
+  }
+
+  .status-conexao .status-dot {
+    width: 5px;
+    height: 5px;
+    margin-right: 5px;
+  }
+
+  .hora-data {
+    font-size: 0.75em;
+  }
+
+  /* Status do servidor */
+  #status-deriv {
+    font-size: 0.75em;
+    margin-top: 8px;
+    padding: 4px 8px;
+  }
+
+  /* Ocultar colunas menos importantes em telas pequenas */
+  .hide-on-mobile {
+    display: none !important;
+  }
+
+  /* Ajustes para tabela em telas pequenas */
+  #historico-tabela {
+    table-layout: fixed;
+  }
+
+  #historico-tabela th,
+  #historico-tabela td {
+    padding: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Aumentar a largura de colunas importantes */
+  #historico-tabela th:nth-child(3),
+  #historico-tabela td:nth-child(3) {
+    font-weight: bold;
+    min-width: 70px;
+  }
+}
+
+/* === CELULARES PEQUENOS (320px e abaixo) === */
+@media (max-width: 320px) {
+  :root {
+    --espacamento-padrao: 8px;
+    --espacamento-mobile: 10px;
+    --borda-arredondada: 8px;
+    --borda-arredondada-pequena: 4px;
+    --gap-padrao: 8px;
+    --gap-pequeno: 4px;
+  }
+
+  /* Elementos base */
+  html,
+  body {
+    font-size: 14px;
+  }
+
+  /* Layout geral */
+  .painel-central {
+    padding: var(--espacamento-mobile) 0 8px;
+  }
+
+  /* Barra superior */
+  .navbar-topo {
+    margin: 8px auto;
+  }
+
+  .topo-superior {
+    margin-bottom: 6px;
+  }
+
+  .card-conta {
+    padding: 6px;
+  }
+
+  .logout-btn {
+    padding: 6px 8px;
+    font-size: 0.75em;
+  }
+
+  /* Informações de licença */
+  .licenca-wrapper {
+    margin-top: 6px;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  .licenca-mini {
+    padding: 4px 6px;
+    gap: 6px;
+  }
+
+  .licenca-mini-item {
+    font-size: 0.7em;
+  }
+
+  .licenca-mini-icone {
+    font-size: 0.75em;
+    margin-right: 2px;
+  }
+
+  .licenca-mini-text,
+  .licenca-mini-valor {
+    font-size: 0.7em;
+  }
+
+  /* Informações de saldo e lucro */
+  .info-bar {
+    padding: 6px 8px;
+  }
+
+  .info-bar .saldo,
+  .info-bar .lucro {
+    padding: 4px 6px;
+  }
+
+  #saldo-valor,
+  #lucro-valor {
+    font-size: 1em;
+  }
+
+  .info-bar .saldo label,
+  .info-bar .lucro label {
+    font-size: 0.7em;
+  }
+
+  /* Botão principal */
+  #bot-control-btn {
+    padding: 8px 12px;
+    font-size: 0.85em;
+    margin-top: 10px;
+  }
+
+  /* Status de barra */
+  #barra-status {
+    margin: 8px 0;
+  }
+
+  .status-etapas {
+    padding: 8px 10px;
+    margin-bottom: 10px;
+  }
+
+  .status-etapas > div {
+    font-size: 0.7em;
+  }
+
+  .bolinha {
+    width: 8px;
+    height: 8px;
+    margin-bottom: 3px;
+  }
+
+  .bolinha.pequena {
+    width: 6px;
+    height: 6px;
+  }
+
+  /* Modo e meta */
+  .modo-meta-wrapper {
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  #modo-container {
+    width: 100%;
+  }
+
+  #modo-container label,
+  #meta-container label {
+    font-size: 0.75em;
+  }
+
+  .modo-select,
+  .input-meta {
+    font-size: 0.8em;
+    padding: 5px 8px;
+  }
+
+  /* Histórico */
+  .historico {
+    margin-top: 10px;
+  }
+
+  .linha-titulo-historico {
+    margin-bottom: 8px;
+  }
+
+  .titulo-historico {
+    font-size: 0.85em;
+  }
+
+  .acoes-esquerda,
+  .acoes-direita {
+    gap: 6px;
+  }
+
+  .icone-historico {
+    font-size: 0.8em;
+  }
+
+  #historico-tabela th {
+    font-size: 0.7em;
+    padding: 5px;
+  }
+
+  #historico-tabela td {
+    font-size: 0.7em;
+    padding: 5px;
+  }
+
+  /* Log temporário */
+  .log-temp {
+    font-size: 0.75em;
+    padding: 5px 8px;
+    margin: 6px 0;
+  }
+
+  /* Rodapé */
+  .rodape-painel {
+    padding: 5px 8px;
+    font-size: 0.7em;
+  }
+
+  .status-conexao {
+    font-size: 0.7em;
+  }
+
+  .status-conexao .status-dot {
+    width: 4px;
+    height: 4px;
+    margin-right: 4px;
+  }
+
+  .hora-data {
+    font-size: 0.7em;
+  }
+
+  /* Menu de abas */
+  .aba-menu {
+    gap: 4px;
+  }
+
+  .aba {
+    font-size: 0.7em;
+    padding: 5px 8px;
+  }
+}
+
+/* === Ajustes para elementos específicos em visualização mobile === */
+.destaque-mobile {
+  animation: destacarMobile 1.5s ease-in-out;
+}
+
+@keyframes destacarMobile {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+/* Ajustes de texto para telas pequenas */
+@media (max-width: 480px) {
+  .esconde-texto-mobile {
+    font-size: 0;
+  }
+
+  .esconde-texto-mobile::before {
+    content: attr(data-mobile-text);
+    font-size: initial;
+  }
+
+  .texto-truncado {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+  }
+}
+
+/* === SUPORTE A ORIENTAÇÃO DA TELA === */
+@media (max-width: 768px) and (orientation: landscape) {
+  /* Ajustes para modo paisagem em tablets */
+  .painel-central {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-gap: 10px;
+    padding: 10px;
+  }
+
+  .painel-central > * {
+    width: 100%;
+    grid-column: span 1;
+  }
+
+  .info-bar {
+    grid-column: span 2;
+  }
+
+  .painel-robo {
+    margin-bottom: 10px;
+  }
+
+  .historico {
+    margin-top: 0;
+    height: calc(100vh - 300px);
+    overflow: hidden;
+  }
+
+  .tabela-wrapper {
+    max-height: calc(100vh - 380px);
+  }
+
+  .rodape-painel {
+    grid-column: span 2;
+    margin-top: 10px;
+  }
+}
+
+@media (max-width: 480px) and (orientation: landscape) {
+  /* Ajustes para modo paisagem em smartphones */
+  body {
+    font-size: 13px;
+  }
+
+  .navbar-topo {
+    margin: 5px auto;
+  }
+
+  .info-bar .saldo,
+  .info-bar .lucro {
+    padding: 5px;
+  }
+
+  #bot-control-btn {
+    padding: 8px 15px;
+    font-size: 0.85em;
+    height: auto;
+  }
+
+  .log-temp {
+    font-size: 0.75em;
+    padding: 5px 8px;
+  }
+
+  .info-bar {
+    margin-bottom: 10px;
+    padding: 8px;
+  }
+
+  #status-deriv {
+    font-size: 0.75em;
+    margin-top: 5px;
+  }
+}
+
+/* Orientação retrato específica */
+@media (max-width: 480px) and (orientation: portrait) {
+  /* Elementos que precisam de mais espaço em modo retrato */
+  .modo-meta-wrapper {
+    flex-direction: column;
+  }
+
+  .modo-select,
+  .input-meta {
+    margin-bottom: 5px;
+  }
+}

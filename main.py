@@ -442,7 +442,19 @@ def conectar_demo():
     if token_demo:
         session["token"] = token_demo
         session["tipo_conta"] = "demo"
-        return jsonify({"status": "ok"})
+
+        # Busca a licença atual para obter o ID da conta demo
+        licencas = carregar_licencas()
+        licenca_id = session.get("licenca_id")
+
+        conta_id = None
+        if licenca_id and licenca_id in licencas:
+            licenca = licencas[licenca_id]
+            conta_id = licenca.get("deriv_demo")
+            # Atualiza a sessão com o ID da conta
+            session["deriv_account"] = conta_id
+
+        return jsonify({"status": "ok", "conta_id": conta_id})
     return jsonify({"status": "erro", "mensagem": "Token demo não cadastrado."})
 
 
@@ -464,7 +476,19 @@ def conectar_real():
     if token_real:
         session["token"] = token_real
         session["tipo_conta"] = "real"
-        return jsonify({"status": "ok"})
+
+        # Busca a licença atual para obter o ID da conta real
+        licencas = carregar_licencas()
+        licenca_id = session.get("licenca_id")
+
+        conta_id = None
+        if licenca_id and licenca_id in licencas:
+            licenca = licencas[licenca_id]
+            conta_id = licenca.get("deriv_real")
+            # Atualiza a sessão com o ID da conta
+            session["deriv_account"] = conta_id
+
+        return jsonify({"status": "ok", "conta_id": conta_id})
     return jsonify({"status": "erro", "mensagem": "Token real não cadastrado."})
 
 

@@ -3,7 +3,16 @@
 <html lang="pt-br">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <meta name="theme-color" content="#0d0d0d" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
     <meta
       name="description"
       content="Painel de controle do robô inteligente para Deriv"
@@ -20,6 +29,11 @@
       rel="stylesheet"
       href="/static/style.css?v={{ range(1, 999999) | random }}"
     />
+    <link
+      rel="stylesheet"
+      href="/static/mobile.css?v={{ range(1, 999999) | random }}"
+      media="screen and (max-width: 768px)"
+    />
   </head>
   <body>
     <!-- Fundo decorativo com mapa-múndi e gráficos -->
@@ -35,7 +49,7 @@
             <div class="status-dot" aria-hidden="true"></div>
             <div class="info-conta">
               <div class="tipo-conta">
-                {{ "Conta Virtual" if tipo_conta == "demo" else "Conta Real" }}
+                {{ "Conta Demo" if tipo_conta == "demo" else "Conta Real" }}
               </div>
               <div class="numero-conta">
                 {{ session.get("deriv_account", "VRTCxxxxxxx") }}
@@ -161,9 +175,26 @@
           <div id="modo-container">
             <label for="modo">Modo de operação:</label>
             <select class="modo-select" id="modo">
-              <option value="iniciante">🌱 Iniciante - 95%</option>
-              <option value="conservador">🛡️ Conservador - 85%</option>
-              <option value="agressivo">🔥 Agressivo - 80%</option>
+              <option value="iniciante">
+                🌱
+                <span class="esconde-texto-mobile" data-mobile-text="Iniciante"
+                  >Iniciante - 95%</span
+                >
+              </option>
+              <option value="conservador">
+                🛡️
+                <span
+                  class="esconde-texto-mobile"
+                  data-mobile-text="Conservador"
+                  >Conservador - 85%</span
+                >
+              </option>
+              <option value="agressivo">
+                🔥
+                <span class="esconde-texto-mobile" data-mobile-text="Agressivo"
+                  >Agressivo - 80%</span
+                >
+              </option>
             </select>
           </div>
           <div id="meta-container">
@@ -175,6 +206,7 @@
               min="0"
               step="0.01"
               aria-label="Meta diária em dólares"
+              inputmode="decimal"
             />
           </div>
         </div>
@@ -329,17 +361,15 @@
       </div>
 
       <!-- Rodapé -->
-      <footer class="rodape-painel">
+      <div class="rodape-painel">
         <div class="status-conexao">
-          <div
-            class="status-dot"
-            style="background: #00d67b"
-            aria-hidden="true"
-          ></div>
-          <span>Conectado</span>
+          <div class="status-dot pequeno" id="status-dot-conexao"></div>
+          <span class="texto-truncado"
+            >Status: <span id="status-texto">Aguardando...</span></span
+          >
         </div>
-        <div class="hora-data" id="hora-atual" role="timer"></div>
-      </footer>
+        <div class="hora-data" id="hora-atual"></div>
+      </div>
     </main>
 
     <script>
@@ -367,5 +397,6 @@
       window.addEventListener("load", forcarRecarregamentoCSS);
     </script>
     <script src="{{ url_for('static', filename='scripts.js') }}" defer></script>
+    <script src="/static/persistencia.js"></script>
   </body>
 </html>

@@ -21,6 +21,10 @@ document.addEventListener("DOMContentLoaded", function () {
   let tempoAtivoSegundos = 0;
   let contadorOperacoes = 0;
   let timerAtualizacao;
+  let isMobile = false;
+
+  // Novo: variável para controlar se precisamos restaurar o estado
+  let precisaRestaurarEstado = false;
 
   const modosConfig = {
     iniciante: { meta: 20, entrada: 1, stop: 10, assertividade: 95 },
@@ -358,34 +362,8 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   function atualizarTabelaResultados() {
-    fetch("/historico_resultados")
-      .then((res) => res.json())
-      .then((data) => {
-        const tbody = document.getElementById("historico-tabela-body");
-        tbody.innerHTML = "";
-
-        data.reverse().forEach((item) => {
-          const row = document.createElement("tr");
-          row.innerHTML = `
-            <td>${item.data}</td>
-            <td>${item.hora}</td>
-
-            <td>${item.tipo.toUpperCase()}</td>
-            <td>$${parseFloat(item.valor).toFixed(2)}</td>
-            <td class="resultado ${
-              item.resultado_real >= 0 ? "positivo" : "negativo"
-            }">
-              $${parseFloat(item.resultado_real).toFixed(2)}
-            </td>
-
-
-          `;
-          tbody.appendChild(row);
-        });
-      })
-      .catch((err) => {
-        console.warn("Erro ao atualizar histórico de resultados:", err);
-      });
+    // Usa a nova implementação para manter consistência
+    atualizarHistorico();
   }
 
   const botaoTrocar = document.getElementById("trocar-conta");
@@ -439,14 +417,14 @@ document.addEventListener("DOMContentLoaded", function () {
             // Removemos a atualização automática das bolinhas aqui, elas devem ser atualizadas apenas durante operações
             botaoControle.textContent = "⛔ Parar Robô";
             botaoControle.style.backgroundColor = "#ff3b3b"; // vermelho
-            botaoControle.style.color = "#fff";
+            botaoControle.style.color = "#000"; // preto
           } else {
             atualizarLog("🟡 Robô parado.", "config");
             // Quando o robô estiver parado, resetamos as bolinhas e barra
             resetarProgressoBolinhas();
             botaoControle.textContent = "✅ Iniciar Robô";
             botaoControle.style.backgroundColor = "#00d67b"; // verde
-            botaoControle.style.color = "#fff";
+            botaoControle.style.color = "#000"; // preto
           }
         }
 
@@ -500,20 +478,62 @@ document.addEventListener("DOMContentLoaded", function () {
           const metaEl = document.getElementById("meta-valor");
           const metaInput = document.getElementById("meta");
 
-          const lucroAtual = parseFloat(lucroEl.textContent || "0");
-          const novoLucro = parseFloat(data.lucro);
+          // Garante que mesmo quando o valor atual é igual ao valor anterior,
+          // o display é atualizado
+          if (lucroEl) {
+            const lucroAtual = parseFloat(lucroEl.textContent || "0");
+            const novoLucro = parseFloat(data.lucro || "0");
+
+            // Força a atualização direta do texto, sem alterar estilos
+            lucroEl.textContent = novoLucro.toFixed(2);
+
+            // Garante que nenhum estilo de fonte seja aplicado
+            if (lucroEl.style.fontFamily) {
+              lucroEl.style.fontFamily = "";
+            }
+            if (lucroEl.style.fontWeight) {
+              lucroEl.style.fontWeight = "";
+            }
+
+            // Só anima se houver diferença
+            if (lucroAtual !== novoLucro) {
+              // Usa uma versão modificada que não afeta a fonte
+              const valorInicial = lucroAtual;
+              const valorFinal = novoLucro;
+              const duracao = 1200;
+              const inicio = Date.now();
+              const incremento = valorFinal - valorInicial;
+
+              if (incremento !== 0) {
+                const animarNumero = () => {
+                  const decorrido = Date.now() - inicio;
+                  const fracao = Math.min(decorrido / duracao, 1);
+                  const progresso = 1 - Math.pow(1 - fracao, 3);
+                  const valorAtual = valorInicial + incremento * progresso;
+
+                  // Atualiza apenas o texto sem modificar estilos
+                  lucroEl.textContent = valorAtual.toFixed(2);
+
+                  if (fracao < 1) {
+                    requestAnimationFrame(animarNumero);
+                  } else {
+                    lucroEl.textContent = valorFinal.toFixed(2);
+                  }
+                };
+
+                requestAnimationFrame(animarNumero);
+              }
+            }
+          }
 
           // Só atualiza meta se o robô estiver ativo; caso contrário mantemos valor local
           if (roboAtivo) {
             const meta = parseFloat(data.meta).toFixed(2);
-            metaEl.textContent = "/" + meta;
+            if (metaEl) metaEl.textContent = "/" + meta;
             if (metaInput && !roboAtivo) {
               metaInput.value = meta;
             }
           }
-
-          // Animação do lucro
-          animarValor(lucroEl, lucroAtual, novoLucro, 1200);
         }
       });
   }
@@ -695,19 +715,21 @@ document.addEventListener("DOMContentLoaded", function () {
     const passos = duracaoMS / 16; // ~60fps
     const incrementoPorPasso = incremento / passos;
 
-    // Aplica classe de animação
-    elemento.classList.add("valor-animando");
+    // Aplica classe de animação somente nos resultados, não no saldo
+    if (!elemento.id.includes("saldo")) {
+      elemento.classList.add("valor-animando");
 
-    // Remove classes de cores anteriores
-    elemento.classList.remove("positivo", "negativo", "neutro");
+      // Remove classes de cores anteriores
+      elemento.classList.remove("positivo", "negativo", "neutro");
 
-    // Adiciona classe baseada no valor
-    if (valorFinal > 0) {
-      elemento.classList.add("positivo");
-    } else if (valorFinal < 0) {
-      elemento.classList.add("negativo");
-    } else {
-      elemento.classList.add("neutro");
+      // Adiciona classe baseada no valor
+      if (valorFinal > 0) {
+        elemento.classList.add("positivo");
+      } else if (valorFinal < 0) {
+        elemento.classList.add("negativo");
+      } else {
+        elemento.classList.add("neutro");
+      }
     }
 
     // Função de animação
@@ -733,9 +755,11 @@ document.addEventListener("DOMContentLoaded", function () {
           prefixo + valorFinal.toFixed(formatoDecimais) + sufixo;
 
         // Remove a classe de animação
-        setTimeout(() => {
-          elemento.classList.remove("valor-animando");
-        }, 300);
+        if (!elemento.id.includes("saldo")) {
+          setTimeout(() => {
+            elemento.classList.remove("valor-animando");
+          }, 300);
+        }
       }
     }, 16);
   }
@@ -763,15 +787,535 @@ document.addEventListener("DOMContentLoaded", function () {
     } else {
       elemento.classList.add("neutro");
       elemento.innerHTML = `$${valorNum.toFixed(formatoDecimais)}`;
-      // Aplica estilo courier new para zero
-      elemento.style.fontFamily = "'Courier New', monospace";
-      elemento.style.fontWeight = "normal";
+
+      // Removido - Não alteramos mais a fonte de nenhum elemento
     }
 
     // Aplica animação
     requestAnimationFrame(() => {
       elemento.classList.add("destaque-resultado");
     });
+  }
+
+  // Função para salvar o estado atual do robô no localStorage
+  function salvarEstadoRobo() {
+    if (!roboAtivo) return; // Não salva se o robô estiver inativo
+
+    const estadoRobo = {
+      roboAtivo,
+      metaDiaria,
+      modoOperacao,
+      saldoAtual,
+      lucroAtual,
+      tempoAtivoSegundos,
+      contadorOperacoes,
+      timestamp: Date.now(),
+      // Informações adicionais para melhor restauração
+      statusOperacao: document.querySelector(".status-operacao")
+        ? document.querySelector(".status-operacao").textContent
+        : "",
+      statusConta: document.querySelector(".tipo-conta")
+        ? document.querySelector(".tipo-conta").textContent
+        : "",
+      numeroConta: document.querySelector(".numero-conta")
+        ? document.querySelector(".numero-conta").textContent
+        : "",
+      historicoOperacoes: [], // Para armazenar o histórico recente (será preenchido abaixo)
+    };
+
+    // Capturar o histórico recente (últimas 5 operações)
+    if (historicoTabela) {
+      const linhas = historicoTabela.querySelectorAll("tr");
+      const limite = Math.min(linhas.length, 5); // Limita a 5 operações recentes
+
+      for (let i = 0; i < limite; i++) {
+        const celulas = linhas[i].querySelectorAll("td");
+        if (celulas.length >= 5) {
+          estadoRobo.historicoOperacoes.push({
+            data: celulas[0].textContent,
+            hora: celulas[1].textContent,
+            tipo: celulas[2].textContent,
+            valor: celulas[3].textContent,
+            resultado: celulas[4].textContent,
+          });
+        }
+      }
+    }
+
+    localStorage.setItem("derivbot_estado", JSON.stringify(estadoRobo));
+    console.log("Estado do robô salvo no localStorage");
+  }
+
+  // Função para restaurar o estado do robô do localStorage
+  function restaurarEstadoRobo() {
+    const estadoSalvo = localStorage.getItem("derivbot_estado");
+    if (!estadoSalvo) return false;
+
+    try {
+      const estado = JSON.parse(estadoSalvo);
+
+      // Verificar se o estado é recente (menos de 5 minutos)
+      const agora = Date.now();
+      const diferenca = agora - estado.timestamp;
+      const cincominutosMs = 5 * 60 * 1000;
+
+      if (diferenca > cincominutosMs) {
+        console.log("Estado salvo expirado, não será restaurado");
+        localStorage.removeItem("derivbot_estado");
+        return false;
+      }
+
+      // Restaurar os valores
+      metaDiaria = estado.metaDiaria;
+      modoOperacao = estado.modoOperacao;
+      saldoAtual = estado.saldoAtual;
+      lucroAtual = estado.lucroAtual;
+      tempoAtivoSegundos = estado.tempoAtivoSegundos;
+      contadorOperacoes = estado.contadorOperacoes;
+
+      // Atualizar a interface com os valores restaurados
+      if (metaInput) metaInput.value = metaDiaria.toString();
+      if (modoSelect) modoSelect.value = modoOperacao;
+      if (saldoValor) saldoValor.textContent = saldoAtual.toFixed(2);
+      if (lucroValor) lucroValor.textContent = lucroAtual.toFixed(2);
+      if (metaValor) metaValor.textContent = "/" + metaDiaria.toFixed(2);
+      if (operacoesDiarias)
+        operacoesDiarias.textContent = contadorOperacoes.toString();
+
+      // Restaurar o histórico de operações se disponível
+      if (estado.historicoOperacoes && estado.historicoOperacoes.length > 0) {
+        restaurarHistoricoOperacoes(estado.historicoOperacoes);
+      }
+
+      console.log("Estado do robô restaurado com sucesso");
+
+      // Se o robô estava ativo, precisamos reiniciá-lo
+      if (estado.roboAtivo) {
+        precisaRestaurarEstado = true;
+        console.log("Robô estava ativo, marcando para reiniciar");
+        atualizarLog("📋 Restaurando sessão anterior do robô...", "info");
+      }
+
+      return true;
+    } catch (erro) {
+      console.error("Erro ao restaurar estado:", erro);
+      localStorage.removeItem("derivbot_estado");
+      return false;
+    }
+  }
+
+  // Nova função para restaurar o histórico de operações
+  function restaurarHistoricoOperacoes(historicoSalvo) {
+    if (!historicoTabela || !historicoSalvo || historicoSalvo.length === 0)
+      return;
+
+    // Limpa o histórico atual
+    historicoTabela.innerHTML = "";
+
+    // Adiciona as operações salvas
+    historicoSalvo.forEach((op) => {
+      // Cria nova linha
+      const linha = document.createElement("tr");
+
+      // Data
+      const celulaData = document.createElement("td");
+      celulaData.textContent = op.data;
+      linha.appendChild(celulaData);
+
+      // Hora
+      const celulaHora = document.createElement("td");
+      celulaHora.textContent = op.hora;
+      linha.appendChild(celulaHora);
+
+      // Tipo
+      const celulaTipo = document.createElement("td");
+      celulaTipo.textContent = op.tipo;
+      linha.appendChild(celulaTipo);
+
+      // Valor
+      const celulaValor = document.createElement("td");
+      celulaValor.textContent = op.valor;
+      linha.appendChild(celulaValor);
+
+      // Resultado
+      const celulaResultado = document.createElement("td");
+      celulaResultado.classList.add("resultado");
+      celulaResultado.textContent = op.resultado;
+
+      // Aplicar classe baseada no valor
+      const valorNumerico = parseFloat(op.resultado.replace("$", "").trim());
+      if (valorNumerico > 0) {
+        celulaResultado.classList.add("positivo");
+      } else if (valorNumerico < 0) {
+        celulaResultado.classList.add("negativo");
+      } else {
+        celulaResultado.classList.add("neutro");
+      }
+
+      linha.appendChild(celulaResultado);
+
+      // Adiciona linha na tabela
+      historicoTabela.appendChild(linha);
+    });
+
+    console.log("Histórico de operações restaurado");
+  }
+
+  // Modificar a função inicializar para verificar se há estado salvo
+  function inicializar() {
+    // Define valor inicial da meta
+    if (metaInput) {
+      metaInput.value = metaDiaria.toString();
+    }
+
+    // Verificação inicial do status do Deriv
+    verificarStatusDeriv();
+
+    // Inicia timers de verificação
+    verificacaoDerivTimer = setInterval(verificarStatusDeriv, 10000);
+    verificacaoStatusTimer = setInterval(verificarStatusRobo, 5000);
+
+    // Atualiza saldo inicial
+    atualizarSaldo();
+
+    // Novo: Tenta restaurar o estado salvo
+    restaurarEstadoRobo();
+
+    // Novo: Configurar evento para salvar estado quando a página for fechada/atualizada
+    window.addEventListener("beforeunload", salvarEstadoRobo);
+
+    // Novo: Verificar a cada 30 segundos para salvar o estado (backup)
+    setInterval(salvarEstadoRobo, 30000);
+
+    // Novo: Se o robô estava ativo, reiniciá-lo após alguns segundos
+    if (precisaRestaurarEstado) {
+      atualizarLog("🔄 Restaurando operações do robô...", "config");
+      setTimeout(() => {
+        iniciarRoboAutomaticamente();
+      }, 3000);
+    }
+  }
+
+  // Nova função para iniciar o robô automaticamente após restauração de estado
+  function iniciarRoboAutomaticamente() {
+    if (!precisaRestaurarEstado) return;
+
+    console.log("Iniciando robô automaticamente após restauração de estado");
+
+    // Envia comando para o servidor para iniciar o robô com os valores restaurados
+    fetch("/toggle_bot", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        modo: modoOperacao,
+        meta: metaDiaria,
+      }),
+    })
+      .then((response) => response.json())
+      .then((data) => {
+        if (data.status === "iniciado") {
+          roboAtivo = true;
+          botaoControle.textContent = "Parar Robô";
+          botaoControle.classList.add("ativo");
+          atualizarLog(
+            "✅ Robô restaurado com sucesso no modo " + modoOperacao,
+            "sucesso"
+          );
+
+          // Atualiza valores na interface
+          if (metaValor) metaValor.textContent = "/" + metaDiaria.toFixed(2);
+          document.getElementById("modo-selecionado").style.display = "block";
+          document.getElementById("modo-texto").textContent =
+            modoOperacao.toUpperCase();
+
+          // Inicia atualização contínua
+          atualizacaoTimer = setInterval(atualizarStatusRobo, 1000);
+
+          // Reset da flag
+          precisaRestaurarEstado = false;
+        } else {
+          atualizarLog(
+            "⚠️ Erro ao restaurar robô: " +
+              (data.mensagem || "Falha na conexão"),
+            "erro"
+          );
+          precisaRestaurarEstado = false;
+        }
+      })
+      .catch((error) => {
+        atualizarLog("⚠️ Erro de conexão ao restaurar robô", "erro");
+        console.error("Erro:", error);
+        precisaRestaurarEstado = false;
+      });
+  }
+
+  // Modificar a função iniciarRobo para salvar estado após iniciar
+  function iniciarRobo() {
+    // Obtem valores atuais de modo e meta
+    if (modoSelect) modoOperacao = modoSelect.value;
+    if (metaInput) metaDiaria = parseFloat(metaInput.value);
+
+    // Valida meta
+    if (isNaN(metaDiaria) || metaDiaria < 10) {
+      adicionarLog("⚠️ Meta inválida! Mínimo: $10.00");
+      return;
+    }
+
+    // Configuração do botão
+    botaoControle.textContent = "Parando...";
+    botaoControle.disabled = true;
+
+    // Envia comando para o servidor
+    fetch("/toggle_bot", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        modo: modoOperacao,
+        meta: metaDiaria,
+      }),
+    })
+      .then((response) => response.json())
+      .then((data) => {
+        if (data.status === "iniciado") {
+          roboAtivo = true;
+          botaoControle.textContent = "Parar Robô";
+          botaoControle.classList.add("ativo");
+          adicionarLog("🚀 Robô iniciado no modo " + modoOperacao);
+
+          // Atualiza valores na interface
+          if (metaValor) metaValor.textContent = "/" + metaDiaria.toFixed(2);
+          document.getElementById("modo-selecionado").style.display = "block";
+          document.getElementById("modo-texto").textContent =
+            modoOperacao.toUpperCase();
+
+          // Inicia atualização contínua
+          atualizacaoTimer = setInterval(atualizarStatusRobo, 1000);
+
+          // Salvar estado imediatamente
+          salvarEstadoRobo();
+        } else {
+          adicionarLog(
+            "⚠️ Erro ao iniciar: " + (data.mensagem || "Falha desconhecida")
+          );
+        }
+        botaoControle.disabled = false;
+      })
+      .catch((error) => {
+        adicionarLog("⚠️ Erro de conexão");
+        console.error("Erro:", error);
+        botaoControle.disabled = false;
+      });
+  }
+
+  // Modificar a função pararRobo para limpar estado ao parar
+  function pararRobo() {
+    botaoControle.textContent = "Parando...";
+    botaoControle.disabled = true;
+
+    fetch("/toggle_bot", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({}),
+    })
+      .then((response) => response.json())
+      .then((data) => {
+        if (data.status === "parado") {
+          roboAtivo = false;
+          botaoControle.textContent = "Iniciar Robô";
+          botaoControle.classList.remove("ativo");
+          adicionarLog("🛑 Robô parado");
+
+          // Para atualização contínua
+          if (atualizacaoTimer) {
+            clearInterval(atualizacaoTimer);
+            atualizacaoTimer = null;
+          }
+
+          // Atualiza uma última vez
+          atualizarStatusRobo();
+
+          // Remover estado salvo quando o robô é parado intencionalmente
+          localStorage.removeItem("derivbot_estado");
+        }
+        botaoControle.disabled = false;
+      })
+      .catch((error) => {
+        adicionarLog("⚠️ Erro de conexão");
+        console.error("Erro:", error);
+        botaoControle.disabled = false;
+      });
+  }
+
+  // Verifica status atual do robô
+  function verificarStatusRobo() {
+    fetch("/status_robo")
+      .then((response) => response.json())
+      .then((data) => {
+        if (data.ativo && !roboAtivo) {
+          // Robô está rodando mas interface não reflete
+          roboAtivo = true;
+          botaoControle.textContent = "Parar Robô";
+          botaoControle.classList.add("ativo");
+
+          // Inicia atualização contínua
+          if (!atualizacaoTimer) {
+            atualizacaoTimer = setInterval(atualizarStatusRobo, 1000);
+          }
+
+          // Salvar o estado quando detectamos que o robô está rodando
+          salvarEstadoRobo();
+        } else if (!data.ativo && roboAtivo) {
+          // Robô está parado mas interface não reflete
+          roboAtivo = false;
+          botaoControle.textContent = "Iniciar Robô";
+          botaoControle.classList.remove("ativo");
+
+          // Para atualização contínua
+          if (atualizacaoTimer) {
+            clearInterval(atualizacaoTimer);
+            atualizacaoTimer = null;
+          }
+
+          // Remover o estado salvo quando o robô é detectado como parado
+          localStorage.removeItem("derivbot_estado");
+        }
+
+        // Atualizar dados do robô para persistência, apenas se estiver ativo
+        if (data.ativo && roboAtivo) {
+          // Atualizar valores para persistência
+          saldoAtual = data.saldo;
+          lucroAtual = data.lucro;
+          contadorOperacoes = data.operacoes;
+
+          // Salvar estado atualizado
+          salvarEstadoRobo();
+        }
+      })
+      .catch((error) => {
+        console.error("Erro ao verificar status:", error);
+      });
+  }
+
+  // Verifica status da conexão com Deriv
+  function verificarStatusDeriv() {
+    fetch("/status_deriv")
+      .then((response) => response.json())
+      .then((data) => {
+        if (data.status === "ok") {
+          statusDeriv.textContent = "✅ Conectado ao servidor Deriv";
+          statusDeriv.style.color = "var(--cor-verde)";
+        } else {
+          statusDeriv.textContent =
+            "❌ " + (data.mensagem || "Erro de conexão com Deriv");
+          statusDeriv.style.color = "var(--cor-vermelha)";
+        }
+      })
+      .catch((error) => {
+        statusDeriv.textContent = "❌ Falha ao verificar conexão";
+        statusDeriv.style.color = "var(--cor-vermelha)";
+      });
+  }
+
+  // Atualiza o saldo atual
+  function atualizarSaldo() {
+    fetch("/saldo_atual")
+      .then((response) => response.json())
+      .then((data) => {
+        if (data.status === "ok" && saldoValor) {
+          saldoAtual = parseFloat(data.saldo);
+          saldoValor.textContent = saldoAtual.toFixed(2);
+        }
+      })
+      .catch((error) => {
+        console.error("Erro ao atualizar saldo:", error);
+      });
+  }
+
+  // Atualiza a tabela de histórico
+  function atualizarHistorico() {
+    fetch("/historico_resultados")
+      .then((response) => response.json())
+      .then((data) => {
+        if (historicoTabela) {
+          // Limpa a tabela atual
+          historicoTabela.innerHTML = "";
+
+          // Adiciona as operações na ordem (mais recentes primeiro)
+          data.reverse().forEach((op) => {
+            // Cria nova linha
+            const linha = document.createElement("tr");
+
+            // Data
+            const celulaData = document.createElement("td");
+            celulaData.textContent = op.data;
+            linha.appendChild(celulaData);
+
+            // Hora
+            const celulaHora = document.createElement("td");
+            celulaHora.textContent = op.hora;
+            linha.appendChild(celulaHora);
+
+            // Tipo
+            const celulaTipo = document.createElement("td");
+            celulaTipo.textContent = op.tipo.toUpperCase();
+            linha.appendChild(celulaTipo);
+
+            // Valor
+            const celulaValor = document.createElement("td");
+            celulaValor.textContent = "$" + parseFloat(op.valor).toFixed(2);
+            linha.appendChild(celulaValor);
+
+            // Resultado - Agora com animação
+            const celulaResultado = document.createElement("td");
+            celulaResultado.classList.add("resultado");
+
+            // Aplicar classe baseada no valor
+            if (op.resultado_real > 0) {
+              celulaResultado.classList.add("positivo");
+            } else if (op.resultado_real < 0) {
+              celulaResultado.classList.add("negativo");
+            } else {
+              celulaResultado.classList.add("neutro");
+            }
+
+            celulaResultado.textContent =
+              "$" + parseFloat(op.resultado_real).toFixed(2);
+
+            linha.appendChild(celulaResultado);
+
+            // Adiciona linha na tabela
+            historicoTabela.appendChild(linha);
+          });
+
+          // Mantém rolagem no final
+          const tabela = document.getElementById("tabela-historico");
+          if (tabela) {
+            tabela.scrollTop = tabela.scrollHeight;
+          }
+        }
+      })
+      .catch((error) => {
+        console.error("Erro ao atualizar histórico:", error);
+      });
+  }
+
+  // Adiciona log temporário na interface
+  function adicionarLog(mensagem) {
+    if (logTemp) {
+      logTemp.textContent = mensagem;
+
+      // Efeito de fade
+      logTemp.style.opacity = "1";
+      setTimeout(() => {
+        logTemp.style.opacity = "0.7";
+      }, 3000);
+    }
   }
 
   // Inicializações - Modificado para garantir que as bolinhas estejam desativadas no início
@@ -790,15 +1334,17 @@ document.addEventListener("DOMContentLoaded", function () {
   setInterval(atualizarSaldoEmTempoReal, 5000);
   setInterval(verificarConexaoDeriv, 5000);
   setInterval(atualizarStatusRobo, 4000);
-  setInterval(atualizarLucroEMeta, 4000);
+  setInterval(atualizarLucroEMeta, 3000); // Mais frequente
   setInterval(atualizarOperacoesDiarias, 4000);
-  setInterval(atualizarStatusDetalhado, 3000); // Atualiza status detalhado a cada 3 segundos
+  setInterval(atualizarStatusDetalhado, 3000);
+  setInterval(atualizarHistorico, 2000); // Mais frequente
   setInterval(() => {
     fetch("/status_robo")
       .then((res) => res.json())
       .then((data) => {
         if (data.ativo) {
-          atualizarTabelaResultados();
+          // Usa a nova implementação
+          atualizarHistorico();
         }
       });
   }, 5000);
@@ -810,7 +1356,27 @@ document.addEventListener("DOMContentLoaded", function () {
         .then((res) => res.json())
         .then((data) => {
           if (data.status === "ok") {
-            window.location.reload();
+            // Se bem-sucedido, atualizamos a interface antes de recarregar a página
+            if (data.conta_id) {
+              // Atualiza o tipo de conta e número da conta no card
+              const tipoConta = document.querySelector(".tipo-conta");
+              const numeroConta = document.querySelector(".numero-conta");
+
+              if (tipoConta) tipoConta.textContent = "Conta Demo";
+              if (numeroConta) numeroConta.textContent = data.conta_id;
+
+              // Adiciona efeito de destaque ao card para mostrar a mudança
+              const cardConta = document.querySelector(".card-conta");
+              if (cardConta) {
+                cardConta.classList.add("destacar-card");
+                setTimeout(() => {
+                  cardConta.classList.remove("destacar-card");
+                }, 1500);
+              }
+            } else {
+              // Se não tiver o ID da conta, recarrega a página
+              window.location.reload();
+            }
           } else {
             alert(data.mensagem || "Erro ao conectar à conta demo.");
           }
@@ -823,6 +1389,7 @@ document.addEventListener("DOMContentLoaded", function () {
       .then((res) => res.json())
       .then((data) => {
         if (data.status === "ok") {
+          // Recarrega a página para aplicar todas as mudanças corretamente
           window.location.reload();
         } else {
           alert(data.mensagem || "Erro ao conectar à conta demo.");
@@ -835,6 +1402,7 @@ document.addEventListener("DOMContentLoaded", function () {
       .then((res) => res.json())
       .then((data) => {
         if (data.status === "ok") {
+          // Recarrega a página para aplicar todas as mudanças corretamente
           window.location.reload();
         } else {
           alert(data.mensagem || "Erro ao conectar à conta real.");
@@ -890,281 +1458,6 @@ document.addEventListener("DOMContentLoaded", function () {
   };
 
   // Inicialização
-  function inicializar() {
-    // Define valor inicial da meta
-    if (metaInput) {
-      metaInput.value = metaDiaria.toString();
-    }
-
-    // Verificação inicial do status do Deriv
-    verificarStatusDeriv();
-
-    // Inicia timers de verificação
-    verificacaoDerivTimer = setInterval(verificarStatusDeriv, 10000);
-    verificacaoStatusTimer = setInterval(verificarStatusRobo, 5000);
-
-    // Atualiza saldo inicial
-    atualizarSaldo();
-  }
-
-  // Iniciar o robô
-  function iniciarRobo() {
-    // Obtem valores atuais de modo e meta
-    if (modoSelect) modoOperacao = modoSelect.value;
-    if (metaInput) metaDiaria = parseFloat(metaInput.value);
-
-    // Valida meta
-    if (isNaN(metaDiaria) || metaDiaria < 10) {
-      adicionarLog("⚠️ Meta inválida! Mínimo: $10.00");
-      return;
-    }
-
-    // Configuração do botão
-    botaoControle.textContent = "Parando...";
-    botaoControle.disabled = true;
-
-    // Envia comando para o servidor
-    fetch("/toggle_bot", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        modo: modoOperacao,
-        meta: metaDiaria,
-      }),
-    })
-      .then((response) => response.json())
-      .then((data) => {
-        if (data.status === "iniciado") {
-          roboAtivo = true;
-          botaoControle.textContent = "Parar Robô";
-          botaoControle.classList.add("ativo");
-          adicionarLog("🚀 Robô iniciado no modo " + modoOperacao);
-
-          // Atualiza valores na interface
-          if (metaValor) metaValor.textContent = "/" + metaDiaria.toFixed(2);
-          document.getElementById("modo-selecionado").style.display = "block";
-          document.getElementById("modo-texto").textContent =
-            modoOperacao.toUpperCase();
-
-          // Inicia atualização contínua
-          atualizacaoTimer = setInterval(atualizarStatusRobo, 1000);
-        } else {
-          adicionarLog(
-            "⚠️ Erro ao iniciar: " + (data.mensagem || "Falha desconhecida")
-          );
-        }
-        botaoControle.disabled = false;
-      })
-      .catch((error) => {
-        adicionarLog("⚠️ Erro de conexão");
-        console.error("Erro:", error);
-        botaoControle.disabled = false;
-      });
-  }
-
-  // Parar o robô
-  function pararRobo() {
-    botaoControle.textContent = "Parando...";
-    botaoControle.disabled = true;
-
-    fetch("/toggle_bot", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({}),
-    })
-      .then((response) => response.json())
-      .then((data) => {
-        if (data.status === "parado") {
-          roboAtivo = false;
-          botaoControle.textContent = "Iniciar Robô";
-          botaoControle.classList.remove("ativo");
-          adicionarLog("🛑 Robô parado");
-
-          // Para atualização contínua
-          if (atualizacaoTimer) {
-            clearInterval(atualizacaoTimer);
-            atualizacaoTimer = null;
-          }
-
-          // Atualiza uma última vez
-          atualizarStatusRobo();
-        }
-        botaoControle.disabled = false;
-      })
-      .catch((error) => {
-        adicionarLog("⚠️ Erro de conexão");
-        console.error("Erro:", error);
-        botaoControle.disabled = false;
-      });
-  }
-
-  // Verifica status atual do robô
-  function verificarStatusRobo() {
-    fetch("/status_robo")
-      .then((response) => response.json())
-      .then((data) => {
-        if (data.ativo && !roboAtivo) {
-          // Robô está rodando mas interface não reflete
-          roboAtivo = true;
-          botaoControle.textContent = "Parar Robô";
-          botaoControle.classList.add("ativo");
-
-          // Inicia atualização contínua
-          if (!atualizacaoTimer) {
-            atualizacaoTimer = setInterval(atualizarStatusRobo, 1000);
-          }
-        } else if (!data.ativo && roboAtivo) {
-          // Robô está parado mas interface não reflete
-          roboAtivo = false;
-          botaoControle.textContent = "Iniciar Robô";
-          botaoControle.classList.remove("ativo");
-
-          // Para atualização contínua
-          if (atualizacaoTimer) {
-            clearInterval(atualizacaoTimer);
-            atualizacaoTimer = null;
-          }
-        }
-      })
-      .catch((error) => {
-        console.error("Erro ao verificar status:", error);
-      });
-  }
-
-  // Verifica status da conexão com Deriv
-  function verificarStatusDeriv() {
-    fetch("/status_deriv")
-      .then((response) => response.json())
-      .then((data) => {
-        if (data.status === "ok") {
-          statusDeriv.textContent = "✅ Conectado ao servidor Deriv";
-          statusDeriv.style.color = "var(--cor-verde)";
-        } else {
-          statusDeriv.textContent =
-            "❌ " + (data.mensagem || "Erro de conexão com Deriv");
-          statusDeriv.style.color = "var(--cor-vermelha)";
-        }
-      })
-      .catch((error) => {
-        statusDeriv.textContent = "❌ Falha ao verificar conexão";
-        statusDeriv.style.color = "var(--cor-vermelha)";
-      });
-  }
-
-  // Atualiza o saldo atual
-  function atualizarSaldo() {
-    fetch("/saldo_atual")
-      .then((response) => response.json())
-      .then((data) => {
-        if (data.status === "ok" && saldoValor) {
-          saldoAtual = parseFloat(data.saldo);
-          saldoValor.textContent = saldoAtual.toFixed(2);
-        }
-      })
-      .catch((error) => {
-        console.error("Erro ao atualizar saldo:", error);
-      });
-  }
-
-  // Atualiza a tabela de histórico
-  function atualizarHistorico() {
-    fetch("/historico_resultados")
-      .then((response) => response.json())
-      .then((data) => {
-        if (historicoTabela && data.length > 0) {
-          // Verifica se o histórico precisa ser atualizado
-          const ultimaLinha = historicoTabela.lastElementChild;
-          const ultimoRegistro = data[data.length - 1];
-
-          if (
-            !ultimaLinha ||
-            ultimaLinha.children[0].textContent !== ultimoRegistro.data ||
-            ultimaLinha.children[1].textContent !== ultimoRegistro.hora
-          ) {
-            // Adiciona novas linhas na tabela
-            data.forEach((op, idx) => {
-              // Verifica se já existe na tabela para evitar duplicatas
-              let existe = false;
-              for (let i = 0; i < historicoTabela.children.length; i++) {
-                const linha = historicoTabela.children[i];
-                if (
-                  linha.children[0].textContent === op.data &&
-                  linha.children[1].textContent === op.hora
-                ) {
-                  existe = true;
-                  break;
-                }
-              }
-
-              if (!existe) {
-                // Cria nova linha
-                const linha = document.createElement("tr");
-
-                // Data
-                const celulaData = document.createElement("td");
-                celulaData.textContent = op.data;
-                linha.appendChild(celulaData);
-
-                // Hora
-                const celulaHora = document.createElement("td");
-                celulaHora.textContent = op.hora;
-                linha.appendChild(celulaHora);
-
-                // Tipo
-                const celulaTipo = document.createElement("td");
-                celulaTipo.textContent = op.tipo.toUpperCase();
-                linha.appendChild(celulaTipo);
-
-                // Valor
-                const celulaValor = document.createElement("td");
-                celulaValor.textContent = "$" + op.valor.toFixed(2);
-                linha.appendChild(celulaValor);
-
-                // Resultado - Agora com animação
-                const celulaResultado = document.createElement("td");
-                celulaResultado.classList.add("resultado");
-
-                // Aplicar animação do resultado
-                animarResultado(celulaResultado, op.resultado_real);
-
-                linha.appendChild(celulaResultado);
-
-                // Adiciona linha na tabela
-                historicoTabela.appendChild(linha);
-
-                // Mantém rolagem no final
-                const tabela = document.getElementById("tabela-historico");
-                if (tabela) {
-                  tabela.scrollTop = tabela.scrollHeight;
-                }
-              }
-            });
-          }
-        }
-      })
-      .catch((error) => {
-        console.error("Erro ao atualizar histórico:", error);
-      });
-  }
-
-  // Adiciona log temporário na interface
-  function adicionarLog(mensagem) {
-    if (logTemp) {
-      logTemp.textContent = mensagem;
-
-      // Efeito de fade
-      logTemp.style.opacity = "1";
-      setTimeout(() => {
-        logTemp.style.opacity = "0.7";
-      }, 3000);
-    }
-  }
-
-  // Inicializa a página
   inicializar();
 
   // Simular sequência de operações para demonstração (remover em produção)
@@ -1266,4 +1559,147 @@ document.addEventListener("DOMContentLoaded", function () {
       }
     }, 2000);
   }
+
+  // Detecção de dispositivo móvel
+  function detectarDispositivoMovel() {
+    isMobile =
+      window.innerWidth <= 768 || "ontouchstart" in document.documentElement;
+
+    if (isMobile) {
+      document.body.classList.add("mobile-device");
+      ajustarInterfaceMobile();
+      adicionarSuporteGestos();
+    } else {
+      document.body.classList.remove("mobile-device");
+      removerSuporteGestos();
+    }
+  }
+
+  // Adiciona suporte a gestos de toque para facilitar a interação
+  function adicionarSuporteGestos() {
+    // Verifica se já existe um listener para evitar duplicações
+    if (!window.temListenersGestos) {
+      // Suporte para swipe na tabela de histórico (para navegação)
+      const historicoEl = document.querySelector(".tabela-wrapper");
+      if (historicoEl) {
+        let touchStartX = 0;
+        let touchEndX = 0;
+
+        historicoEl.addEventListener(
+          "touchstart",
+          (e) => {
+            touchStartX = e.changedTouches[0].screenX;
+          },
+          { passive: true }
+        );
+
+        historicoEl.addEventListener(
+          "touchend",
+          (e) => {
+            touchEndX = e.changedTouches[0].screenX;
+            processarGestoSwipe(touchStartX, touchEndX);
+          },
+          { passive: true }
+        );
+      }
+
+      // Toque duplo no saldo para atualizar o saldo
+      const saldoEl = document.getElementById("saldo-valor");
+      if (saldoEl) {
+        saldoEl.addEventListener("dblclick", () => {
+          atualizarSaldoEmTempoReal(true);
+          saldoEl.classList.add("destaque-mobile");
+          setTimeout(() => saldoEl.classList.remove("destaque-mobile"), 1500);
+        });
+      }
+
+      window.temListenersGestos = true;
+    }
+  }
+
+  // Remove os listeners de gestos quando não estiver em dispositivo móvel
+  function removerSuporteGestos() {
+    // Apenas marca a flag, pois remover listeners específicos é complexo
+    window.temListenersGestos = false;
+  }
+
+  // Processa os gestos de swipe horizontal
+  function processarGestoSwipe(inicioX, fimX) {
+    const swipeThreshold = 50; // Mínimo de pixels para considerar um swipe
+
+    if (inicioX - fimX > swipeThreshold) {
+      // Swipe para esquerda - avançar página na tabela
+      const botaoAvancar = document.querySelector(
+        '.icone-historico[data-acao="avancar"]'
+      );
+      if (botaoAvancar) {
+        botaoAvancar.click();
+      }
+    } else if (fimX - inicioX > swipeThreshold) {
+      // Swipe para direita - retornar página na tabela
+      const botaoVoltar = document.querySelector(
+        '.icone-historico[data-acao="voltar"]'
+      );
+      if (botaoVoltar) {
+        botaoVoltar.click();
+      }
+    }
+  }
+
+  // Ajustes específicos para interface mobile
+  function ajustarInterfaceMobile() {
+    const saldoValor = document.getElementById("saldo-valor");
+    const lucroValor = document.getElementById("lucro-valor");
+
+    if (isMobile) {
+      // Reduz informações na tabela de histórico para visualização mobile
+      const tabela = document.getElementById("historico-tabela");
+      if (tabela) {
+        const cabecalhos = tabela.querySelectorAll("th");
+        const linhas = tabela.querySelectorAll("tr:not(:first-child)");
+
+        // Ajusta células importantes para melhor visualização
+        if (cabecalhos.length > 0) {
+          if (window.innerWidth <= 480) {
+            // Em telas muito pequenas, oculta colunas menos importantes
+            Array.from(cabecalhos).forEach((th, index) => {
+              if (index !== 0 && index !== 2 && index !== 3) {
+                th.classList.add("hide-on-mobile");
+
+                // Oculta as colunas correspondentes em todas as linhas
+                linhas.forEach((linha) => {
+                  const celulas = linha.querySelectorAll("td");
+                  if (celulas[index]) {
+                    celulas[index].classList.add("hide-on-mobile");
+                  }
+                });
+              }
+            });
+          }
+        }
+      }
+
+      // Ajusta o comportamento do botão de iniciar/parar para dispositivos móveis
+      const botaoControle = document.getElementById("bot-control-btn");
+      if (botaoControle) {
+        // Adiciona feedback tátil para dispositivos que suportam
+        botaoControle.addEventListener("click", () => {
+          if ("vibrate" in navigator) {
+            navigator.vibrate(50);
+          }
+        });
+      }
+    }
+  }
+
+  // Inicialização
+  document.addEventListener("DOMContentLoaded", function () {
+    // Detecta se é dispositivo móvel
+    detectarDispositivoMovel();
+
+    // Adiciona listener para redimensionamento
+    window.addEventListener("resize", detectarDispositivoMovel);
+
+    // ... resto do código existente ...
+  });
 });
