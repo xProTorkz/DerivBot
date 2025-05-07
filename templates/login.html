@@ -132,8 +132,16 @@
 
       {% if erro %}
       <div class="erro">{{ erro }}</div>
-      {% endif %}
-
+      {% elif session.get('erro_licenca') %}
+      <div class="erro">{{ session.get('erro_licenca') }}</div>
+      {% endif %} {% if session.get('erro_licenca') and 'gerada' in
+      session.get('erro_licenca') %}
+      <div class="alerta-cautela">
+        <b>Ativação necessária:</b> Sua licença já foi gerada! Agora você
+        precisa informar seu(s) token(s) da Deriv para completar a ativação e
+        começar a usar o robô.
+      </div>
+      {% else %}
       <div class="alerta-risco">
         ⚠️ <b>Aviso de Risco:</b> Operar nos mercados financeiros envolve riscos
         significativos. Nunca opere valores que não pode perder. O uso deste
@@ -145,6 +153,7 @@
         cautela. Defina metas realistas, respeite seu limite diário e evite
         operar sob pressão ou emoção.
       </div>
+      {% endif %}
 
       <form method="POST" action="{{ url_for('ativacao') }}">
         <div class="form-group">

@@ -1,0 +1,15 @@
+{
+  "editor.fontSize": 12,
+  "editor.minimap.sectionHeaderFontSize": 8,
+  "workbench.sash.size": 4,
+  "workbench.editor.doubleClickTabToToggleEditorGroupSizes": "expand",
+  "screencastMode.fontSize": 56,
+  "debug.console.fontSize": 12,
+  "scm.inputFontSize": 12,
+  "terminal.integrated.fontSize": 12,
+  "markdown.preview.fontSize": 12,
+  "editor.accessibilityPageSize": 8,
+  "editor.scrollbar.horizontalScrollbarSize": 10,
+  "editor.scrollbar.verticalScrollbarSize": 10,
+  "scm.graph.pageSize": 50
+}

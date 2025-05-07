@@ -10,6 +10,9 @@ from typing import List, Dict, Optional, Tuple, Any, Union
 from dataclasses import dataclass
 from enum import Enum
 
+# Novo import do arquivo de configurações globais
+import config
+
 from inteligencia import carregar_memoria, salvar_memoria
 
 # Configuração de logging
@@ -635,17 +638,108 @@ def executar_teste(velas_teste: List[Dict]) -> None:
 
 class Catalogador:
     def __init__(self):
-        self.ticks = []
-        self.velas = []
+        # Timeframe (em segundos) definido em config.py
+        self.timeframe: int = max(1, int(getattr(config, "TIMEFRAME", 1)))
+
+        # Lista bruta de ticks [(timestamp, preco)] para fins de depuração
+        self.ticks: List[Tuple[float, float]] = []
+
+        # Velas OHLCV já consolidadas
+        self.velas: List[Dict[str, Union[int, float]]] = []
+
+        # Estado da vela em construção
+        self._current_candle: Optional[Dict[str, Union[int, float]]] = None
+        self._current_candle_start: Optional[int] = None
+
+    # --------- Novo método usado pelo Motor para decidir entradas ----------
+    def analisar_scalping(self, cliente_id: str = "default") -> dict:
+        """Analisa as velas acumuladas e retorna um sinal de CALL/PUT ou None.
+
+        Retorna:
+            {"sinal": "compra"|"venda"|None, "confianca": float(0-1)}
+        """
+        try:
+            # Precisamos de pelo menos 20 velas para a IA tomar decisão
+            if len(self.velas) < CONFIG["analise"]["limites"]["min_velas"]:
+                return {"sinal": None, "confianca": 0.0}
+
+            # Usa a pipeline de decisão já implementada (IA + técnico)
+            decisao = analisar_entrada_chatgpt(self.velas, 0.0, [], cliente_id)
+
+            if decisao == DecisaoTipo.CALL.value:
+                return {"sinal": "compra", "confianca": 0.8}
+            elif decisao == DecisaoTipo.PUT.value:
+                return {"sinal": "venda", "confianca": 0.8}
+            else:
+                return {"sinal": None, "confianca": 0.0}
+        except Exception as e:
+            logger.error(f"Erro em analisar_scalping: {e}")
+            return {"sinal": None, "confianca": 0.0}
 
     def adicionar_tick(self, preco):
-        self.ticks.append(preco)
-        # Aqui você pode implementar a lógica de transformar ticks em velas
+        """Adiciona um tick de preço e consolida em velas do timeframe definido.
+
+        Args:
+            preco (float): Último preço cotado.
+        """
+
+        import time  # import local para evitar impactos em outros módulos
+
+        # Marca temporal do tick (segundos desde epoch)
+        ts: float = time.time()
+
+        # Salva tick bruto para auditoria/depuração (mantém apenas os últimos 5.000)
+        self.ticks.append((ts, preco))
+        if len(self.ticks) > 5000:
+            self.ticks = self.ticks[-5000:]
+
+        # Determina o início da vela corrente (alinha ao timeframe)
+        candle_start: int = int(ts // self.timeframe * self.timeframe)
+
+        # Se ainda não existe vela aberta, cria uma nova
+        if self._current_candle is None:
+            self._current_candle_start = candle_start
+            self._current_candle = {
+                "timestamp": candle_start,
+                "open": preco,
+                "high": preco,
+                "low": preco,
+                "close": preco,
+                "volume": 1,
+            }
+            return
+
+        # Caso o tick ainda pertença à janela da vela atual
+        if candle_start == self._current_candle_start:
+            self._current_candle["high"] = max(self._current_candle["high"], preco)
+            self._current_candle["low"] = min(self._current_candle["low"], preco)
+            self._current_candle["close"] = preco
+            self._current_candle["volume"] += 1
+        else:
+            # Vela atual é finalizada e armazenada
+            self.velas.append(self._current_candle)
+
+            # Mantém apenas as últimas 1.000 velas para economizar memória
+            if len(self.velas) > 1000:
+                self.velas = self.velas[-1000:]
+
+            # Inicia uma nova vela com o tick recebido
+            self._current_candle_start = candle_start
+            self._current_candle = {
+                "timestamp": candle_start,
+                "open": preco,
+                "high": preco,
+                "low": preco,
+                "close": preco,
+                "volume": 1,
+            }
 
     def obter_velas(self):
         # Retorna as velas já processadas
         return self.velas
 
     def limpar_dados(self):
-        self.ticks = []
-        self.velas = []
+        self.ticks.clear()
+        self.velas.clear()
+        self._current_candle = None
+        self._current_candle_start = None

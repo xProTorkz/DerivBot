@@ -8,73 +8,132 @@
       name="description"
       content="Painel de controle do robô inteligente para Deriv"
     />
+    <!-- Meta tags para evitar caching -->
+    <meta
+      http-equiv="Cache-Control"
+      content="no-cache, no-store, must-revalidate"
+    />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
     <title>Painel Deriv - Robô Inteligente</title>
-    <link rel="stylesheet" href="/static/style.css" />
-    <style>
-      @media (max-width: 700px) {
-        .card-conta {
-          left: 8px;
-          top: 8px;
-          min-width: 180px;
-          padding: 10px;
-        }
-        .info-bar {
-          padding: 10px;
-        }
-        .painel-robo {
-          margin: 0 4vw;
-        }
-      }
-    </style>
+    <link
+      rel="stylesheet"
+      href="/static/style.css?v={{ range(1, 999999) | random }}"
+    />
   </head>
   <body>
-    <!-- Card de Conta -->
-    <div class="card-conta">
-      <div class="status-dot" aria-hidden="true"></div>
-      <div class="info-conta">
-        <div class="tipo-conta">
-          {{ "Conta Virtual" if tipo_conta == "demo" else "Conta Real" }}
+    <!-- Fundo decorativo com mapa-múndi e gráficos -->
+    <div class="bg-mapa-mundi-svg" aria-hidden="true"></div>
+
+    <!-- Barra superior de navegação -->
+    <div class="navbar-topo">
+      <!-- Seção superior com conta e desconectar -->
+      <div class="topo-superior">
+        <!-- Card de Conta à esquerda com dropdown -->
+        <div class="card-conta-container card-esquerda">
+          <div class="card-conta">
+            <div class="status-dot" aria-hidden="true"></div>
+            <div class="info-conta">
+              <div class="tipo-conta">
+                {{ "Conta Virtual" if tipo_conta == "demo" else "Conta Real" }}
+              </div>
+              <div class="numero-conta">
+                {{ session.get("deriv_account", "VRTCxxxxxxx") }}
+              </div>
+            </div>
+            <button
+              class="dropdown-seta"
+              id="dropdown-toggle"
+              aria-label="Abrir menu de contas"
+            >
+              &#9660;
+            </button>
+          </div>
+
+          <!-- Menu de Opções (Dropdown) -->
+          <div class="dropdown-menu" id="dropdown-conta">
+            {% if tipo_conta == 'real' and session.get('token_deriv_demo') %}
+            <button
+              type="button"
+              class="dropdown-btn"
+              onclick="trocarContaDemo()"
+            >
+              Conta Demo
+            </button>
+            {% elif tipo_conta == 'demo' and session.get('token_deriv_real') %}
+            <button
+              type="button"
+              class="dropdown-btn"
+              onclick="trocarContaReal()"
+            >
+              Conta Real
+            </button>
+            {% endif %}
+          </div>
         </div>
-        <div class="numero-conta">
-          {{ session.get("deriv_account", "VRTCxxxxxxx") }} - {{ moeda or "USD"
-          }}
+
+        <!-- Botão de Desconectar (Direita) -->
+        <div class="logout-container">
+          <button
+            class="logout-btn"
+            onclick="desconectar()"
+            aria-label="Desconectar"
+          >
+            <span class="logout-icon">🔐</span
+            ><span class="logout-text">Desconectar</span>
+          </button>
         </div>
       </div>
-      <button class="dropdown-seta" aria-label="Abrir menu de contas">
-        &#9660;
-      </button>
-      <div class="dropdown-conta" id="dropdown-conta" style="display: none">
-        {% if tipo_conta == 'real' and session.get('token_deriv_demo') %}
-        <button type="button" class="dropdown-btn" onclick="trocarContaDemo()">
-          Conta Demo
-        </button>
-        {% elif tipo_conta == 'demo' and session.get('token_deriv_real') %}
-        <button type="button" class="dropdown-btn" onclick="trocarContaReal()">
-          Conta Real
-        </button>
-        {% endif %}
+
+      <!-- Informações da licença (abaixo) - Layout simplificado -->
+      <div class="licenca-wrapper">
+        <div class="licenca-mini">
+          <div class="licenca-mini-item">
+            <span class="licenca-mini-icone">🔑</span>
+            <span class="licenca-mini-text">ID:</span>
+            <span class="licenca-mini-valor">
+              {{ codigo_licenca[:4] if codigo_licenca else 'XXXX' }}<span
+                class="codigo-secundario"
+                >***</span
+              >
+            </span>
+          </div>
+          <div class="licenca-mini-item">
+            <span class="licenca-mini-icone">⭐</span>
+            <span class="licenca-mini-text">Plano:</span>
+            {% if plano == 'free' %}
+            <span class="licenca-mini-valor licenca-mini-plano free">FREE</span>
+            {% elif plano == 'vitalicio' %}
+            <span class="licenca-mini-valor licenca-mini-plano vitalicio"
+              >VITALÍCIO</span
+            >
+            {% else %}
+            <span class="licenca-mini-valor licenca-mini-plano mensal"
+              >MENSAL</span
+            >
+            {% endif %}
+          </div>
+          <div class="licenca-mini-item">
+            <span class="licenca-mini-icone">🎯</span>
+            <span class="licenca-mini-text">Operações:</span>
+            <span class="licenca-mini-valor" id="operacoes-diarias">0</span>
+          </div>
+          <div class="licenca-mini-item">
+            <span class="licenca-mini-icone">📅</span>
+            <span class="licenca-mini-text">Val:</span>
+            {% if plano == 'vitalicio' %}
+            <span class="licenca-mini-valor licenca-mini-plano vitalicio"
+              >FULL</span
+            >
+            {% else %}
+            <span class="licenca-mini-valor">{{ validade }}</span>
+            {% endif %}
+          </div>
+        </div>
       </div>
     </div>
 
     <main class="painel-central">
-      <!-- Informações da Licença -->
-      <div
-        class="licenca-info glass-dark"
-        style="
-          margin-top: 10px;
-          font-size: 13px;
-          line-height: 1.5;
-          padding: 10px 15px;
-          text-align: center;
-        "
-      >
-        <p>
-          🔐 <strong>ID da Conta:</strong> {{ email }} |
-          <strong>Tipo:</strong> {{ tipo_conta.upper() }}
-        </p>
-        <p>⏳ <strong>Validade:</strong> {{ validade }}</p>
-      </div>
-
       <!-- Saldo e Lucro -->
       <div class="info-bar">
         <div class="saldo">
@@ -84,7 +143,6 @@
             <span id="saldo-valor"
               >{{ saldo if saldo is not none else '--' }}</span
             >
-            <span id="moeda">{{ moeda if moeda else 'USD' }}</span>
           </p>
         </div>
         <div class="lucro">
@@ -98,7 +156,7 @@
       </div>
 
       <!-- Controles do Robô -->
-      <div class="painel-robo glass-dark" id="painel-config">
+      <div class="painel-robo" id="painel-config">
         <div class="modo-meta-wrapper">
           <div id="modo-container">
             <label for="modo">Modo de operação:</label>
@@ -134,12 +192,7 @@
         >
           🔄 Modo selecionado: <span id="modo-texto"></span>
         </div>
-        <p
-          id="status-deriv"
-          style="font-size: 13px; margin-top: 10px; color: #ccc"
-        >
-          🔄 Conectando ao servidor Deriv...
-        </p>
+        <p id="status-deriv">🔄 Conectando ao servidor Deriv...</p>
       </div>
 
       <!-- Logs -->
@@ -164,7 +217,7 @@
               id="bolinha-abrindo"
               aria-label="Status abrindo contrato"
             ></div>
-            <span>Abrindo Contrato</span>
+            <span>Abrindo</span>
           </div>
           <div>
             <div
@@ -172,60 +225,50 @@
               id="bolinha-finalizado"
               aria-label="Status finalizado"
             ></div>
-            <span>Contrato Finalizado</span>
+            <span>Finalizado</span>
           </div>
         </div>
-        <div
-          id="barra-progresso"
-          role="progressbar"
-          aria-valuenow="0"
-          aria-valuemin="0"
-          aria-valuemax="100"
-        ></div>
       </div>
 
       <!-- Histórico -->
-      <div class="historico glass-dark">
-        <div
-          class="linha-titulo-historico"
-          style="
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
-            padding: 10px 80px;
-          "
-        >
-          <div style="display: flex; gap: 25px">
+      <div class="historico">
+        <div class="linha-titulo-historico">
+          <div class="acoes-esquerda">
             <button
-              class="aba active"
+              class="icone-historico ativo"
+              id="btn-historico-atual"
               onclick="trocarAba('tabela')"
-              title="Tabela"
-              aria-label="Ver tabela"
+              title="Histórico da operação atual"
+              aria-label="Ver histórico da operação atual"
             >
               📄
             </button>
             <button
-              class="aba"
-              onclick="trocarAba('resumo')"
-              title="Resumo"
-              aria-label="Ver resumo"
+              class="icone-historico"
+              id="btn-historico-completo"
+              onclick="trocarAba('historico-completo')"
+              title="Todos os históricos"
+              aria-label="Ver todos os históricos"
             >
               📊
             </button>
           </div>
-          <h2 style="margin: 0; font-size: 20px">Histórico de Operações</h2>
-          <div style="display: flex; gap: 25px">
+
+          <h2 class="titulo-historico">Histórico de Operações</h2>
+
+          <div class="acoes-direita">
             <button
-              class="aba"
+              class="icone-historico"
+              id="btn-graficos"
               onclick="trocarAba('grafico')"
-              title="Gráfico"
-              aria-label="Ver gráfico"
+              title="Gráficos e detalhes"
+              aria-label="Ver gráficos e detalhes"
             >
               📈
             </button>
             <button
-              class="aba"
+              class="icone-historico"
+              id="btn-limpar"
               onclick="limparHistorico()"
               title="Limpar Histórico"
               aria-label="Limpar histórico"
@@ -247,7 +290,11 @@
         </div>
 
         <div id="grafico-diario" style="display: none; text-align: center">
-          <p style="color: gray">📈 Gráficos ainda em construção...</p>
+          <p style="color: gray">📈 Gráficos e detalhes em tempo real...</p>
+        </div>
+
+        <div id="historico-completo" style="display: none; text-align: center">
+          <p style="color: gray">📊 Todos os históricos de operações...</p>
         </div>
 
         <div class="tabela-wrapper" id="tabela-historico">
@@ -282,15 +329,15 @@
 
       <!-- Rodapé -->
       <footer class="rodape-painel">
-        <div>
+        <div class="status-conexao">
           <div
             class="status-dot"
             style="background: #00d67b"
             aria-hidden="true"
           ></div>
-          <span>Conectado ao Deriv</span>
+          <span>Conectado</span>
         </div>
-        <div id="hora-atual" role="timer"></div>
+        <div class="hora-data" id="hora-atual" role="timer"></div>
       </footer>
     </main>
 
@@ -303,10 +350,79 @@
       }
       setInterval(atualizarHora, 1000);
       atualizarHora();
+
+      // Função para atualizar a barra de progresso entre as bolinhas
+      function atualizarProgressoBarra(etapa) {
+        const statusEtapas = document.querySelector(".status-etapas");
+        let progresso = 0;
+
+        if (etapa === "analisando") {
+          progresso = 0;
+          ativarBolinha("bolinha-analisando");
+          desativarBolinha("bolinha-abrindo");
+          desativarBolinha("bolinha-finalizado");
+        } else if (etapa === "abrindo") {
+          progresso = 50;
+          ativarBolinha("bolinha-analisando");
+          ativarBolinha("bolinha-abrindo");
+          desativarBolinha("bolinha-finalizado");
+        } else if (etapa === "finalizado") {
+          progresso = 100;
+          ativarBolinha("bolinha-analisando");
+          ativarBolinha("bolinha-abrindo");
+          ativarBolinha("bolinha-finalizado");
+        } else {
+          // Etapa "parado" ou indefinida
+          desativarBolinha("bolinha-analisando");
+          desativarBolinha("bolinha-abrindo");
+          desativarBolinha("bolinha-finalizado");
+        }
+
+        // Atualiza a largura da barra de progresso
+        statusEtapas.style.setProperty("--progresso-barra", `${progresso}%`);
+      }
+
+      function ativarBolinha(id) {
+        document.getElementById(id).classList.add("ativa");
+      }
+
+      function desativarBolinha(id) {
+        document.getElementById(id).classList.remove("ativa");
+      }
+
+      // Controle do botão
+      document.addEventListener("DOMContentLoaded", function () {
+        const botaoControle = document.getElementById("bot-control-btn");
+        let botaoAtivo = false;
+
+        // Alternância do botão
+        botaoControle.addEventListener("click", function () {
+          botaoAtivo = !botaoAtivo;
+
+          if (botaoAtivo) {
+            this.textContent = "Parar Robô";
+            this.classList.add("ativo");
+          } else {
+            this.textContent = "Iniciar Robô";
+            this.classList.remove("ativo");
+          }
+        });
+      });
+
+      // Forçar recarregamento do CSS para evitar problemas de cache
+      function forcarRecarregamentoCSS() {
+        const links = document.getElementsByTagName("link");
+        for (let i = 0; i < links.length; i++) {
+          if (links[i].rel === "stylesheet") {
+            const href = links[i].href;
+            links[i].href = href + "?v=" + new Date().getTime();
+          }
+        }
+      }
+
+      // Executa após o carregamento da página
+      window.addEventListener("load", forcarRecarregamentoCSS);
     </script>
     <script src="{{ url_for('static', filename='scripts.js') }}" defer></script>
-    <script>
-      /* Controle do dropdown agora está em static/scripts.js */
-    </script>
   </body>
 </html>

@@ -86,9 +86,26 @@ class Motor:
                 if not self.rodando or self.meta_atingida:
                     return
 
-                sinal = self.catalogador.analisar_scalping()
-                if sinal["sinal"] and sinal["confianca"] >= 0.7:
-                    self.executar_operacao(sinal["sinal"])
+                # Modificado para usar análise de micro scalping
+                from inteligencia import analisar_micro_scalping
+
+                velas = self.catalogador.obter_velas()
+                lucro_atual = self.obter_saldo() - self.saldo_inicial
+
+                # Verificar se temos velas suficientes para análise
+                if len(velas) >= 20:
+                    analise = analisar_micro_scalping(
+                        velas=velas,
+                        meta=config.TAKE_PROFIT,
+                        lucro_atual=lucro_atual,
+                        modo="iniciante",  # Valor default, será sobrescrito pelo App
+                    )
+
+                    if analise["sinal"] and analise["confianca"] >= 0.8:
+                        tipo_operacao = (
+                            "CALL" if analise["sinal"] == "compra" else "PUT"
+                        )
+                        self.executar_operacao(tipo_operacao)
 
             if "buy" in data and data["buy"]:
                 contract_id = data["buy"]["contract_id"]

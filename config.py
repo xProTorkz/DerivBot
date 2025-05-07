@@ -26,6 +26,45 @@ MAX_OPERATIONS: int = int(os.getenv("MAX_OPERATIONS", "50"))
 STOP_LOSS: float = float(os.getenv("STOP_LOSS", "30"))
 TAKE_PROFIT: float = float(os.getenv("TAKE_PROFIT", "50"))
 
+# --------------------------- MICRO SCALPING ---------------------------
+# Modos de operação (referência para cálculos)
+MODO_INICIANTE = {
+    "max_operacoes": 1,
+    "percent_entrada": 0.005,  # 0.5% do valor da meta
+    "stop_consecutivos": 3,  # parar após 3 perdas consecutivas
+    "stop_percent": 0.5,  # 50% da meta (stop loss)
+    "martingale": 1,  # apenas 1 martingale
+    "win_rate": 95,  # taxa de acerto estimada para este modo (%)
+}
+
+MODO_CONSERVADOR = {
+    "max_operacoes": 3,
+    "percent_entrada": 0.01,  # 1% do valor da meta
+    "stop_consecutivos": 3,  # parar após 3 perdas consecutivas
+    "stop_percent": 0.5,  # 50% da meta (stop loss)
+    "martingale": 1,  # apenas 1 martingale
+    "win_rate": 85,  # taxa de acerto estimada para este modo (%)
+}
+
+MODO_AGRESSIVO = {
+    "max_operacoes": 5,
+    "percent_entrada": 0.05,  # 5% do valor da meta
+    "stop_consecutivos": 3,  # parar após 3 perdas consecutivas
+    "stop_percent": 0.5,  # 50% da meta (stop loss)
+    "martingale": 1,  # apenas 1 martingale
+    "win_rate": 80,  # taxa de acerto estimada para este modo (%)
+}
+
+# Configurações gerais do micro scalping
+MICRO_SCALPING = {
+    "suporte_resistencia_janela": 5,  # janela para detectar suporte/resistência
+    "suporte_resistencia_margem": 0.03,  # margem para considerar que está no suporte/resistência (3%)
+    "rsi_sobrecompra": 70,  # limiar de sobrecompra do RSI
+    "rsi_sobrevenda": 30,  # limiar de sobrevenda do RSI
+    "meta_minima": 10.0,  # meta mínima em dólares
+    "meta_progresso_reducao": 75.0,  # % de progresso da meta para começar a reduzir operações
+}
+
 # --------------------------- INDICADORES ---------------------------
 RSI_PERIODO: int = int(os.getenv("RSI_PERIODO", "5"))
 RSI_SOBRECOMPRADO: int = int(os.getenv("RSI_SOBRECOMPRADO", "70"))
@@ -35,12 +74,12 @@ BOLLINGER_DESVIO: int = int(os.getenv("BOLLINGER_DESVIO", "2"))
 
 # --------------------------- LISTA DE ATIVOS ---------------------------
 PARES = [
-    "frxEURUSD",
-    "frxGBPUSD",
-    "frxUSDJPY",
-    "frxAUDUSD",
+    "R_100",  # Volatility 100 Index
+    "R_50",  # Volatility 50 Index
+    "R_25",  # Volatility 25 Index
+    "R_10",  # Volatility 10 Index
 ]
-PAR_PADRAO = os.getenv("PAR_PADRAO", "frxEURUSD")
+PAR_PADRAO = os.getenv("PAR_PADRAO", "R_100")
 
 # --------------------------- LOG ---------------------------
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
