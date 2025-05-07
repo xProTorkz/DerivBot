@@ -83,25 +83,44 @@ document.addEventListener("DOMContentLoaded", function () {
   });
 
   function atualizarLogTemp(mensagem) {
-    if (logTemp) {
-      logTemp.textContent = mensagem;
-    }
+    document.getElementById("log-temporario").textContent = mensagem;
   }
 
   function atualizarStatusEtapas(etapa) {
-    document.querySelectorAll(".bolinha").forEach((b) => {
-      b.style.backgroundColor = "#666";
-    });
+    // Remove pisca de todas as bolinhas
+    document
+      .querySelectorAll(".bolinha")
+      .forEach((b) => b.classList.remove("pisca"));
 
-    if (etapa === "iniciando") {
-      document.getElementById("bolinha-analisando").style.backgroundColor =
-        "orange";
-    } else if (etapa === "contrato") {
-      document.getElementById("bolinha-abrindo").style.backgroundColor = "gold";
-    } else if (etapa === "finalizado") {
-      document.getElementById("bolinha-finalizado").style.backgroundColor =
-        "#15ff82";
+    // Define etapas e índice
+    const etapas = ["analisando", "abrindo", "finalizado", "completo"];
+    const idx = etapas.indexOf(etapa);
+
+    // Atualiza barra de preenchimento
+    const preenchimento = document.getElementById("preenchimento-barra");
+    if (preenchimento) {
+      // 0 etapas = 0%, 1 = 33%, 2 = 66%, 3 = 100%
+      const percentuais = [0, 33, 66, 100];
+      preenchimento.style.width = percentuais[idx] + "%";
     }
+
+    // Cores das bolinhas
+    etapas.forEach((nome, i) => {
+      const bolinha = document.getElementById("bolinha-" + nome);
+      if (bolinha) {
+        if (i < idx) {
+          bolinha.style.background = "#ffd700";
+          bolinha.style.borderColor = "#fff";
+        } else if (i === idx) {
+          bolinha.style.background = "#fff";
+          bolinha.style.borderColor = "#ffd700";
+          bolinha.classList.add("pisca");
+        } else {
+          bolinha.style.background = "#fff";
+          bolinha.style.borderColor = "#ffd700";
+        }
+      }
+    });
   }
 
   window.atualizarTabelaResultadosSeRoboAtivo = function () {
@@ -226,7 +245,7 @@ document.addEventListener("DOMContentLoaded", function () {
         roboAtivo = data.ativo;
         if (roboAtivo) {
           atualizarLogTemp("⚙️ Robô está rodando...");
-          atualizarStatusEtapas("contrato");
+          atualizarStatusEtapas("analisando");
           botaoControle.textContent = "⛔ Parar Robô";
           botaoControle.style.backgroundColor = "#ff3b3b"; // vermelho
           botaoControle.style.color = "#fff";
@@ -250,12 +269,18 @@ document.addEventListener("DOMContentLoaded", function () {
         if (data.status === "ok") {
           const lucroEl = document.getElementById("lucro-valor");
           const metaEl = document.getElementById("meta-valor");
+          const metaInput = document.getElementById("meta");
 
           const lucro = parseFloat(data.lucro).toFixed(2);
           const meta = parseFloat(data.meta).toFixed(2);
 
           lucroEl.textContent = lucro;
           metaEl.textContent = "/" + meta;
+
+          // Atualiza o input de meta para refletir o valor real do backend
+          if (metaInput && !roboAtivo) {
+            metaInput.value = meta;
+          }
 
           lucroEl.className = lucro >= 0 ? "positivo" : "negativo";
         }
@@ -324,6 +349,7 @@ document.addEventListener("DOMContentLoaded", function () {
   atualizarSaldoEmTempoReal();
   verificarConexaoDeriv();
   atualizarStatusRobo();
+  atualizarLucroEMeta();
 
   // Atualizações periódicas
   setInterval(atualizarSaldoEmTempoReal, 5000);
@@ -339,4 +365,32 @@ document.addEventListener("DOMContentLoaded", function () {
         }
       });
   }, 5000);
+
+  document.getElementById("btn-conectar-demo").onclick = function () {
+    fetch("/conectar_demo", { method: "POST" })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.status === "ok") {
+          window.location.reload();
+        } else {
+          alert(data.mensagem || "Erro ao conectar à conta demo.");
+        }
+      });
+  };
+
+  function trocarContaDemo() {
+    fetch("/conectar_demo", { method: "POST" })
+      .then((res) => res.json())
+      .then((data) => window.location.reload());
+  }
+  function trocarContaReal() {
+    fetch("/conectar_real", { method: "POST" })
+      .then((res) => res.json())
+      .then((data) => window.location.reload());
+  }
+  function trocarContaSair() {
+    fetch("/trocar_conta", { method: "POST" }).then(
+      () => (window.location.href = "/login")
+    );
+  }
 });

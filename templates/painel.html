@@ -4,267 +4,195 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Painel de controle do robô inteligente para Deriv" />
     <title>Painel Deriv - Robô Inteligente</title>
     <link rel="stylesheet" href="/static/style.css" />
+    <style>
+      @media (max-width: 700px) {
+        .card-conta {
+          left: 8px;
+          top: 8px;
+          min-width: 180px;
+          padding: 10px;
+        }
+        .info-bar {
+          padding: 10px;
+        }
+        .painel-robo {
+          margin: 0 4vw;
+        }
+      }
+    </style>
   </head>
   <body>
-    <!-- TOPO COM TROCA E LOGOUT -->
-    <div class="top-bar">
-      <div
-        style="
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          width: 100%;
-        "
-      >
-        <div style="display: flex; gap: 10px; align-items: center">
-          <form action="/trocar_conta" method="POST">
-            <button class="logout-btn" type="submit">🔄 Trocar Conta</button>
-          </form>
+    <!-- Card de Conta -->
+    <div class="card-conta">
+      <div class="status-dot" aria-hidden="true"></div>
+      <div class="info-conta">
+        <div class="tipo-conta">
+          {{ "Conta Virtual" if tipo_conta == "demo" else "Conta Real" }}
         </div>
-        <form action="/logout" method="POST">
-          <button class="logout-btn" type="submit">🔐 Desconectar</button>
-        </form>
+        <div class="numero-conta">
+          {{ session.get("deriv_account", "VRTCxxxxxxx") }} - {{ moeda or "USD" }}
+        </div>
+      </div>
+      <button class="dropdown-seta" onclick="toggleDropdownConta()" aria-label="Abrir menu de contas">&#9660;</button>
+      <div class="dropdown-conta" id="dropdown-conta" style="display: none">
+        {% if tipo_conta == 'real' and session.get('token_deriv_demo') %}
+        <button type="button" class="dropdown-btn" onclick="trocarContaDemo()">
+          Conta Demo
+        </button>
+        {% elif tipo_conta == 'demo' and session.get('token_deriv_real') %}
+        <button type="button" class="dropdown-btn" onclick="trocarContaReal()">
+          Conta Real
+        </button>
+        {% endif %}
       </div>
     </div>
 
-    <!-- LICENÇA E DADOS -->
-    <div
-      class="licenca-info glass-dark"
-      style="
-        margin-top: 10px;
-        font-size: 13px;
-        line-height: 1.5;
-        padding: 10px 15px;
-        text-align: center;
-      "
-    >
-      🔐 <strong>ID da Conta:</strong> {{ email }} | <strong>Tipo:</strong> {{
-      tipo_conta.upper() }}<br />
-      ⏳ <strong>Validade:</strong> {{ validade }}
-    </div>
+    <main class="painel-central">
+      <!-- Informações da Licença -->
+      <div class="licenca-info glass-dark" style="margin-top: 10px; font-size: 13px; line-height: 1.5; padding: 10px 15px; text-align: center;">
+        <p>🔐 <strong>ID da Conta:</strong> {{ email }} | <strong>Tipo:</strong> {{ tipo_conta.upper() }}</p>
+        <p>⏳ <strong>Validade:</strong> {{ validade }}</p>
+      </div>
 
-    <!-- SALDO E LUCRO -->
-    <div class="info-bar">
-      <div class="saldo">
-        <label>Saldo</label>
-        <p id="valor-saldo" class="saldo-valor">
-          <span class="rs">$</span>
-          <span id="saldo-valor"
-            >{{ saldo if saldo is not none else '--' }}</span
-          >
-          <span id="moeda">{{ moeda if moeda else 'USD' }}</span>
+      <!-- Saldo e Lucro -->
+      <div class="info-bar">
+        <div class="saldo">
+          <label for="saldo-valor">Saldo</label>
+          <p id="valor-saldo" class="saldo-valor">
+            <span class="rs">$</span>
+            <span id="saldo-valor">{{ saldo if saldo is not none else '--' }}</span>
+            <span id="moeda">{{ moeda if moeda else 'USD' }}</span>
+          </p>
+        </div>
+        <div class="lucro">
+          <label for="lucro-valor">Lucro / Meta</label>
+          <p id="lucro-meta">
+            <span class="rs">$</span>
+            <span id="lucro-valor" class="positivo">0</span>
+            <span id="meta-valor">/0</span>
+          </p>
+        </div>
+      </div>
+
+      <!-- Controles do Robô -->
+      <div class="painel-robo glass-dark" id="painel-config">
+        <div class="modo-meta-wrapper">
+          <div id="modo-container">
+            <label for="modo">Modo de operação:</label>
+            <select class="modo-select" id="modo">
+              <option value="iniciante">🌱 Iniciante - 95%</option>
+              <option value="conservador">🛡️ Conservador - 85%</option>
+              <option value="agressivo">🔥 Agressivo - 80%</option>
+            </select>
+          </div>
+          <div id="meta-container">
+            <label for="meta">Meta diária:</label>
+            <input class="input-meta" id="meta" type="number" min="0" step="0.01" aria-label="Meta diária em dólares" />
+          </div>
+        </div>
+        <button id="bot-control-btn" aria-label="Controle do robô">Iniciar Robô</button>
+        <div id="modo-selecionado" style="display: none; margin-top: 10px; font-weight: bold; text-align: center;">
+          🔄 Modo selecionado: <span id="modo-texto"></span>
+        </div>
+        <p id="status-deriv" style="font-size: 13px; margin-top: 10px; color: #ccc">
+          🔄 Conectando ao servidor Deriv...
         </p>
-      </div>
-      <div class="lucro">
-        <label>Lucro / Meta</label>
-        <p id="lucro-meta">
-          <span class="rs">$</span>
-          <span id="lucro-valor" class="positivo">0</span>
-          <span id="meta-valor">/0</span>
-        </p>
-      </div>
-    </div>
-
-    <!-- CONTROLES DO ROBO -->
-    <!-- CONTROLES DO ROBO -->
-    <div class="painel-robo glass-dark" id="painel-config">
-      <div class="modo-meta-wrapper">
-        <div id="modo-container">
-          <label for="modo">Modo de operação:</label>
-          <select class="modo-select" id="modo">
-            <option value="iniciante">🌱 Iniciante - 95%</option>
-            <option value="conservador">🛡️ Conservador - 85%</option>
-            <option value="agressivo">🔥 Agressivo - 80%</option>
-          </select>
-        </div>
-
-        <div id="meta-container">
-          <label for="meta">Meta diária:</label>
-          <input
-            class="input-meta"
-            id="meta"
-            type="number"
-            min="0"
-            step="0.01"
-          />
-        </div>
+        <button id="btn-conectar-demo" class="btn-ativar" style="background: #00d67b; color: #000">
+          Conectar à Conta Demo
+        </button>
       </div>
 
-      <button id="bot-control-btn">Iniciar Robô</button>
+      <!-- Logs -->
+      <div class="log-temp" id="log-temporario" role="log" aria-live="polite">Aguardando logs...</div>
 
-      <!-- 🔄 MODO SELECIONADO ABAIXO DO BOTÃO -->
-      <div
-        id="modo-selecionado"
-        style="
-          display: none;
-          margin-top: 10px;
-          font-weight: bold;
-          text-align: center;
-        "
-      >
-        🔄 Modo selecionado: <span id="modo-texto"></span>
-      </div>
-
-      <p
-        id="status-deriv"
-        style="font-size: 13px; margin-top: 10px; color: #ccc"
-      >
-        🔄 Conectando ao servidor Deriv...
-      </p>
-    </div>
-
-    <!-- LOGS TEMPORÁRIOS -->
-    <div class="log-temp" id="log-temporario">Aguardando logs...</div>
-
-    <!-- STATUS DE OPERAÇÃO -->
-    <div
-      id="barra-status"
-      style="margin-top: 15px; width: 100%; text-align: center"
-    >
-      <div
-        style="
-          display: flex;
-          justify-content: space-around;
-          align-items: center;
-          max-width: 500px;
-          margin: auto;
-        "
-      >
-        <div>
-          <div class="bolinha" id="bolinha-analisando"></div>
-          <span>Analisando</span>
-        </div>
-        <div>
-          <div class="bolinha" id="bolinha-abrindo"></div>
-          <span>Abrindo Contrato</span>
-        </div>
-        <div>
-          <div class="bolinha" id="bolinha-finalizado"></div>
-          <span>Contrato Finalizado</span>
-        </div>
-      </div>
-      <div
-        id="barra-progresso"
-        style="
-          height: 5px;
-          background: goldenrod;
-          width: 0%;
-          margin: 10px auto 0 auto;
-          transition: width 0.5s;
-          max-width: 500px;
-        "
-      ></div>
-    </div>
-
-    <!-- HISTÓRICO -->
-    <div class="historico glass-dark">
-      <div
-        class="linha-titulo-historico"
-        style="
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 10px;
-          padding: 10px 80px;
-        "
-      >
-        <!-- Ícones à esquerda -->
-        <div style="display: flex; gap: 25px">
-          <div class="aba active" onclick="trocarAba('tabela')" title="Tabela">
-            📄
+      <!-- Status de Operação -->
+      <div id="barra-status" role="status">
+        <div class="status-etapas">
+          <div>
+            <div class="bolinha" id="bolinha-analisando" aria-label="Status analisando"></div>
+            <span>Analisando</span>
           </div>
-          <div class="aba" onclick="trocarAba('resumo')" title="Resumo">📊</div>
-        </div>
-
-        <!-- Título central -->
-        <h2 style="margin: 0; font-size: 20px">Histórico de Operações</h2>
-
-        <!-- Ícones à direita -->
-        <div style="display: flex; gap: 25px">
-          <div class="aba" onclick="trocarAba('grafico')" title="Gráfico">
-            📈
+          <div>
+            <div class="bolinha" id="bolinha-abrindo" aria-label="Status abrindo contrato"></div>
+            <span>Abrindo Contrato</span>
           </div>
-          <div class="aba" onclick="limparHistorico()" title="Limpar Histórico">
-            🗑️
+          <div>
+            <div class="bolinha" id="bolinha-finalizado" aria-label="Status finalizado"></div>
+            <span>Contrato Finalizado</span>
           </div>
         </div>
+        <div id="barra-progresso" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
       </div>
 
-      <!-- RESUMO -->
-      <div id="resumo-diario" style="display: none">
-        <h3>Resumo do Dia</h3>
-        <ul>
-          <li>Total de operações: <span id="resumo-total">--</span></li>
-          <li>Lucros: <span id="resumo-lucros">--</span></li>
-          <li>Prejuízos: <span id="resumo-prejuizos">--</span></li>
-          <li>Assertividade: <span id="resumo-assertividade">--</span>%</li>
-          <li>Lucro total: <span id="resumo-lucro-total">--</span></li>
-        </ul>
+      <!-- Histórico -->
+      <div class="historico glass-dark">
+        <div class="linha-titulo-historico" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding: 10px 80px;">
+          <div style="display: flex; gap: 25px">
+            <button class="aba active" onclick="trocarAba('tabela')" title="Tabela" aria-label="Ver tabela">📄</button>
+            <button class="aba" onclick="trocarAba('resumo')" title="Resumo" aria-label="Ver resumo">📊</button>
+          </div>
+          <h2 style="margin: 0; font-size: 20px">Histórico de Operações</h2>
+          <div style="display: flex; gap: 25px">
+            <button class="aba" onclick="trocarAba('grafico')" title="Gráfico" aria-label="Ver gráfico">📈</button>
+            <button class="aba" onclick="limparHistorico()" title="Limpar Histórico" aria-label="Limpar histórico">🗑️</button>
+          </div>
+        </div>
+        
+        <div id="resumo-diario" style="display: none">
+          <h3>Resumo do Dia</h3>
+          <ul>
+            <li>Total de operações: <span id="resumo-total">--</span></li>
+            <li>Lucros: <span id="resumo-lucros">--</span></li>
+            <li>Prejuízos: <span id="resumo-prejuizos">--</span></li>
+            <li>Assertividade: <span id="resumo-assertividade">--</span>%</li>
+            <li>Lucro total: <span id="resumo-lucro-total">--</span></li>
+          </ul>
+        </div>
+
+        <div id="grafico-diario" style="display: none; text-align: center">
+          <p style="color: gray">📈 Gráficos ainda em construção...</p>
+        </div>
+
+        <div class="tabela-wrapper" id="tabela-historico">
+          <table id="historico-tabela" role="table">
+            <thead>
+              <tr>
+                <th scope="col">Data</th>
+                <th scope="col">Hora</th>
+                <th scope="col">Tipo</th>
+                <th scope="col">Valor</th>
+                <th scope="col">Resultado</th>
+              </tr>
+            </thead>
+            <tbody id="historico-tabela-body">
+              {% for op in historico %}
+              <tr>
+                <td>{{ op.data }}</td>
+                <td>{{ op.hora }}</td>
+                <td>{{ op.tipo.upper() if op.tipo else '--' }}</td>
+                <td title="Valor da entrada">${{ "%.2f"|format(op.valor) }}</td>
+                <td class="resultado {{ 'positivo' if op.resultado_real >= 0 else 'negativo' }}">
+                  ${{ "%.2f"|format(op.resultado_real) }}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
       </div>
 
-      <!-- GRÁFICO (placeholder por enquanto) -->
-      <div id="grafico-diario" style="display: none; text-align: center">
-        <p style="color: gray">📈 Gráficos ainda em construção...</p>
-      </div>
-
-      <!-- TABELA -->
-      <div class="tabela-wrapper" id="tabela-historico">
-        <table id="historico-tabela">
-          <thead>
-            <tr>
-              <th>Data</th>
-              <th>Hora</th>
-              <th>Tipo</th>
-              <th>Valor</th>
-              <th>Resultado</th>
-            </tr>
-          </thead>
-          <tbody id="historico-tabela-body">
-            {% for op in historico %}
-            <tr>
-              <td>{{ op.data }}</td>
-              <td>{{ op.hora }}</td>
-              <td>{{ op.tipo.upper() if op.tipo else '--' }}</td>
-              <td title="Valor da entrada">${{ "%.2f"|format(op.valor) }}</td>
-              <td
-                class="resultado {{ 'positivo' if op.resultado_real >= 0 else 'negativo' }}"
-              >
-                ${{ "%.2f"|format(op.resultado_real) }}
-              </td>
-            </tr>
-
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- RODAPÉ -->
-    <div
-      style="
-        margin-top: 20px;
-        display: flex;
-        justify-content: space-between;
-        padding: 10px 20px;
-        font-size: 13px;
-        background: #1b1b1b;
-      "
-    >
-      <div style="display: flex; align-items: center; gap: 6px">
-        <div
-          style="
-            width: 10px;
-            height: 10px;
-            background: #00d67b;
-            border-radius: 50%;
-          "
-        ></div>
-        <span>Conectado ao Deriv</span>
-      </div>
-      <div id="hora-atual"></div>
-    </div>
+      <!-- Rodapé -->
+      <footer class="rodape-painel">
+        <div>
+          <div class="status-dot" style="background: #00d67b" aria-hidden="true"></div>
+          <span>Conectado ao Deriv</span>
+        </div>
+        <div id="hora-atual" role="timer"></div>
+      </footer>
+    </main>
 
     <script>
       function atualizarHora() {
@@ -277,5 +205,25 @@
       atualizarHora();
     </script>
     <script src="{{ url_for('static', filename='scripts.js') }}" defer></script>
+    <script>
+      function toggleDropdownConta() {
+        const el = document.getElementById("dropdown-conta");
+        if (el.style.display === "none" || el.style.display === "") {
+          el.style.display = "flex";
+          setTimeout(() => {
+            document.addEventListener("click", fecharDropdownConta, { once: true });
+          }, 10);
+        } else {
+          el.style.display = "none";
+        }
+      }
+
+      function fecharDropdownConta(e) {
+        const el = document.getElementById("dropdown-conta");
+        if (!el.contains(e.target)) {
+          el.style.display = "none";
+        }
+      }
+    </script>
   </body>
 </html>

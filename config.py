@@ -1,101 +1,50 @@
-# config.py
+"""
+Arquivo de configuração para o sistema de scalping.
+Contém todas as constantes, chaves de API e configurações do sistema.
+"""
 
-import json
-from resultado import calcular_assertividade
-
-# Caminho do arquivo de status
-STATUS_PATH = "status.json"
-
-# Estado global do robô
-estado = {
-    "robo_ativo": False,
-    "modo": None,
-    "token": None,
-    "meta": 0,
-    "tipo_conta": None,
-    "lucro_total": 0,
+# Configurações da API
+API_ID = 71203
+API_USER_DATA = {
+    "lucas-110425-0938-7c3018": {
+        "usada": False,
+        "email": "pglucas7@gmail.com",
+        "token": "0hfU9DKnc0LnCZL",
+        "deriv_account": "",
+        "ips": ["127.0.0.1"],
+        "hwids": ["0x22334d051b1a"],
+        "ativado_em": "",
+        "token_demo": "RYMx6qlHahIlC53",
+        "deriv_demo": "VRTC13064068",
+        "ativado_em_demo": "2025-04-11 09:39",
+        "token_real": "afK88ZEXLzGdzD9",
+        "deriv_real": "CR8745847",
+        "ativado_em_real": "2025-04-11 09:39",
+    }
 }
 
-# Modo atual selecionado (pode ser alterado dinamicamente no painel)
-MODO_ATUAL = "iniciante"  # Pode ser: iniciante, conservador, agressivo
+# Token de acesso atual (usar o demo por padrão para segurança)
+ACTIVE_TOKEN = API_USER_DATA["lucas-110425-0938-7c3018"]["token_demo"]
 
-# Taxas de assertividade baseadas no histórico de operações (calculadas dinamicamente)
-assertividades = calcular_assertividade()
+# Configurações de trading
+MODO_REAL = False  # False = modo demo, True = modo real
+VALOR_ENTRADA = 5  # Valor padrão de entrada em dólares
+TIMEFRAME = 1  # Tempo em segundos para cada operação (scalping)
+MAX_OPERATIONS = 50  # Número máximo de operações por sessão
+STOP_LOSS = 30  # Stop loss em dólares
+TAKE_PROFIT = 50  # Take profit em dólares
 
-# Configurações dos modos do robô
-MODOS = {
-    "iniciante": {
-        "meta": 20,
-        "entrada": 1,
-        "stop": 10,
-        "nome": f"Iniciante - assertividade média de {assertividades.get('iniciante', 90)}%",
-    },
-    "conservador": {
-        "meta": 50,
-        "entrada": 5,
-        "stop": 25,
-        "nome": f"Conservador - assertividade média de {assertividades.get('conservador', 85)}%",
-    },
-    "agressivo": {
-        "meta": 100,
-        "entrada": 10,
-        "stop": 50,
-        "nome": f"Agressivo - assertividade média de {assertividades.get('agressivo', 80)}%",
-    },
-}
+# Configurações de indicadores para scalping
+RSI_PERIODO = 5  # Período curto para RSI, ideal para scalping
+RSI_SOBRECOMPRADO = 70
+RSI_SOBREVENDIDO = 30
+BOLLINGER_PERIODO = 10
+BOLLINGER_DESVIO = 2
 
+# Pares de moedas disponíveis
+PARES = ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD"]
+PAR_PADRAO = "EURUSD"
 
-# Retorna as configurações do modo atual
-def get_valores_modo(modo):
-    return MODOS.get(modo, MODOS["iniciante"])
-
-
-# =============================
-# Controle do status do robô
-
-
-def iniciar_robo():
-    print("⚙️ Robô está sendo iniciado pelo botão...")
-    estado["robo_ativo"] = True
-    salvar_status(estado["lucro_total"], estado["meta"])
-    print("🚀 Robô iniciado!")
-
-
-def parar_robo():
-    estado["robo_ativo"] = False
-    salvar_status(estado["lucro_total"], estado["meta"])
-    print("🛑 Robô parado!")
-
-
-def status_robo():
-    return estado["robo_ativo"]
-
-
-# =============================
-# Persistência de status (usado para sincronizar com frontend)
-
-
-def salvar_status(lucro_total, meta):
-    try:
-        with open(STATUS_PATH, "w") as f:
-            json.dump(
-                {
-                    "robo_ativo": estado["robo_ativo"],
-                    "lucro": round(lucro_total, 2),
-                    "meta": round(meta, 2),
-                },
-                f,
-                indent=2,
-            )
-        print(f"[✔️ STATUS SALVO] Lucro: {lucro_total} | Meta: {meta}")
-    except Exception as e:
-        print(f"[ERRO AO SALVAR STATUS] {e}")
-
-
-def carregar_status():
-    try:
-        with open(STATUS_PATH, "r") as f:
-            dados = json.load(f)
-        return dados
-    except:
-        return {"robo_ativo": False, "lucro": 0, "meta": 0}
+# Configurações de log
+LOG_LEVEL = "INFO"
+LOG_FILE = "scalping_log.txt"

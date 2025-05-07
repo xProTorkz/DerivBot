@@ -1,441 +1,162 @@
-from flask import render_template, request, jsonify, redirect, session
-from motor import executar_operacao_sniper, estado
-from config import iniciar_robo, status_robo
-from threading import Thread
-import config
-import os
-import json
+# app.py - Controlador do sistema de scalping com melhorias gerais e controle de meta/stop
+
+import time
+import logging
+from typing import Dict, List, Union
 from datetime import datetime
-from constantes import LICENCAS_PATH, LOGS_PATH
-import websocket
 
-thread_robo = None
-robos_em_execucao = {}
-
-
-def get_saldo(token):
-    try:
-        ws = websocket.WebSocket()
-        ws.connect("wss://ws.derivws.com/websockets/v3?app_id=71287")
-        ws.send(json.dumps({"authorize": token}))
-        raw = ws.recv()
-        if not raw.strip():
-            raise ValueError("Resposta vazia recebida do WebSocket.")
-        resposta = json.loads(raw)
-
-        ws.close()
-
-        if "error" in resposta:
-            raise Exception(resposta["error"]["message"])
-
-        return resposta["authorize"]["balance"]
-
-    except Exception as e:
-        print(f"[ERRO SALDO] {e}")
-        return 0.0
+import config
+from motor import Motor
+from catalogador import Catalogador, analisar_entrada_chatgpt, analisar_saida_chatgpt
 
 
-def painel():
-    if "token_deriv" not in session or "tipo_conta" not in session:
-        return redirect("/")
+class App:
+    def __init__(self):
+        logging.basicConfig(
+            level=getattr(logging, config.LOG_LEVEL),
+            format="%(asctime)s - %(levelname)s - %(message)s",
+            filename=config.LOG_FILE,
+        )
+        self.logger = logging.getLogger("ScalpingApp")
 
-    chave = session.get("chave_ativacao")
-    if not chave or not os.path.exists(LICENCAS_PATH):
-        return redirect("/")
+        self.motor = Motor()
+        self.catalogador = Catalogador()
 
-    with open(LICENCAS_PATH, "r") as f:
-        licencas = json.load(f)
+        self.rodando = False
+        self.operacao_em_andamento = False
+        self.ultima_operacao = None
+        self.contador_operacoes = 0
+        self.saldo_inicial = 0
+        self.lucro_sessao = 0
+        self.hora_inicio = None
+        self.entradas_recentes = []
 
-    licenca = licencas.get(chave)
-    if not licenca:
-        return render_template("acesso_negado.html"), 403
-
-    tipo_conta = session.get("tipo_conta")
-    conta_id = licenca.get(f"deriv_{tipo_conta}", "----")
-    ativado_em = licenca.get(f"ativado_em_{tipo_conta}", "--/--/----")
-
-    # Usar o modo padrão (não tentar pegar do request!)
-    modo = config.MODO_ATUAL
-    meta = config.MODOS[modo]["meta"]
-    moeda = "USD"
-    token = session.get("token_deriv")
-    saldo = get_saldo(token)
-
-    lucro = 0
-    historico = []
-
-    if status_robo() and os.path.exists(LOGS_PATH):
-        with open(LOGS_PATH, "r") as f:
-            for linha in f:
-                linha = linha.strip()
-                if not linha:
-                    continue
-                try:
-                    dado = json.loads(linha)
-
-                    # 🛠️ Corrige resultado_real se for prejuízo e estiver zerado
-                    if (
-                        dado.get("resultado") == "prejuízo"
-                        and float(dado.get("resultado_real", 0)) == 0
-                    ):
-                        dado["resultado_real"] = -float(dado.get("valor", 0))
-
-                    valor = round(float(dado.get("valor", 0)), 2)
-                    resultado_real = round(float(dado.get("resultado_real", 0)), 2)
-
-                    saldo_inicial = carregar_status().get(
-                        "saldo_inicial", saldo
-                    )  # usar o saldo salvo na hora de iniciar o robô
-                    lucro = round(saldo - saldo_inicial, 2)
-
-                    historico.append(
-                        {
-                            "data": dado.get(
-                                "data", datetime.now().strftime("%Y-%m-%d")
-                            ),
-                            "hora": dado.get(
-                                "hora", datetime.now().strftime("%H:%M:%S")
-                            ),
-                            "tipo": dado.get("tipo", dado.get("resultado", "--")),
-                            "valor": valor,
-                            "resultado_real": resultado_real,
-                        }
-                    )
-                except:
-                    continue
-
-    return render_template(
-        "painel.html",
-        saldo=saldo,
-        lucro=lucro,
-        meta=meta,
-        moeda=moeda,
-        historico=historico,
-        tipo_conta=tipo_conta,
-        conta_id=conta_id,
-        chave=chave,
-        ativado_em=ativado_em,
-        validade=ativado_em,
-    )
-
-
-def configuracao():
-    if request.method == "POST":
-        token = request.form.get("token")
-        tipo_conta = request.form.get("tipo_conta")
-        aceite = request.form.get("aceite")
-        chave = session.get("chave_ativacao")
-
-        if not token or not tipo_conta or not aceite:
-            return "Preencha todos os campos obrigatórios!", 400
-
+    def iniciar(self) -> bool:
         try:
-            ws = websocket.WebSocket()
-            ws.connect("wss://ws.derivws.com/websockets/v3?app_id=71287")
-            ws.send(json.dumps({"authorize": token}))
-            raw = ws.recv()
-            if not raw.strip():
-                raise ValueError("Resposta vazia recebida do WebSocket.")
-            resposta = json.loads(raw)
-            ws.close()
+            self.logger.info("Iniciando aplicação de scalping...")
 
-            if "error" in resposta:
-                return "Token inválido ou expirado!", 401
+            if not self.motor.conectar():
+                self.logger.error("Falha ao conectar ao motor")
+                return False
 
-            session["token_deriv"] = token
-            session["tipo_conta"] = tipo_conta
-            session["chave_ativacao"] = chave
+            self.motor.registrar_callback_tick(self._processar_tick)
+            self.motor.rodando = True
 
-            print(f"✅ Token autorizado com sucesso para chave: {chave}")
-            return redirect("/painel")
+            self.saldo_inicial = self.motor.obter_saldo()
+            self.logger.info(f"Saldo inicial: {self.saldo_inicial}")
+
+            self.rodando = True
+            self.hora_inicio = datetime.now()
+            self.logger.info(f"Aplicação iniciada em {self.hora_inicio}")
+
+            return True
 
         except Exception as e:
-            print(f"[ERRO AUTORIZAÇÃO]: {e}")
-            return "Erro ao validar o token. Tente novamente.", 500
+            self.logger.error(f"Erro ao iniciar aplicação: {e}")
+            return False
 
-    chave = session.get("chave_ativacao")
-    return render_template("configuracao.html", chave=chave)
+    def _processar_tick(self, preco: float):
+        self.catalogador.adicionar_tick(preco)
 
+        if self.operacao_em_andamento or not self.rodando:
+            return
 
-def trocar_conta():
-    if "chave_ativacao" not in session:
-        return redirect("/login")
+        if self.contador_operacoes >= config.MAX_OPERATIONS:
+            self.logger.info("Limite de operações atingido. Parando robô.")
+            self.parar()
+            return
 
-    chave = session["chave_ativacao"]
+        # Verifica stop loss ou take profit
+        lucro_atual = self.motor.obter_saldo() - self.saldo_inicial
+        if lucro_atual >= config.TAKE_PROFIT:
+            self.logger.info("🎯 Meta diária atingida. Encerrando sessão.")
+            self.parar()
+            return
+        elif lucro_atual <= -config.STOP_LOSS:
+            self.logger.info("🛑 Stop Loss atingido. Encerrando sessão.")
+            self.parar()
+            return
 
-    if not os.path.exists(LICENCAS_PATH):
-        return redirect("/login")
+        velas = self.catalogador.obter_velas()
+        sinal = analisar_entrada_chatgpt(velas, lucro_atual, self.entradas_recentes)
 
-    with open(LICENCAS_PATH, "r") as f:
-        licencas = json.load(f)
+        if sinal in ["CALL", "PUT"]:
+            self._executar_operacao(sinal)
 
-    licenca = licencas.get(chave)
-    if not licenca:
-        return redirect("/login")
+    def _executar_operacao(self, tipo_operacao: str):
+        try:
+            self.logger.info(f"Executando operação: {tipo_operacao}")
 
-    if session["tipo_conta"] == "demo" and licenca.get("token_real"):
-        session["token_deriv"] = licenca["token_real"]
-        session["email"] = licenca["deriv_real"]
-        session["tipo_conta"] = "real"
+            self.operacao_em_andamento = True
+            self.entradas_recentes.append(tipo_operacao)
 
-    elif session["tipo_conta"] == "real" and licenca.get("token_demo"):
-        session["token_deriv"] = licenca["token_demo"]
-        session["email"] = licenca["deriv_demo"]
-        session["tipo_conta"] = "demo"
+            sucesso = self.motor.comprar(tipo_operacao, config.VALOR_ENTRADA)
 
-    return redirect("/painel")
-
-
-def status_deriv():
-    import websocket
-    import json
-
-    if "token_deriv" not in session:
-        return jsonify({"status": "erro", "mensagem": "Token não encontrado."})
-
-    try:
-        ws = websocket.WebSocket()
-        ws.connect("wss://ws.derivws.com/websockets/v3?app_id=71287")
-        ws.send(json.dumps({"authorize": session["token_deriv"]}))
-        raw = ws.recv()
-        if not raw.strip():
-            raise ValueError("Resposta vazia recebida do WebSocket.")
-        resposta = json.loads(raw)
-
-        ws.close()
-
-        if "authorize" in resposta:
-            return jsonify({"status": "ok"})
-        else:
-            return jsonify(
-                {"status": "erro", "mensagem": "Token inválido ou expirado."}
-            )
-
-    except Exception as e:
-        return jsonify({"status": "erro", "mensagem": str(e)})
-
-
-# ========== ROTAS ========
-
-
-def lucro_meta():
-    try:
-        if not os.path.exists("status.json"):
-            raise FileNotFoundError("status.json não encontrado.")
-
-        with open("status.json", "r") as f:
-            conteudo = f.read().strip()
-            if not conteudo:
-                raise ValueError("status.json está vazio.")
-            dados = json.loads(conteudo)
-
-        return jsonify(
-            {
-                "status": "ok",
-                "lucro": float(dados.get("lucro", 0)),
-                "meta": float(dados.get("meta", 0)),
-            }
-        )
-    except Exception as e:
-        print(f"[ERRO LUCRO META] {e}")
-        return jsonify({"status": "erro", "lucro": 0, "meta": 0})
-
-
-def status_robo_route():
-    return jsonify({"ativo": status_robo()})
-
-
-def limpar_arquivo_historico():
-    try:
-        open("data/logs.txt", "w").close()
-        print("🧹 Histórico limpo.")
-    except:
-        print("⚠️ Erro ao limpar histórico.")
-
-
-def toggle_bot():
-    global estado
-
-    data = request.get_json()
-    modo = data.get("modo")
-    meta = float(data.get("meta"))
-    token = session.get("token_deriv")
-    tipo_conta = session.get("tipo_conta")
-
-    if not config.status_robo():
-        limpar_arquivo_historico()
-        saldo_atual = get_saldo(token)
-        salvar_status_inicial(saldo_atual, 0, meta)
-        iniciar_robo_em_thread(modo, token, meta, tipo_conta)
-        return jsonify({"status": "iniciado"})
-
-    else:
-        config.parar_robo()
-        return jsonify({"status": "parado"})
-
-
-def historico_resultados():
-    if not os.path.exists(LOGS_PATH):
-        return jsonify([])
-
-    historico = []
-
-    with open(LOGS_PATH, "r") as f:
-        for linha in f:
-            linha = linha.strip()
-            if not linha:
-                continue
-            try:
-                dado = json.loads(linha)
-                print(
-                    f"[DEBUG LOG] Resultado Real Lido: {dado.get('resultado_real')} | Tipo: {dado.get('resultado')}"
+            if sucesso:
+                self.contador_operacoes += 1
+                self.logger.info(
+                    f"Operação {self.contador_operacoes} iniciada com sucesso"
                 )
 
-                valor = round(float(dado.get("valor", 0)), 2)
-                resultado_real = round(float(dado.get("resultado_real", 0)), 2)
+                # Aguarda o timeframe
+                time.sleep(config.TIMEFRAME)
 
-                historico.append(
-                    {
-                        "data": dado.get("data", "--"),
-                        "hora": dado.get("hora", "--"),
-                        "tipo": dado.get("resultado", "--"),
-                        "valor": valor,
-                        "resultado_real": resultado_real,
-                    }
+                # Verifica saída
+                velas = self.catalogador.obter_velas()
+                lucro_atual = self.motor.obter_saldo() - self.saldo_inicial
+                decisao_saida = analisar_saida_chatgpt(velas, lucro_atual)
+
+                if decisao_saida == "SAIR":
+                    self.motor.fechar_operacao()
+
+                self.lucro_sessao = self.motor.obter_saldo() - self.saldo_inicial
+                self.logger.info(
+                    f"Operação concluída. Lucro da sessão: {self.lucro_sessao}"
                 )
+            else:
+                self.logger.error("Falha ao executar operação")
 
-            except json.JSONDecodeError:
-                print(f"[ERRO JSON] Linha inválida no log: {linha}")
-                continue
-            except Exception as e:
-                print(f"[ERRO LINHA LOG]: {e}")
-                continue
+            self.operacao_em_andamento = False
 
-    return jsonify(historico)
+        except Exception as e:
+            self.logger.error(f"Erro ao executar operação: {e}")
+            self.operacao_em_andamento = False
 
-
-def iniciar_robo_em_thread(modo, token, meta, tipo_conta):
-    global thread_robo
-    thread_robo = Thread(
-        target=executar_operacao_sniper, args=(modo, token, meta, tipo_conta)
-    )
-    thread_robo.daemon = True  # roda em segundo plano
-    thread_robo.start()
-
-
-def carregar_status():
-    try:
-        with open("status.json", "r") as f:
-            conteudo = f.read()
-            if not conteudo.strip():
-                return {"robo_ativo": False, "lucro": 0, "meta": 0}
-            return json.loads(conteudo)
-    except:
-        return {"robo_ativo": False, "lucro": 0, "meta": 0}
-
-
-def salvar_status(lucro_total, meta):
-    try:
-        status_path = "status.json"
-
-        dados = {
-            "robo_ativo": True,
-            "lucro": float(round(lucro_total, 2)),
-            "meta": float(round(meta, 2)),
+    def status(self) -> Dict:
+        return {
+            "rodando": self.rodando,
+            "operacoes_realizadas": self.contador_operacoes,
+            "operacao_em_andamento": self.operacao_em_andamento,
+            "lucro_sessao": self.motor.obter_saldo() - self.saldo_inicial,
+            "saldo_atual": self.motor.obter_saldo(),
+            "par_atual": self.motor.par_atual,
+            "modo": "REAL" if config.MODO_REAL else "DEMO",
+            "tempo_execucao": (
+                str(datetime.now() - self.hora_inicio)
+                if self.hora_inicio
+                else "00:00:00"
+            ),
         }
 
-        with open(status_path, "w") as f:
-            json.dump(dados, f, indent=2)
+    def parar(self) -> bool:
+        try:
+            self.logger.info("Parando aplicação...")
+            self.rodando = False
+            self.motor.rodando = False
+            self.motor.desconectar()
+            self.catalogador.limpar_dados()
+            self.logger.info(
+                f"Aplicação encerrada. Lucro da sessão: {self.lucro_sessao}"
+            )
+            return True
 
-        print(
-            f"[✔️ STATUS SALVO] Lucro acumulado: ${dados['lucro']} | Meta: ${dados['meta']}"
-        )
-    except Exception as e:
-        print(f"[ERRO AO SALVAR STATUS] {e}")
+        except Exception as e:
+            self.logger.error(f"Erro ao parar aplicação: {e}")
+            return False
 
+    def trocar_par(self, par: str) -> bool:
+        self.catalogador.limpar_dados()
+        return self.motor.definir_par(par)
 
-def salvar_status_inicial(saldo_inicial, lucro_total, meta):
-    with open("status.json", "w") as f:
-        json.dump(
-            {
-                "robo_ativo": True,
-                "saldo_inicial": round(saldo_inicial, 2),
-                "lucro": round(lucro_total, 2),
-                "meta": round(meta, 2),
-            },
-            f,
-            indent=2,
-        )
-    print("[DEBUG] Conteúdo atual do status.json:")
-    with open("status.json", "r") as f:
-        print(f.read())
-
-
-# ========== HISTÓRICO ========
-
-
-def historico_completo():
-    if not os.path.exists(LOGS_PATH):
-        return render_template("historico_completo.html", historico=[], resumo={})
-
-    historico = []
-    total_operacoes = 0
-    total_lucros = 0
-    total_prejuizos = 0
-    total_valor_lucro = 0.0
-    total_valor_prejuizo = 0.0
-
-    with open(LOGS_PATH, "r") as f:
-        for linha in f:
-            linha = linha.strip()
-            if not linha:
-                continue
-            try:
-                dado = json.loads(linha)
-                valor = round(float(dado.get("valor", 0)), 2)
-                resultado_real = round(float(dado.get("resultado_real", 0)), 2)
-                tipo = dado.get("resultado", "--")
-                modo = dado.get("modo", "--")
-                data = dado.get("data", "--")
-                hora = dado.get("hora", "--")
-
-                historico.append(
-                    {
-                        "data": data,
-                        "hora": hora,
-                        "modo": modo,
-                        "tipo": tipo,
-                        "valor": valor,
-                        "resultado_real": resultado_real,
-                    }
-                )
-
-                total_operacoes += 1
-                if resultado_real >= 0:
-                    total_lucros += 1
-                    total_valor_lucro += resultado_real
-                else:
-                    total_prejuizos += 1
-                    total_valor_prejuizo += resultado_real
-
-            except json.JSONDecodeError as e:
-                print(f"[ERRO JSON LOG] Linha inválida ignorada: {linha}")
-                continue
-
-    assertividade = (
-        round((total_lucros / total_operacoes) * 100, 2) if total_operacoes > 0 else 0
-    )
-    resumo = {
-        "total": total_operacoes,
-        "lucros": total_lucros,
-        "prejuizos": total_prejuizos,
-        "assertividade": assertividade,
-        "total_lucro": round(total_valor_lucro, 2),
-        "total_prejuizo": round(total_valor_prejuizo, 2),
-        "saldo_final": round(total_valor_lucro + total_valor_prejuizo, 2),
-    }
-
-    historico.reverse()  # mais recente primeiro
-    return render_template(
-        "historico_completo.html", historico=historico, resumo=resumo
-    )
+    def obter_historico(self) -> List[Dict]:
+        return self.motor.obter_historico()

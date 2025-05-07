@@ -1,1 +1,0 @@
-{"data": "2025-05-04", "hora": "20:45:45.203", "modo": "iniciante", "tipo_operacao": "prejuízo", "tipo_resultado": "prejuízo", "valor": 1.0, "resultado_real": 0.0}

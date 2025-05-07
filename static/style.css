@@ -27,6 +27,12 @@ body {
   position: relative;
   overflow-x: hidden;
   z-index: 0;
+  background: #0d0d0d
+    url("https://upload.wikimedia.org/wikipedia/commons/8/83/Equirectangular-projection.jpg")
+    center 120px no-repeat;
+  background-size: 70vw auto;
+  background-attachment: fixed;
+  min-height: 100vh;
 }
 
 /* === TOPO === */
@@ -73,6 +79,7 @@ body {
   border-radius: 20px;
   margin-bottom: 30px;
   box-shadow: 0 0 15px var(--cor-branco-5);
+  margin-top: 40px;
 }
 
 .info-bar .saldo,
@@ -336,4 +343,175 @@ td.resultado.negativo {
   100% {
     text-shadow: none;
   }
+}
+
+.card-conta {
+  display: flex;
+  align-items: center;
+  background: #111 !important;
+  border-radius: 14px;
+  padding: 14px 20px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.18);
+  position: fixed;
+  top: 24px;
+  left: 24px;
+  min-width: 260px;
+  z-index: 30;
+}
+
+.bg-mapa-mundi-svg {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 0;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bg-mapa-mundi-svg svg {
+  max-width: 80vw;
+  max-height: 80vh;
+  margin: auto;
+  display: block;
+}
+
+.card-conta,
+.dropdown-conta {
+  background: #111 !important;
+}
+.dropdown-btn {
+  background: #111 !important;
+  color: #fff;
+}
+.dropdown-btn:hover {
+  background: #222 !important;
+  color: #00d67b;
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  background: #00d67b;
+  border-radius: 50%;
+  margin-right: 14px;
+}
+
+.info-conta {
+  flex: 1;
+}
+
+.tipo-conta {
+  font-size: 1.2em;
+  font-weight: bold;
+  color: #fff;
+}
+
+.numero-conta {
+  font-size: 0.98em;
+  color: #bdbdbd;
+  margin-top: 2px;
+}
+
+.dropdown-seta {
+  font-size: 1.2em;
+  color: #fff;
+  margin-left: 10px;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.dropdown-seta:hover {
+  color: #ff444f;
+}
+
+.dropdown-conta {
+  position: absolute;
+  top: 54px;
+  left: 0;
+  background: #111 !important;
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  min-width: 180px;
+  padding: 8px 0;
+  display: none;
+  flex-direction: column;
+  z-index: 30;
+}
+
+.dropdown-btn {
+  background: #111 !important;
+  border: none;
+  color: #fff;
+  padding: 10px 18px;
+  text-align: left;
+  width: 100%;
+  font-size: 15px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.dropdown-btn:hover {
+  background: #222 !important;
+  color: #00d67b;
+}
+
+.dropdown-btn.sair {
+  color: #ff444f;
+}
+
+.log-temp {
+  background: rgba(30, 30, 30, 0.8);
+  color: #fff;
+  border-radius: 8px;
+  padding: 8px 0;
+  margin: 30px auto 10px auto;
+  max-width: 400px;
+  font-size: 15px;
+  text-align: center;
+  font-family: monospace;
+}
+
+.painel-central {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 100vh;
+  padding-top: 60px;
+}
+
+.painel-robo {
+  margin: 30px 0 0 0;
+}
+
+.status-etapas {
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  max-width: 500px;
+  margin: auto;
+}
+
+#barra-progresso {
+  height: 5px;
+  background: goldenrod;
+  width: 0%;
+  margin: 10px auto 0 auto;
+  transition: width 0.5s;
+  max-width: 500px;
+}
+
+.rodape-painel {
+  margin-top: 20px;
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 20px;
+  font-size: 13px;
+  background: #1b1b1b;
+  width: 100%;
+  max-width: 1200px;
 }
