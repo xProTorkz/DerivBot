@@ -1,3 +1,7 @@
+// DerivBot - Código Principal
+// Carrega mobile.js para funcionalidades específicas para dispositivos móveis
+// O mobile.js é responsável por detectar e ajustar a interface para dispositivos móveis
+
 document.addEventListener("DOMContentLoaded", function () {
   const modoSelect = document.getElementById("modo");
   const metaInput = document.getElementById("meta");
@@ -21,7 +25,6 @@ document.addEventListener("DOMContentLoaded", function () {
   let tempoAtivoSegundos = 0;
   let contadorOperacoes = 0;
   let timerAtualizacao;
-  let isMobile = false;
 
   // Novo: variável para controlar se precisamos restaurar o estado
   let precisaRestaurarEstado = false;
@@ -234,62 +237,65 @@ document.addEventListener("DOMContentLoaded", function () {
         return; // Saímos aqui para não atualizar a barra
     }
 
-    // Atualiza a barra de progresso - MÉTODO DIRETO
+    // Atualiza a barra de progresso - Versão melhorada para mobile
     if (statusEtapas) {
-      const barraAfter = statusEtapas.querySelector
-        ? statusEtapas.querySelector("::after")
-        : null;
+      // Primeiro, determina se estamos em dispositivo móvel
+      const isMobileDevice =
+        window.innerWidth <= 768 ||
+        document.body.classList.contains("mobile-device");
 
-      // Usando o style.setProperty não funciona bem com ::after, então aplicamos diretamente
-      let widthValue;
+      // Calcula o valor para desktop - padrão
+      let widthValue =
+        progresso === 0
+          ? "0"
+          : progresso === 100
+          ? "calc(100% - 32px)"
+          : `calc(${progresso}% * (100% - 32px) / 100)`;
 
-      // Calcula o valor correto com base no tamanho da tela
-      if (window.innerWidth <= 320) {
-        // Telas muito pequenas
-        widthValue =
-          progresso === 0
-            ? "0"
-            : progresso === 100
-            ? "calc(100% - 18px)"
-            : `calc(${progresso}% * (100% - 18px) / 100)`;
-      } else if (window.innerWidth <= 480) {
-        // Telas pequenas (mobile)
-        widthValue =
-          progresso === 0
-            ? "0"
-            : progresso === 100
-            ? "calc(100% - 30px)"
-            : `calc(${progresso}% * (100% - 30px) / 100)`;
+      // Utiliza a função do mobile.js se disponível
+      if (
+        window.mobileUtils &&
+        typeof window.mobileUtils.calcularWidthProgressoBarra === "function"
+      ) {
+        widthValue = window.mobileUtils.calcularWidthProgressoBarra(progresso);
+      }
+
+      // Usa a função de atualização direta em dispositivos móveis (maior garantia)
+      if (
+        isMobileDevice &&
+        window.atualizarLarguraBarraProgresso &&
+        typeof window.atualizarLarguraBarraProgresso === "function"
+      ) {
+        // Chamada direta para maior garantia em mobile
+        window.atualizarLarguraBarraProgresso(progresso);
       } else {
-        // Telas médias e grandes
-        widthValue =
-          progresso === 0
-            ? "0"
-            : progresso === 100
-            ? "calc(100% - 32px)"
-            : `calc(${progresso}% * (100% - 32px) / 100)`;
-      }
+        // Fallback para o método tradicional
+        // Aplicar diretamente usando CSS inline
+        const styleElement = document.getElementById("barra-progresso-style");
+        if (!styleElement) {
+          // Criar elemento de estilo se não existir
+          const style = document.createElement("style");
+          style.id = "barra-progresso-style";
+          document.head.appendChild(style);
+        }
 
-      // Aplicar diretamente usando CSS inline
-      const styleElement = document.getElementById("barra-progresso-style");
-      if (!styleElement) {
-        // Criar elemento de estilo se não existir
-        const style = document.createElement("style");
-        style.id = "barra-progresso-style";
-        document.head.appendChild(style);
-      }
+        // Atualizar o CSS diretamente
+        const styleSheet = document.getElementById(
+          "barra-progresso-style"
+        ).sheet;
+        // Limpar regras anteriores
+        while (styleSheet.cssRules.length > 0) {
+          styleSheet.deleteRule(0);
+        }
+        // Adicionar nova regra
+        styleSheet.insertRule(
+          `.status-etapas::after { width: ${widthValue} !important; }`,
+          0
+        );
 
-      // Atualizar o CSS diretamente
-      const styleSheet = document.getElementById("barra-progresso-style").sheet;
-      // Limpar regras anteriores
-      while (styleSheet.cssRules.length > 0) {
-        styleSheet.deleteRule(0);
+        // Força um reflow para garantir que a alteração seja aplicada imediatamente
+        void statusEtapas.offsetWidth;
       }
-      // Adicionar nova regra
-      styleSheet.insertRule(
-        `.status-etapas::after { width: ${widthValue}; }`,
-        0
-      );
     }
 
     // Atualiza o log se houver mensagem
@@ -633,6 +639,16 @@ document.addEventListener("DOMContentLoaded", function () {
 
         // Atualiza a barra de progresso e as bolinhas
         atualizarStatusOperacao(data.status_operacao);
+
+        // Força a atualização da barra em dispositivos móveis
+        if (
+          window.mobileUtils &&
+          typeof window.mobileUtils.forcarAtualizacaoBarraProgresso ===
+            "function"
+        ) {
+          // Pequeno atraso para garantir que ocorra após o CSS ter sido aplicado
+          setTimeout(window.mobileUtils.forcarAtualizacaoBarraProgresso, 100);
+        }
       })
       .catch((err) => {
         console.error("Erro ao buscar status detalhado:", err);
@@ -644,11 +660,27 @@ document.addEventListener("DOMContentLoaded", function () {
     const etapa = statusOp.etapa;
     // Usa a função centralizada para atualizar bolinhas e barra de progresso
     atualizarProgressoBolinhas(etapa);
+
+    // Chama a função específica para dispositivos móveis
+    if (
+      window.mobileUtils &&
+      typeof window.mobileUtils.atualizarBarraProgressoMobile === "function"
+    ) {
+      window.mobileUtils.atualizarBarraProgressoMobile(etapa);
+    }
   }
 
   function atualizarBolinhasStatus(etapa) {
     // Usa a função centralizada para atualizar bolinhas e barra de progresso
     atualizarProgressoBolinhas(etapa);
+
+    // Chama a função específica para dispositivos móveis
+    if (
+      window.mobileUtils &&
+      typeof window.mobileUtils.atualizarBarraProgressoMobile === "function"
+    ) {
+      window.mobileUtils.atualizarBarraProgressoMobile(etapa);
+    }
   }
 
   // Função para resetar as bolinhas e barra de progresso para o estado inicial
@@ -677,8 +709,15 @@ document.addEventListener("DOMContentLoaded", function () {
       while (styleSheet.cssRules.length > 0) {
         styleSheet.deleteRule(0);
       }
+
       // Adicionar nova regra
-      styleSheet.insertRule(`.status-etapas::after { width: 0; }`, 0);
+      styleSheet.insertRule(
+        `.status-etapas::after { width: 0 !important; }`,
+        0
+      );
+
+      // Força um reflow para garantir que a alteração seja aplicada imediatamente
+      void statusEtapas.offsetWidth;
     }
   }
 
@@ -1468,7 +1507,7 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     // Etapas com pontos de progresso e tipos de feedback
-    const etapasDemo = [
+    let etapasDemo = [
       {
         nome: "analisando",
         progresso: 0,
@@ -1507,6 +1546,14 @@ document.addEventListener("DOMContentLoaded", function () {
       },
     ];
 
+    // Adapta mensagens para dispositivos móveis, se disponível
+    if (
+      window.mobileUtils &&
+      typeof window.mobileUtils.adaptarMensagensDemo === "function"
+    ) {
+      etapasDemo = window.mobileUtils.adaptarMensagensDemo(etapasDemo);
+    }
+
     let etapaAtual = 0;
 
     // Limpa qualquer intervalo anterior
@@ -1534,6 +1581,14 @@ document.addEventListener("DOMContentLoaded", function () {
       // Usa a função centralizada para atualizar bolinhas e barra de progresso
       atualizarProgressoBolinhas(etapa.nome, etapa.mensagem, etapa.tipo);
 
+      // Chama a função específica para dispositivos móveis
+      if (
+        window.mobileUtils &&
+        typeof window.mobileUtils.atualizarBarraProgressoMobile === "function"
+      ) {
+        window.mobileUtils.atualizarBarraProgressoMobile(etapa.nome);
+      }
+
       // Se for etapa de ganho, atualiza o lucro no cabeçalho
       if (etapa.nome === "finalizado-win") {
         const lucroEl = document.getElementById("lucro-valor");
@@ -1560,146 +1615,9 @@ document.addEventListener("DOMContentLoaded", function () {
     }, 2000);
   }
 
-  // Detecção de dispositivo móvel
-  function detectarDispositivoMovel() {
-    isMobile =
-      window.innerWidth <= 768 || "ontouchstart" in document.documentElement;
-
-    if (isMobile) {
-      document.body.classList.add("mobile-device");
-      ajustarInterfaceMobile();
-      adicionarSuporteGestos();
-    } else {
-      document.body.classList.remove("mobile-device");
-      removerSuporteGestos();
-    }
-  }
-
-  // Adiciona suporte a gestos de toque para facilitar a interação
-  function adicionarSuporteGestos() {
-    // Verifica se já existe um listener para evitar duplicações
-    if (!window.temListenersGestos) {
-      // Suporte para swipe na tabela de histórico (para navegação)
-      const historicoEl = document.querySelector(".tabela-wrapper");
-      if (historicoEl) {
-        let touchStartX = 0;
-        let touchEndX = 0;
-
-        historicoEl.addEventListener(
-          "touchstart",
-          (e) => {
-            touchStartX = e.changedTouches[0].screenX;
-          },
-          { passive: true }
-        );
-
-        historicoEl.addEventListener(
-          "touchend",
-          (e) => {
-            touchEndX = e.changedTouches[0].screenX;
-            processarGestoSwipe(touchStartX, touchEndX);
-          },
-          { passive: true }
-        );
-      }
-
-      // Toque duplo no saldo para atualizar o saldo
-      const saldoEl = document.getElementById("saldo-valor");
-      if (saldoEl) {
-        saldoEl.addEventListener("dblclick", () => {
-          atualizarSaldoEmTempoReal(true);
-          saldoEl.classList.add("destaque-mobile");
-          setTimeout(() => saldoEl.classList.remove("destaque-mobile"), 1500);
-        });
-      }
-
-      window.temListenersGestos = true;
-    }
-  }
-
-  // Remove os listeners de gestos quando não estiver em dispositivo móvel
-  function removerSuporteGestos() {
-    // Apenas marca a flag, pois remover listeners específicos é complexo
-    window.temListenersGestos = false;
-  }
-
-  // Processa os gestos de swipe horizontal
-  function processarGestoSwipe(inicioX, fimX) {
-    const swipeThreshold = 50; // Mínimo de pixels para considerar um swipe
-
-    if (inicioX - fimX > swipeThreshold) {
-      // Swipe para esquerda - avançar página na tabela
-      const botaoAvancar = document.querySelector(
-        '.icone-historico[data-acao="avancar"]'
-      );
-      if (botaoAvancar) {
-        botaoAvancar.click();
-      }
-    } else if (fimX - inicioX > swipeThreshold) {
-      // Swipe para direita - retornar página na tabela
-      const botaoVoltar = document.querySelector(
-        '.icone-historico[data-acao="voltar"]'
-      );
-      if (botaoVoltar) {
-        botaoVoltar.click();
-      }
-    }
-  }
-
-  // Ajustes específicos para interface mobile
-  function ajustarInterfaceMobile() {
-    const saldoValor = document.getElementById("saldo-valor");
-    const lucroValor = document.getElementById("lucro-valor");
-
-    if (isMobile) {
-      // Reduz informações na tabela de histórico para visualização mobile
-      const tabela = document.getElementById("historico-tabela");
-      if (tabela) {
-        const cabecalhos = tabela.querySelectorAll("th");
-        const linhas = tabela.querySelectorAll("tr:not(:first-child)");
-
-        // Ajusta células importantes para melhor visualização
-        if (cabecalhos.length > 0) {
-          if (window.innerWidth <= 480) {
-            // Em telas muito pequenas, oculta colunas menos importantes
-            Array.from(cabecalhos).forEach((th, index) => {
-              if (index !== 0 && index !== 2 && index !== 3) {
-                th.classList.add("hide-on-mobile");
-
-                // Oculta as colunas correspondentes em todas as linhas
-                linhas.forEach((linha) => {
-                  const celulas = linha.querySelectorAll("td");
-                  if (celulas[index]) {
-                    celulas[index].classList.add("hide-on-mobile");
-                  }
-                });
-              }
-            });
-          }
-        }
-      }
-
-      // Ajusta o comportamento do botão de iniciar/parar para dispositivos móveis
-      const botaoControle = document.getElementById("bot-control-btn");
-      if (botaoControle) {
-        // Adiciona feedback tátil para dispositivos que suportam
-        botaoControle.addEventListener("click", () => {
-          if ("vibrate" in navigator) {
-            navigator.vibrate(50);
-          }
-        });
-      }
-    }
-  }
-
   // Inicialização
   document.addEventListener("DOMContentLoaded", function () {
-    // Detecta se é dispositivo móvel
-    detectarDispositivoMovel();
-
-    // Adiciona listener para redimensionamento
-    window.addEventListener("resize", detectarDispositivoMovel);
-
+    // Detecta se é dispositivo móvel - removido, agora gerenciado pelo mobile.js
     // ... resto do código existente ...
   });
 });

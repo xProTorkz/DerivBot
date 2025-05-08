@@ -1,623 +1,680 @@
-/* === ESTILOS RESPONSIVOS PARA DISPOSITIVOS MÓVEIS === */
-/* Arquivo separado para melhor desempenho e manutenção */
-
-/* === TABLETS (768px e abaixo) === */
+/* === MEDIA QUERIES === */
 @media (max-width: 768px) {
-  :root {
-    --espacamento-padrao: 12px;
-    --espacamento-tablet: 20px;
-  }
-
-  /* Layout geral */
-  .painel-central {
-    padding: var(--espacamento-tablet) 0 15px;
-  }
-
-  .painel-central > * {
-    width: calc(100% - var(--espacamento-tablet) * 2);
-  }
-
-  /* Barra superior */
-  .navbar-topo {
-    margin: var(--espacamento-tablet) auto;
-    width: calc(100% - var(--espacamento-tablet) * 2);
-  }
-
-  /* Status e etapas */
+  /* Barra de status */
   .status-etapas {
-    padding: 15px 20px;
-    margin-bottom: 15px;
+    padding: 0;
+    height: 30px;
+    margin-bottom: 0.5rem;
+    position: relative;
+    overflow: visible;
   }
 
-  .status-etapas > div {
-    font-size: 0.85em;
-  }
-
-  .status-etapas::before,
-  .status-etapas::after {
-    height: 4px;
-  }
-
-  /* Informações de licença */
-  .licenca-wrapper {
-    margin-top: 10px;
-  }
-
-  .licenca-mini {
-    padding: 8px 10px;
-    gap: 10px;
-  }
-
-  .licenca-mini-item {
-    font-size: 0.85em;
-  }
-
-  .licenca-mini-icone {
-    font-size: 0.9em;
-  }
-
-  .licenca-mini-text,
-  .licenca-mini-valor {
-    font-size: 0.85em;
-  }
-
-  .licenca-mini-text {
-    margin-right: 3px;
-  }
-
-  .licenca-mini-plano {
-    font-size: 0.75em;
-  }
-
-  /* Informações de saldo e lucro */
-  .info-bar {
-    flex-direction: row;
-    padding: 10px 15px;
-  }
-
-  .info-bar .saldo,
-  .info-bar .lucro {
-    margin-bottom: 0;
-    padding: 8px;
-  }
-
-  .info-bar .saldo label,
-  .info-bar .lucro label {
-    font-size: 0.85em;
-  }
-
-  #saldo-valor,
-  #lucro-valor,
-  #meta-valor {
-    font-size: 1.2em;
-  }
-
-  /* Botão principal */
-  #bot-control-btn {
-    padding: 12px 20px;
-    font-size: 1em;
-    height: auto;
-    margin-top: 15px;
-  }
-
-  /* Modo e meta */
-  .modo-meta-wrapper {
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  /* Log temporário */
-  .log-temp {
-    font-size: 0.9em;
-    padding: 8px 12px;
-    margin: 10px 0;
-  }
-
-  /* Rodapé */
-  .rodape-painel {
-    padding: 8px 15px;
-    font-size: 0.85em;
-  }
-
-  .status-conexao {
-    font-size: 0.85em;
-  }
-
-  .hora-data {
-    font-size: 0.85em;
-  }
-
-  /* Status do servidor */
-  #status-deriv {
-    font-size: 0.85em;
-    margin-top: 10px;
-    padding: 5px 10px;
-  }
-}
-
-/* === CELULARES (480px e abaixo) === */
-@media (max-width: 480px) {
-  :root {
-    --espacamento-padrao: 10px;
-    --espacamento-mobile: 15px;
-  }
-
-  /* Layout geral */
-  .painel-central {
-    padding: var(--espacamento-mobile) 0 10px;
-  }
-
-  .painel-central > * {
-    width: calc(100% - var(--espacamento-mobile) * 2);
-  }
-
-  /* Barra superior */
-  .navbar-topo {
-    margin: var(--espacamento-mobile) auto;
-    width: calc(100% - var(--espacamento-mobile) * 2);
-  }
-
-  /* Status e etapas */
-  .status-etapas {
-    padding: 12px 15px;
-    margin-bottom: 12px;
-  }
-
-  .status-etapas > div {
-    font-size: 0.75em;
-  }
-
-  .status-etapas::before {
-    height: 3px;
-  }
-
-  .status-etapas::after {
-    height: 3px;
-  }
-
-  /* Informações de licença */
-  .licenca-wrapper {
-    margin-top: 8px;
-  }
-
-  .licenca-mini {
-    padding: 6px 8px;
-    gap: 8px;
-  }
-
-  .licenca-mini-item {
-    font-size: 0.75em;
-  }
-
-  .licenca-mini-icone {
-    font-size: 0.8em;
-    margin-right: 3px;
-  }
-
-  .licenca-mini-text,
-  .licenca-mini-valor {
-    font-size: 0.75em;
-  }
-
-  .licenca-mini-text {
+  /* Classe para esconder texto em dispositivos móveis */
+  .esconde-texto-mobile {
     display: none;
   }
 
-  /* Informações de saldo e lucro */
-  .info-bar {
-    flex-direction: row;
-    padding: 8px 10px;
-  }
-
-  .info-bar .saldo label,
-  .info-bar .lucro label {
-    font-size: 0.75em;
-  }
-
-  /* Botão principal */
-  #bot-control-btn {
-    padding: 10px 15px;
-    font-size: 0.9em;
-    margin-top: 12px;
-  }
-
-  /* Modo e meta */
-  .modo-meta-wrapper {
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  /* Log temporário */
-  .log-temp {
-    font-size: 0.8em;
-    padding: 6px 10px;
-    margin: 8px 0;
-  }
-
-  /* Rodapé */
-  .rodape-painel {
-    padding: 6px 10px;
-    font-size: 0.75em;
-  }
-
-  .status-conexao {
-    font-size: 0.75em;
-  }
-
-  .status-conexao .status-dot {
-    width: 5px;
-    height: 5px;
-    margin-right: 5px;
-  }
-
-  .hora-data {
-    font-size: 0.75em;
-  }
-
-  /* Status do servidor */
-  #status-deriv {
-    font-size: 0.75em;
-    margin-top: 8px;
-    padding: 4px 8px;
-  }
-
-  /* Ocultar colunas menos importantes em telas pequenas */
+  /* Esconde alguns elementos em mobile para economizar espaço */
   .hide-on-mobile {
     display: none !important;
   }
 
-  /* Ajustes para tabela em telas pequenas */
-  #historico-tabela {
-    table-layout: fixed;
+  .status-etapas > div {
+    font-size: 0.6rem;
+    gap: 0.2rem;
   }
 
-  #historico-tabela th,
-  #historico-tabela td {
-    padding: 4px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .status-etapas::before {
+    content: "";
+    position: absolute;
+    top: 6px !important;
+    left: 18px !important;
+    right: 18px !important;
+    height: 3px !important;
+    background-color: var(--transparente-claro) !important;
+    z-index: 1 !important;
   }
 
-  /* Aumentar a largura de colunas importantes */
-  #historico-tabela th:nth-child(3),
-  #historico-tabela td:nth-child(3) {
-    font-weight: bold;
-    min-width: 70px;
+  .status-etapas::after {
+    content: "";
+    position: absolute;
+    top: 6px !important;
+    left: 18px !important;
+    height: 3px !important;
+    background-color: var(--amarelo-escuro) !important;
+    box-shadow: 0 0 5px var(--amarelo-claro) !important;
+    z-index: 2 !important;
+    transition: width 0.3s ease-in-out !important;
   }
-}
 
-/* === CELULARES PEQUENOS (320px e abaixo) === */
-@media (max-width: 320px) {
+  #status-deriv {
+    width: calc(100% - var(--espacamento-padrao));
+    margin: 6px auto;
+    font-size: 0.75rem;
+    padding: 10px 12px;
+    box-sizing: border-box;
+  }
+
   :root {
-    --espacamento-padrao: 8px;
-    --espacamento-mobile: 10px;
-    --borda-arredondada: 8px;
-    --borda-arredondada-pequena: 4px;
-    --gap-padrao: 8px;
-    --gap-pequeno: 4px;
+    --espacamento-padrao: var(--espacamento-tablet);
   }
 
-  /* Elementos base */
-  html,
-  body {
-    font-size: 14px;
-  }
-
-  /* Layout geral */
+  /* Layout */
   .painel-central {
-    padding: var(--espacamento-mobile) 0 8px;
+    padding: var(--espacamento-padrao) 0 20px;
   }
 
-  /* Barra superior */
+  .painel-central > * {
+    width: calc(100% - var(--espacamento-padrao));
+  }
+
+  /* Navbar */
   .navbar-topo {
-    margin: 8px auto;
+    width: calc(100% - var(--espacamento-padrao)) !important;
+    margin: 8px auto 12px auto !important;
   }
 
-  .topo-superior {
-    margin-bottom: 6px;
-  }
-
-  .card-conta {
-    padding: 6px;
-  }
-
-  .logout-btn {
-    padding: 6px 8px;
-    font-size: 0.75em;
-  }
-
-  /* Informações de licença */
+  /* Licença */
   .licenca-wrapper {
-    margin-top: 6px;
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    overflow-x: auto;
-    white-space: nowrap;
+    width: 100%;
+    margin: 0;
+    padding: 6px 12px;
   }
 
   .licenca-mini {
-    padding: 4px 6px;
-    gap: 6px;
+    justify-content: space-between;
+    gap: 8px;
   }
 
   .licenca-mini-item {
-    font-size: 0.7em;
+    min-width: 36px;
   }
 
   .licenca-mini-icone {
-    font-size: 0.75em;
-    margin-right: 2px;
+    display: inline;
   }
 
   .licenca-mini-text,
-  .licenca-mini-valor {
-    font-size: 0.7em;
+  .licenca-mini-valor,
+  .licenca-mini-plano {
+    font-size: 0.7rem;
   }
 
-  /* Informações de saldo e lucro */
+  .licenca-mini-text {
+    color: var(--cinza-claro);
+    margin-right: 2px;
+  }
+
+  .licenca-mini-plano {
+    padding: 1px 3px;
+  }
+
+  /* Barra de informações */
   .info-bar {
-    padding: 6px 8px;
+    width: calc(100% - var(--espacamento-padrao));
+    padding: 0 12px;
+    margin: 12px auto 15px auto;
   }
 
   .info-bar .saldo,
   .info-bar .lucro {
-    padding: 4px 6px;
-  }
-
-  #saldo-valor,
-  #lucro-valor {
-    font-size: 1em;
+    min-width: auto;
+    flex: 1;
   }
 
   .info-bar .saldo label,
   .info-bar .lucro label {
-    font-size: 0.7em;
+    font-size: 0.6em;
+    opacity: 0.7;
   }
 
-  /* Botão principal */
+  #saldo-valor,
+  #lucro-valor {
+    font-size: 1.2em;
+  }
+
+  /* Botão de controle */
   #bot-control-btn {
-    padding: 8px 12px;
-    font-size: 0.85em;
-    margin-top: 10px;
-  }
-
-  /* Status de barra */
-  #barra-status {
-    margin: 8px 0;
-  }
-
-  .status-etapas {
-    padding: 8px 10px;
-    margin-bottom: 10px;
-  }
-
-  .status-etapas > div {
-    font-size: 0.7em;
-  }
-
-  .bolinha {
-    width: 8px;
-    height: 8px;
-    margin-bottom: 3px;
-  }
-
-  .bolinha.pequena {
-    width: 6px;
-    height: 6px;
+    width: calc(100% - var(--espacamento-padrao)) !important;
+    padding: 0 12px !important;
+    margin: 12px auto 15px auto !important;
+    font-size: 16px !important;
   }
 
   /* Modo e meta */
   .modo-meta-wrapper {
-    flex-direction: column;
-    gap: 6px;
+    width: calc(80% - var(--espacamento-padrao)) !important;
+    padding: 15px !important;
+    margin: 0 auto 20px auto !important;
   }
 
-  #modo-container {
-    width: 100%;
-  }
-
-  #modo-container label,
-  #meta-container label {
-    font-size: 0.75em;
-  }
-
-  .modo-select,
-  .input-meta {
-    font-size: 0.8em;
-    padding: 5px 8px;
-  }
-
-  /* Histórico */
-  .historico {
-    margin-top: 10px;
-  }
-
-  .linha-titulo-historico {
-    margin-bottom: 8px;
-  }
-
-  .titulo-historico {
-    font-size: 0.85em;
-  }
-
-  .acoes-esquerda,
-  .acoes-direita {
-    gap: 6px;
-  }
-
-  .icone-historico {
-    font-size: 0.8em;
-  }
-
-  #historico-tabela th {
-    font-size: 0.7em;
-    padding: 5px;
-  }
-
-  #historico-tabela td {
-    font-size: 0.7em;
-    padding: 5px;
-  }
-
-  /* Log temporário */
+  /* Log */
   .log-temp {
-    font-size: 0.75em;
-    padding: 5px 8px;
-    margin: 6px 0;
+    width: calc(100% - var(--espacamento-padrao));
+    margin: 0.5rem auto;
+    padding: 0.7rem 0.8rem;
+    font-size: 0.85rem;
+    min-height: 2.2rem;
   }
 
   /* Rodapé */
   .rodape-painel {
-    padding: 5px 8px;
-    font-size: 0.7em;
+    width: calc(100% - var(--espacamento-padrao));
+    margin: 12px auto;
+    padding: 7px 10px;
+    font-size: 0.75rem;
   }
 
   .status-conexao {
-    font-size: 0.7em;
+    gap: 4px;
+    font-size: 0.7rem;
+  }
+
+  .hora-data {
+    font-size: 0.7rem;
+  }
+
+  .licenca-mini-plano {
+    font-size: 0.7rem;
+    padding: 1px 3px;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Barra de status */
+  .status-etapas {
+    padding: 0;
+    height: 30px;
+    margin-bottom: 0.5rem;
+  }
+
+  .status-etapas > div {
+    font-size: 0.6rem;
+    gap: 0.2rem;
+  }
+
+  .status-etapas::before {
+    left: 15px !important;
+    right: 15px !important;
+    height: 2px !important;
+  }
+
+  .status-etapas::after {
+    left: 15px !important;
+    height: 2px !important;
+  }
+
+  #status-deriv {
+    width: calc(100% - var(--espacamento-padrao));
+    margin: 5px auto;
+    font-size: 0.7rem;
+    padding: 8px 10px;
+    box-sizing: border-box;
+  }
+
+  :root {
+    --espacamento-padrao: var(--espacamento-mobile);
+  }
+
+  /* Layout */
+  .painel-central {
+    padding: 10px 0 12px;
+  }
+
+  .painel-central > * {
+    width: calc(100% - var(--espacamento-padrao));
+  }
+
+  /* Navbar */
+  .navbar-topo {
+    width: calc(100% - var(--espacamento-padrao)) !important;
+    margin: 5px auto 10px auto !important;
+  }
+
+  /* Licença */
+  .licenca-wrapper {
+    width: 100%;
+    margin: 0;
+    padding: 6px 12px;
+  }
+
+  .licenca-mini {
+    justify-content: space-between;
+    gap: 6px;
+  }
+
+  .licenca-mini-item {
+    min-width: 32px;
+    gap: 3px;
+  }
+
+  .licenca-mini-icone {
+    display: inline;
+    font-size: 0.6rem;
+    margin-right: 0px;
+  }
+
+  .licenca-mini-text,
+  .licenca-mini-valor,
+  .licenca-mini-plano {
+    font-size: 0.65rem;
+  }
+
+  .licenca-mini-text {
+    color: var(--cinza-claro);
+    margin-right: 2px;
+  }
+
+  /* Barra de informações */
+  .info-bar {
+    width: calc(100% - var(--espacamento-padrao));
+    padding: 0 12px;
+    margin: 8px auto 12px auto;
+  }
+
+  .info-bar .saldo label,
+  .info-bar .lucro label {
+    font-size: 0.55em;
+  }
+
+  /* Botão de controle */
+  #bot-control-btn {
+    width: calc(100% - var(--espacamento-padrao)) !important;
+    padding: 0 12px !important;
+    margin: 8px auto 12px auto !important;
+    font-size: 16px !important;
+  }
+
+  /* Modo e meta */
+  .modo-meta-wrapper {
+    width: calc(80% - var(--espacamento-padrao)) !important;
+    padding: 12px !important;
+    margin: 0 auto 15px auto !important;
+  }
+
+  /* Log */
+  .log-temp {
+    width: calc(100% - var(--espacamento-padrao));
+    margin: 0.5rem auto;
+    padding: 0.6rem 0.7rem;
+    font-size: 0.8rem;
+    min-height: 2rem;
+  }
+
+  /* Rodapé */
+  .rodape-painel {
+    width: calc(100% - var(--espacamento-padrao));
+    margin: 10px auto;
+    padding: 6px 8px;
+    font-size: 0.7rem;
+  }
+
+  .status-conexao {
+    gap: 3px;
+    font-size: 0.65rem;
   }
 
   .status-conexao .status-dot {
     width: 4px;
     height: 4px;
-    margin-right: 4px;
+    margin-right: 2px;
   }
 
   .hora-data {
-    font-size: 0.7em;
+    font-size: 0.65rem;
   }
 
-  /* Menu de abas */
-  .aba-menu {
-    gap: 4px;
-  }
-
-  .aba {
-    font-size: 0.7em;
-    padding: 5px 8px;
+  .licenca-mini-plano {
+    font-size: 0.65rem;
   }
 }
 
-/* === Ajustes para elementos específicos em visualização mobile === */
-.destaque-mobile {
-  animation: destacarMobile 1.5s ease-in-out;
-}
-
-@keyframes destacarMobile {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.6;
-  }
-}
-
-/* Ajustes de texto para telas pequenas */
-@media (max-width: 480px) {
-  .esconde-texto-mobile {
-    font-size: 0;
+/* === SUPORTE PARA TELAS ULTRA PEQUENAS === */
+@media (max-width: 320px) {
+  :root {
+    --espacamento-padrao: 12px;
+    --gap-padrao: 8px;
+    --gap-pequeno: 4px;
+    --gap-menor: 2px;
+    --borda-arredondada: 8px;
+    --borda-arredondada-pequena: 4px;
   }
 
-  .esconde-texto-mobile::before {
-    content: attr(data-mobile-text);
-    font-size: initial;
-  }
-
-  .texto-truncado {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 100%;
-  }
-}
-
-/* === SUPORTE A ORIENTAÇÃO DA TELA === */
-@media (max-width: 768px) and (orientation: landscape) {
-  /* Ajustes para modo paisagem em tablets */
-  .painel-central {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    grid-gap: 10px;
-    padding: 10px;
-  }
-
-  .painel-central > * {
-    width: 100%;
-    grid-column: span 1;
-  }
-
-  .info-bar {
-    grid-column: span 2;
-  }
-
-  .painel-robo {
-    margin-bottom: 10px;
-  }
-
-  .historico {
-    margin-top: 0;
-    height: calc(100vh - 300px);
-    overflow: hidden;
-  }
-
-  .tabela-wrapper {
-    max-height: calc(100vh - 380px);
-  }
-
-  .rodape-painel {
-    grid-column: span 2;
-    margin-top: 10px;
-  }
-}
-
-@media (max-width: 480px) and (orientation: landscape) {
-  /* Ajustes para modo paisagem em smartphones */
+  /* Ajustes de fonte para melhor leitura */
+  html,
   body {
     font-size: 13px;
   }
 
+  /* Compactar elementos */
+  .painel-central {
+    padding: 5px 0 8px;
+  }
+
+  /* Navbar e elementos de topo */
   .navbar-topo {
-    margin: 5px auto;
+    gap: 10px;
+    margin: 4px auto 8px auto !important;
+  }
+
+  .topo-superior {
+    margin-bottom: 4px;
+  }
+
+  .card-conta {
+    padding: 6px 10px;
+  }
+
+  .logout-btn {
+    height: 32px;
+    padding: 4px 10px;
+    font-size: 12px;
+  }
+
+  /* Licença */
+  .licenca-wrapper {
+    width: 100%;
+    margin: 0;
+    padding: 4px 8px;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .licenca-mini {
+    gap: 4px;
+  }
+
+  .licenca-mini-item {
+    min-width: 24px;
+    gap: 1px;
+  }
+
+  .licenca-mini-icone {
+    font-size: 0.55rem;
+    margin-right: 0;
+  }
+
+  .licenca-mini-text,
+  .licenca-mini-valor,
+  .licenca-mini-plano {
+    font-size: 0.6rem;
+  }
+
+  /* Ajustes na barra de informações */
+  .info-bar {
+    height: auto;
+    padding: 4px 6px;
+    margin: 4px auto 6px auto;
   }
 
   .info-bar .saldo,
   .info-bar .lucro {
-    padding: 5px;
+    min-width: auto;
   }
 
+  #saldo-valor,
+  #lucro-valor {
+    font-size: 0.95rem;
+  }
+
+  .info-bar .saldo label,
+  .info-bar .lucro label {
+    font-size: 0.5em;
+  }
+
+  /* Ajustes no botão de controle */
   #bot-control-btn {
-    padding: 8px 15px;
-    font-size: 0.85em;
-    height: auto;
+    height: 38px;
+    padding: 0 6px;
+    margin: 4px auto;
+    font-size: 14px;
   }
 
-  .log-temp {
-    font-size: 0.75em;
-    padding: 5px 8px;
+  /* Ajustes na barra de status */
+  #barra-status {
+    padding: 3px;
+    margin: 3px auto;
   }
 
-  .info-bar {
-    margin-bottom: 10px;
-    padding: 8px;
+  .status-etapas {
+    height: 22px;
+    padding: 0 3px;
+    margin-bottom: 3px;
   }
 
-  #status-deriv {
-    font-size: 0.75em;
-    margin-top: 5px;
+  .status-etapas > div {
+    font-size: 0.55rem;
+    gap: 1px;
   }
-}
 
-/* Orientação retrato específica */
-@media (max-width: 480px) and (orientation: portrait) {
-  /* Elementos que precisam de mais espaço em modo retrato */
+  .bolinha {
+    width: 9px;
+    height: 9px;
+    border-width: 1px;
+  }
+
+  .bolinha.pequena {
+    width: 7px;
+    height: 7px;
+    border-width: 1px;
+  }
+
+  /* Ajustes no modo e meta */
   .modo-meta-wrapper {
-    flex-direction: column;
+    width: calc(90% - var(--espacamento-padrao)) !important;
+    padding: 8px !important;
+    margin: 0 auto 10px auto !important;
+    gap: 5px;
+  }
+
+  #modo-container {
+    margin-bottom: 5px;
+  }
+
+  #modo-container label,
+  #meta-container label {
+    font-size: 0.75em;
+    margin: 0 0 3px 0;
   }
 
   .modo-select,
   .input-meta {
-    margin-bottom: 5px;
+    height: 28px;
+    padding: 4px 6px;
+    font-size: 12px;
   }
+
+  /* Reduzir espaço no histórico */
+  .historico {
+    padding: 10px 6px;
+    margin-top: 8px;
+  }
+
+  .linha-titulo-historico {
+    margin-bottom: 12px;
+    padding: 0 6px;
+  }
+
+  .titulo-historico {
+    font-size: 15px;
+  }
+
+  .acoes-esquerda,
+  .acoes-direita {
+    gap: 5px;
+  }
+
+  .icone-historico {
+    padding: 5px;
+  }
+
+  #historico-tabela th {
+    padding: 6px 3px;
+    font-size: 0.7em;
+  }
+
+  #historico-tabela td {
+    padding: 6px 3px;
+    font-size: 0.7em;
+  }
+
+  /* Log temporário */
+  .log-temp {
+    min-height: 1.7rem;
+    padding: 3px 5px;
+    font-size: 0.65rem;
+    margin: 3px auto;
+  }
+
+  /* Rodapé mais compacto */
+  .rodape-painel {
+    padding: 3px 5px;
+    font-size: 0.6rem;
+    margin: 6px auto;
+  }
+
+  .status-conexao {
+    gap: 2px;
+    font-size: 0.6rem;
+  }
+
+  .status-conexao .status-dot {
+    width: 3px;
+    height: 3px;
+    margin-right: 1px;
+  }
+
+  .hora-data {
+    font-size: 0.6rem;
+  }
+
+  /* Abas */
+  .aba-menu {
+    gap: 5px;
+    margin-bottom: 8px;
+  }
+
+  .aba {
+    font-size: 13px;
+    padding: 5px 8px;
+  }
+
+  .licenca-mini-plano {
+    font-size: 0.6rem;
+    padding: 1px 3px;
+  }
+
+  /* Barra de status - VERSÃO ÚNICA OTIMIZADA */
+  .status-etapas {
+    height: 22px;
+    padding: 0 3px;
+    margin-bottom: 3px;
+  }
+
+  .status-etapas > div {
+    font-size: 0.55rem;
+    gap: 1px;
+  }
+
+  .bolinha {
+    width: 9px;
+    height: 9px;
+    border-width: 1px;
+  }
+
+  .bolinha.pequena {
+    width: 7px;
+    height: 7px;
+    border-width: 1px;
+  }
+
+  .status-etapas::before {
+    top: 4px !important;
+    left: 10px !important;
+    right: 10px !important;
+    height: 2px !important;
+  }
+
+  .status-etapas::after {
+    top: 4px !important;
+    left: 10px !important;
+    height: 2px !important;
+  }
+}
+
+/* Ajustes para dispositivos móveis */
+@media (max-width: 768px) {
+  #status-deriv {
+    width: calc(100% - var(--espacamento-padrao));
+    margin: 6px auto;
+    font-size: 0.75rem;
+    padding: 10px 12px;
+    box-sizing: border-box;
+  }
+}
+
+@media (max-width: 480px) {
+  #status-deriv {
+    width: calc(100% - var(--espacamento-padrao));
+    margin: 5px auto;
+    font-size: 0.7rem;
+    padding: 8px 10px;
+    box-sizing: border-box;
+  }
+}
+
+@media (max-width: 320px) {
+  #status-deriv {
+    padding: 5px 8px;
+    margin: 4px auto;
+    font-size: 0.65rem;
+  }
+}
+
+/* Estilos adicionais para mobile.js */
+.destaque-mobile {
+  animation: pulseMobile 1.5s ease-in-out;
+}
+
+@keyframes pulseMobile {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 0.7;
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.8);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* === CLASSE MOBILE-DEVICE === */
+body.mobile-device {
+  touch-action: manipulation; /* Melhora o desempenho de toque */
+  -webkit-tap-highlight-color: transparent; /* Remove destaque de toque */
+  user-select: none; /* Evita seleção de texto indesejada */
+}
+
+body.mobile-device .card-conta {
+  max-width: 140px;
+}
+
+body.mobile-device .tipo-conta {
+  max-width: 80px;
+}
+
+body.mobile-device .logout-text {
+  font-size: 0.8rem;
+}
+
+body.mobile-device .bolinha {
+  width: 12px;
+  height: 12px;
+  border-width: 1px;
 }

@@ -349,9 +349,9 @@
                 <td>{{ op.tipo.upper() if op.tipo else '--' }}</td>
                 <td title="Valor da entrada">${{ "%.2f"|format(op.valor) }}</td>
                 <td
-                  class="resultado {{ 'positivo' if op.resultado_real >= 0 else 'negativo' }}"
+                  class="resultado {{ 'positivo' if op.get('resultado_real', 0) >= 0 else 'negativo' }}"
                 >
-                  ${{ "%.2f"|format(op.resultado_real) }}
+                  ${{ "%.2f"|format(op.get('resultado_real', 0)) }}
                 </td>
               </tr>
               {% endfor %}
@@ -396,7 +396,8 @@
       // Executa após o carregamento da página
       window.addEventListener("load", forcarRecarregamentoCSS);
     </script>
-    <script src="{{ url_for('static', filename='scripts.js') }}" defer></script>
+    <script src="{{ url_for('static', filename='mobile.js') }}"></script>
+    <script src="{{ url_for('static', filename='scripts.js') }}"></script>
     <script src="/static/persistencia.js"></script>
   </body>
 </html>
