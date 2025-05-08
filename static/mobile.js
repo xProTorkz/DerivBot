@@ -1,6 +1,48 @@
 // DerivBot - Funções específicas para Mobile
 // Arquivo separado para lidar com funcionalidades exclusivas de dispositivos móveis
 
+// Adicionar estilo direto para o símbolo USD e espaçamento entre lucro e meta
+const estiloUSD = document.createElement("style");
+estiloUSD.textContent = `
+  /* Garantir que o valor-saldo tenha o símbolo USD visível após o valor */
+  #saldo-valor::after {
+    content: " USD";
+    display: inline-block;
+    visibility: visible;
+    opacity: 0.7;
+    font-weight: normal;
+    color: #aaaaaa;
+    margin-left: 15px;
+    font-size: 1rem;
+  }
+  
+  /* Ajustar espaço entre o lucro e a meta */
+  #meta-valor {
+    margin-left: 3px !important;
+    letter-spacing: 1px !important;
+  }
+  
+  /* Aumentar o tamanho dos valores de saldo e lucro */
+  #saldo-valor, #lucro-valor {
+    font-size: 1.7rem !important;
+    font-weight: bold !important;
+  }
+  
+  /* Ajustes responsivos para telas menores */
+  @media (max-width: 480px) {
+    #saldo-valor, #lucro-valor {
+      font-size: 1.5rem !important;
+    }
+  }
+  
+  @media (max-width: 320px) {
+    #saldo-valor, #lucro-valor {
+      font-size: 1.3rem !important;
+    }
+  }
+`;
+document.head.appendChild(estiloUSD);
+
 document.addEventListener("DOMContentLoaded", function () {
   let isMobile = false;
 
@@ -15,6 +57,7 @@ document.addEventListener("DOMContentLoaded", function () {
       ajustarInterfaceMobile();
       adicionarSuporteGestos();
       corrigirBarraProgresso(); // Aplica correções específicas na barra de progresso
+      corrigirCamposValores(); // Correção dos campos de saldo e lucro
 
       // Nova função: verifica o estado atual da barra e força atualização
       setTimeout(forcarAtualizacaoBarraProgresso, 500);
@@ -175,6 +218,174 @@ document.addEventListener("DOMContentLoaded", function () {
     }
   }
 
+  // Função para corrigir a apresentação dos valores de saldo e lucro em dispositivos móveis
+  function corrigirCamposValores() {
+    const saldoValor = document.getElementById("saldo-valor");
+    const lucroValor = document.getElementById("lucro-valor");
+    const metaValor = document.getElementById("meta-valor");
+    const infoBar = document.querySelector(".info-bar");
+
+    if (!saldoValor || !lucroValor) return;
+
+    // Garantir que a info-bar esteja em layout horizontal
+    if (infoBar) {
+      infoBar.style.flexDirection = "row";
+      infoBar.style.justifyContent = "space-between";
+
+      // Corrigir alinhamento dos elementos filhos
+      const saldoContainer = infoBar.querySelector(".saldo");
+      const lucroContainer = infoBar.querySelector(".lucro");
+
+      if (saldoContainer) {
+        saldoContainer.style.alignItems = "flex-start";
+        saldoContainer.style.textAlign = "left";
+        saldoContainer.style.width = "auto";
+
+        // Garantir que o valor do saldo seja visível
+        const valorSaldo = saldoContainer.querySelector("#valor-saldo");
+        if (valorSaldo) {
+          valorSaldo.style.display = "flex";
+          valorSaldo.style.alignItems = "center";
+          valorSaldo.style.flexWrap = "nowrap";
+          valorSaldo.style.overflow = "visible";
+        }
+      }
+
+      if (lucroContainer) {
+        lucroContainer.style.alignItems = "flex-end";
+        lucroContainer.style.textAlign = "right";
+        lucroContainer.style.width = "auto";
+
+        // Garantir que o valor do lucro seja visível
+        const lucroMeta = lucroContainer.querySelector("#lucro-meta");
+        if (lucroMeta) {
+          lucroMeta.style.display = "flex";
+          lucroMeta.style.alignItems = "center";
+          lucroMeta.style.justifyContent = "flex-end";
+          lucroMeta.style.flexWrap = "nowrap";
+          lucroMeta.style.overflow = "visible";
+        }
+      }
+    }
+
+    // Corrigir estilo direto dos elementos de valor
+    if (saldoValor) {
+      saldoValor.style.maxWidth = "100%";
+      saldoValor.style.overflow = "visible";
+      saldoValor.style.textOverflow = "initial";
+      saldoValor.style.whiteSpace = "nowrap";
+    }
+
+    if (lucroValor) {
+      lucroValor.style.maxWidth = "100%";
+      lucroValor.style.overflow = "visible";
+      lucroValor.style.textOverflow = "initial";
+      lucroValor.style.whiteSpace = "nowrap";
+    }
+
+    // Função para formatação de valores numéricos
+    function formatarValor(valor) {
+      if (!valor || isNaN(parseFloat(valor))) return valor;
+
+      // Sempre mostrar 2 casas decimais para valores numéricos
+      let numeroFormatado = parseFloat(valor).toFixed(2);
+
+      // Se o valor for muito grande, simplificar a apresentação
+      if (numeroFormatado > 9999) {
+        return Math.floor(numeroFormatado / 1000) + "k";
+      }
+
+      return numeroFormatado;
+    }
+
+    // Configurar o MutationObserver para monitorar alterações nos valores
+    const observarValor = new MutationObserver(function (mutations) {
+      mutations.forEach(function (mutation) {
+        if (
+          mutation.type === "childList" ||
+          mutation.type === "characterData"
+        ) {
+          const elemento = mutation.target;
+
+          // Se o elemento for o saldo ou lucro, aplicar formatação
+          if (elemento === saldoValor || elemento.parentNode === saldoValor) {
+            const valorAtual = saldoValor.textContent.trim();
+            if (!isNaN(parseFloat(valorAtual))) {
+              if (valorAtual.length > 8) {
+                saldoValor.classList.add("valor-longo");
+              } else {
+                saldoValor.classList.remove("valor-longo");
+              }
+            }
+          }
+
+          // Se o elemento for o lucro, verificar se é positivo ou negativo
+          if (elemento === lucroValor || elemento.parentNode === lucroValor) {
+            const valorAtual = lucroValor.textContent.trim();
+            if (!isNaN(parseFloat(valorAtual))) {
+              const valor = parseFloat(valorAtual);
+              if (valor > 0) {
+                lucroValor.classList.add("positivo");
+                lucroValor.classList.remove("negativo", "neutro");
+              } else if (valor < 0) {
+                lucroValor.classList.add("negativo");
+                lucroValor.classList.remove("positivo", "neutro");
+              } else {
+                lucroValor.classList.add("neutro");
+                lucroValor.classList.remove("positivo", "negativo");
+              }
+
+              if (valorAtual.length > 8) {
+                lucroValor.classList.add("valor-longo");
+              } else {
+                lucroValor.classList.remove("valor-longo");
+              }
+            }
+          }
+
+          // Se o elemento for a meta, garantir formato correto
+          if (elemento === metaValor || elemento.parentNode === metaValor) {
+            const valorAtual = metaValor.textContent.trim();
+            if (valorAtual && !valorAtual.startsWith("/")) {
+              metaValor.textContent = "/" + valorAtual.replace("/", "");
+            }
+          }
+        }
+      });
+    });
+
+    // Observar mudanças nos elementos
+    observarValor.observe(saldoValor, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+
+    observarValor.observe(lucroValor, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+
+    if (metaValor) {
+      observarValor.observe(metaValor, {
+        childList: true,
+        characterData: true,
+        subtree: true,
+      });
+    }
+
+    // Aplicar imediatamente para valores iniciais
+    setTimeout(() => {
+      saldoValor.textContent = formatarValor(saldoValor.textContent);
+      lucroValor.textContent = formatarValor(lucroValor.textContent);
+
+      if (metaValor && !metaValor.textContent.startsWith("/")) {
+        metaValor.textContent = "/" + metaValor.textContent.replace("/", "");
+      }
+    }, 100);
+  }
+
   // Inicialização - detecta se é dispositivo móvel
   detectarDispositivoMovel();
 
@@ -184,10 +395,11 @@ document.addEventListener("DOMContentLoaded", function () {
     if (isMobile) {
       // Ajustar as barras quando redimensionar
       ajustarBarrasEmResize();
+      corrigirCamposValores(); // Reaplica a correção após redimensionar
     }
   });
 
-  // Exporta funções para uso global
+  // Adicionar a nova função ao objeto window.mobileUtils
   window.mobileUtils = {
     detectarDispositivoMovel,
     ajustarInterfaceMobile,
@@ -198,6 +410,7 @@ document.addEventListener("DOMContentLoaded", function () {
     forcarAtualizacaoBarraProgresso,
     atualizarBarraProgressoMobile,
     ajustarBarrasEmResize,
+    corrigirCamposValores,
   };
 
   // Inicialização adicional após carregamento completo da página
@@ -205,12 +418,16 @@ document.addEventListener("DOMContentLoaded", function () {
     if (isMobile) {
       // Garante que as barras estejam criadas e visíveis
       corrigirBarraProgresso();
+      corrigirCamposValores(); // Aplica a correção nos valores iniciais
 
       // Aplica atualização inicial
       setTimeout(forcarAtualizacaoBarraProgresso, 200);
 
       // Atualização secundária com atraso maior para garantir
       setTimeout(forcarAtualizacaoBarraProgresso, 1000);
+
+      // Atualização dos campos de valores após a renderização completa
+      setTimeout(corrigirCamposValores, 500);
     }
   });
 
@@ -249,23 +466,33 @@ document.addEventListener("DOMContentLoaded", function () {
     // Cria uma cópia para não modificar o original
     const etapasAdaptadas = JSON.parse(JSON.stringify(etapasDemo));
 
+    // Obtém o valor da entrada da etapa original
+    const msgOriginal = etapasAdaptadas[2].mensagem;
+    // Extrai o valor usando expressão regular (procura por $X.XX)
+    const valorMatch = msgOriginal.match(/\$(\d+\.\d+)/);
+    const valorEntrada = valorMatch ? valorMatch[1] : "0.35";
+
     // Reduz o tamanho das mensagens para dispositivos móveis
     if (window.innerWidth <= 320) {
       // Versões curtas para telas muito pequenas
       etapasAdaptadas[0].mensagem = "Analisando mercado...";
-      etapasAdaptadas[1].mensagem = "Sinal detectado em EUR/USD";
-      etapasAdaptadas[2].mensagem = "Abrindo CALL $5.00 (1min)";
+      etapasAdaptadas[1].mensagem = "Sinal detectado em R_10";
+      etapasAdaptadas[2].mensagem = `MULTUP $${valorEntrada} (1s)`;
       etapasAdaptadas[3].mensagem = "Aguardando resultado...";
-      etapasAdaptadas[4].mensagem = "✅ GANHO! +$4.30";
-      etapasAdaptadas[5].mensagem = "Pronto para nova análise";
+      etapasAdaptadas[4].mensagem = `✅ GANHO! +$${(
+        parseFloat(valorEntrada) * 0.9
+      ).toFixed(2)}`;
+      etapasAdaptadas[5].mensagem = "Próxima análise...";
     } else if (window.innerWidth <= 480) {
       // Versões médias para telas pequenas
       etapasAdaptadas[0].mensagem = "Analisando mercado...";
-      etapasAdaptadas[1].mensagem = "Sinal identificado! Alta em EUR/USD";
-      etapasAdaptadas[2].mensagem = "Abrindo CALL $5.00 (1min)";
-      etapasAdaptadas[3].mensagem = "Contrato aberto! Aguardando...";
-      etapasAdaptadas[4].mensagem = "✅ GANHO! +$4.30 (86%)";
-      etapasAdaptadas[5].mensagem = "Pronto para nova análise";
+      etapasAdaptadas[1].mensagem = "Sinal identificado! Alta em R_10";
+      etapasAdaptadas[2].mensagem = `MULTUP $${valorEntrada} (micro 1s)`;
+      etapasAdaptadas[3].mensagem = "Aguardando fechamento...";
+      etapasAdaptadas[4].mensagem = `✅ GANHO! +$${(
+        parseFloat(valorEntrada) * 0.9
+      ).toFixed(2)}`;
+      etapasAdaptadas[5].mensagem = "Analisando nova oportunidade...";
     }
 
     return etapasAdaptadas;

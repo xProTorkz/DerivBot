@@ -26,6 +26,8 @@ import string
 import re
 import requests
 import traceback
+import time
+import logging
 
 load_dotenv()
 
@@ -39,6 +41,9 @@ ADMIN_DERIV_REAL = os.getenv("ADMIN_DERIV_REAL")
 app = Flask(__name__, template_folder="templates")
 # Gera chave secreta estática (para persistir cookies entre reinícios) ou lê do .env
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "minha_chave_flask_super_secreta")
+
+# Registra o tempo de início da aplicação para cálculo de uptime
+app.start_time = time.time()
 
 
 # Rota para servir arquivos da pasta img
@@ -198,20 +203,177 @@ def status_detalhado():
 
 @app.route("/status_deriv")
 def status_deriv():
-    status_flag = "ok" if trading_app.motor.conectado else "erro"
-    return jsonify({"status": status_flag, "mensagem": trading_app.motor.ultimo_erro})
+    """
+    Retorna o status da conexão com a Deriv, incluindo dados da conta quando conectado.
+    """
+    try:
+        status_flag = "ok" if trading_app.motor.conectado else "erro"
+        resposta = {"status": status_flag}
+
+        if status_flag == "ok":
+            # Adiciona informações detalhadas sobre a conta conectada
+            resposta["mensagem"] = "Conectado com sucesso"
+            resposta["saldo"] = trading_app.motor.obter_saldo()
+
+            # Se tivermos informações da conta, incluímos
+            if (
+                hasattr(trading_app.motor, "info_conta")
+                and trading_app.motor.info_conta
+            ):
+                resposta["conta_nome"] = trading_app.motor.info_conta.get(
+                    "nome", "Conta Deriv"
+                )
+                resposta["conta_tipo"] = trading_app.motor.info_conta.get(
+                    "tipo", "Demo"
+                )
+                resposta["conta_moeda"] = trading_app.motor.info_conta.get(
+                    "moeda", "USD"
+                )
+
+            # Se não tivermos informações completas da conta, usamos valores padrão
+            if "conta_nome" not in resposta:
+                if session.get("account_type") == "demo":
+                    resposta["conta_nome"] = "Conta Demo"
+                    resposta["conta_tipo"] = "Demo"
+                else:
+                    resposta["conta_nome"] = "Conta Real"
+                    resposta["conta_tipo"] = "Real"
+                resposta["conta_moeda"] = "USD"
+        else:
+            resposta["mensagem"] = (
+                trading_app.motor.ultimo_erro or "Falha na conexão com a Deriv"
+            )
+
+        return jsonify(resposta)
+    except Exception as e:
+        app.logger.error(f"Erro ao verificar status Deriv: {str(e)}")
+        return jsonify({"status": "erro", "mensagem": f"Erro interno: {str(e)}"})
 
 
 @app.route("/saldo_atual")
 def saldo_atual():
-    return jsonify({"status": "ok", "saldo": trading_app.motor.obter_saldo()})
+    """
+    Retorna o saldo atual da conta.
+    Força uma verificação direta do saldo na API da Deriv para garantir precisão.
+    """
+    try:
+        # Força a atualização do saldo no motor
+        saldo = trading_app.motor.obter_saldo()
+
+        # Registra o saldo para debug
+        app.logger.info(f"Saldo atual obtido: ${saldo:.2f}")
+
+        return jsonify({"status": "ok", "saldo": saldo})
+    except Exception as e:
+        app.logger.error(f"Erro ao obter saldo: {str(e)}")
+        return jsonify({"status": "erro", "mensagem": str(e)})
 
 
 @app.route("/lucro_meta")
 def lucro_meta():
+    """
+    Endpoint para obter o lucro atual e meta do robô.
+    Se o robô não estiver ativo, retorna o último valor de lucro conhecido.
+    """
+    try:
+        # Verifica se o robô está ativo
+        robo_ativo = trading_app.rodando
+
+        # Força atualização do saldo para precisão
+        saldo_atual = trading_app.motor.obter_saldo()
+
+        # Verifica se temos saldo inicial registrado
+        if not hasattr(trading_app, "saldo_inicial") or trading_app.saldo_inicial <= 0:
+            trading_app.saldo_inicial = saldo_atual
+            app.logger.info(f"Saldo inicial definido: ${trading_app.saldo_inicial:.2f}")
+
+        # Se o robô estiver ativo, calcula o lucro real
+        if robo_ativo:
+            # Calcula o lucro real (saldo atual - saldo inicial)
+            lucro_real = saldo_atual - trading_app.saldo_inicial
+            # Armazena o lucro para uso quando o robô estiver inativo
+            trading_app.ultimo_lucro_conhecido = lucro_real
+            app.logger.info(f"Lucro calculado (ativo): ${lucro_real:.2f}")
+        else:
+            # Se o robô não estiver ativo, usa o último valor conhecido
+            lucro_real = getattr(trading_app, "ultimo_lucro_conhecido", 0.0)
+            app.logger.info(f"Lucro recuperado (inativo): ${lucro_real:.2f}")
+
+        # Log detalhado para depuração
+        app.logger.info(
+            f"Meta: ${meta_diaria:.2f} | Saldo atual: ${saldo_atual:.2f} | Saldo inicial: ${trading_app.saldo_inicial:.2f}"
+        )
+
+        return jsonify(
+            {
+                "status": "ok",
+                "lucro": lucro_real,
+                "meta": meta_diaria,
+                "robo_ativo": robo_ativo,
+                "saldo_atual": saldo_atual,
+                "saldo_inicial": trading_app.saldo_inicial,
+            }
+        )
+    except Exception as e:
+        app.logger.error(f"Erro ao calcular lucro/meta: {str(e)}")
+        return jsonify({"status": "erro", "mensagem": str(e)})
+
+
+@app.route("/ultima_analise")
+def ultima_analise():
+    """
+    Endpoint para obter a última análise da IA, mesmo quando o robô não está ativo.
+    Permite ver recomendações de entrada, pontos de suporte/resistência, etc.
+    """
+    analise = trading_app.obter_ultima_analise()
+
     return jsonify(
-        {"status": "ok", "lucro": trading_app.lucro_sessao, "meta": meta_diaria}
+        {
+            "status": "ok",
+            "timestamp": analise["timestamp"],
+            "preco": analise["preco"],
+            "suportes": analise["suportes"],
+            "resistencias": analise["resistencias"],
+            "em_suporte": analise["em_suporte"],
+            "em_resistencia": analise["em_resistencia"],
+            "sinal": analise["sinal"],
+            "confianca": analise["confianca"],
+            "razao": analise["razao"],
+        }
     )
+
+
+@app.route("/estatisticas")
+def estatisticas():
+    """
+    Endpoint para obter estatísticas do sistema, incluindo uso de memória,
+    dados armazenados e outros indicadores de performance.
+    """
+    try:
+        # Estatísticas do catalogador
+        cat_stats = trading_app.catalogador.estatisticas()
+
+        # Estatísticas gerais do sistema
+        stats = {
+            "status": "ok",
+            "catalogador": cat_stats,
+            "memoria": {
+                "uso_estimado_kb": cat_stats["memoria_estimada_kb"],
+                "periodo_dados": f"{cat_stats['periodo_segundos'] / 3600:.1f} horas",
+            },
+            "sistema": {
+                "uptime": (
+                    time.time() - app.start_time if hasattr(app, "start_time") else 0
+                ),
+                "conectado_deriv": trading_app.motor.conectado,
+                "operacoes_abertas": len(trading_app.motor.operacoes_abertas),
+                "operacoes_historico": len(trading_app.motor.historico_operacoes),
+            },
+        }
+        return jsonify(stats)
+    except Exception as e:
+        logging.error(f"Erro ao obter estatísticas: {str(e)}", exc_info=True)
+        return jsonify({"status": "erro", "mensagem": str(e)})
 
 
 @app.route("/historico_resultados")

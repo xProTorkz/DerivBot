@@ -355,20 +355,40 @@ document.addEventListener("DOMContentLoaded", function () {
   };
 
   function atualizarSaldoEmTempoReal() {
-    fetch("/saldo_atual")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.status === "ok") {
-          const saldoEl = document.getElementById("saldo-valor");
-          const saldoAtual = parseFloat(saldoEl.textContent || "0");
-          const novoSaldo = parseFloat(data.saldo);
+    // Verificar status do robô antes de atualizar o saldo
+    fetch("/status_robo")
+      .then((statusRes) => statusRes.json())
+      .then((statusData) => {
+        // Só atualiza se o robô estiver ativo ou for a primeira vez
+        const saldoEl = document.getElementById("saldo-valor");
+        if (
+          statusData.ativo ||
+          saldoEl.getAttribute("data-inicializado") !== "true"
+        ) {
+          // Busca o saldo atual
+          fetch("/saldo_atual")
+            .then((res) => res.json())
+            .then((data) => {
+              if (data.status === "ok") {
+                const saldoAtual = parseFloat(
+                  saldoEl.textContent.replace(/,/g, "") || "0"
+                );
+                const novoSaldo = parseFloat(data.saldo);
 
-          // Anima a transição do saldo
-          animarValor(saldoEl, saldoAtual, novoSaldo, 1000);
+                // Atualiza o saldo
+                saldoEl.textContent = novoSaldo.toFixed(2);
+
+                // Marca como inicializado
+                saldoEl.setAttribute("data-inicializado", "true");
+              }
+            })
+            .catch((err) => {
+              console.warn("Erro ao atualizar saldo:", err);
+            });
         }
       })
       .catch((err) => {
-        console.warn("Erro ao atualizar saldo:", err);
+        console.warn("Erro ao verificar status do robô:", err);
       });
   }
 
@@ -378,8 +398,23 @@ document.addEventListener("DOMContentLoaded", function () {
       .then((data) => {
         if (statusDeriv) {
           if (data.status === "ok") {
-            statusDeriv.textContent = "🟢 Conectado ao Deriv";
-            statusDeriv.style.color = "#00d67b";
+            // Mostra informações da conta conectada
+            let textoStatus = "✅ ";
+
+            // Se temos dados da conta, mostramos eles
+            if (data.conta_nome && data.conta_tipo) {
+              textoStatus += `${data.conta_nome} (${data.conta_tipo})`;
+            } else {
+              textoStatus += "Conectado à Deriv";
+            }
+
+            // Se tem saldo, mostra
+            if (data.saldo) {
+              textoStatus += ` - Saldo: $${parseFloat(data.saldo).toFixed(2)}`;
+            }
+
+            statusDeriv.textContent = textoStatus;
+            statusDeriv.style.color = "var(--cor-verde)";
           } else {
             const msg = data.mensagem ? ` (${data.mensagem})` : "";
             statusDeriv.textContent = `🔴 Erro na conexão com Deriv${msg}`;
@@ -450,6 +485,20 @@ document.addEventListener("DOMContentLoaded", function () {
             botaoControle.textContent = "⛔ Parar Robô";
             botaoControle.style.backgroundColor = "#ff3b3b"; // vermelho
             botaoControle.style.color = "#000"; // preto
+
+            // Oculta os controles de configuração quando robô está ativo
+            document.querySelector(".modo-meta-wrapper").style.display = "none";
+
+            // Mostra o modo selecionado
+            if (modoOperacao) {
+              document.getElementById("modo-selecionado").style.display =
+                "block";
+              document.getElementById("modo-texto").textContent =
+                modoOperacao.toUpperCase();
+            }
+
+            // Salvar estado para persistência
+            salvarEstadoRobo();
           } else {
             atualizarLog("🟡 Robô parado.", "config");
             // Quando o robô estiver parado, resetamos as bolinhas e barra
@@ -457,6 +506,19 @@ document.addEventListener("DOMContentLoaded", function () {
             botaoControle.textContent = "✅ Iniciar Robô";
             botaoControle.style.backgroundColor = "#00d67b"; // verde
             botaoControle.style.color = "#000"; // preto
+
+            // Mostra os controles de configuração quando robô está inativo
+            document.querySelector(".modo-meta-wrapper").style.display = "flex";
+            document.getElementById("modo-selecionado").style.display = "none";
+
+            // Remover estado salvo quando o robô está parado
+            localStorage.removeItem("derivbot_estado");
+
+            // Para timer de atualização contínua se existir
+            if (atualizacaoTimer) {
+              clearInterval(atualizacaoTimer);
+              atualizacaoTimer = null;
+            }
           }
         }
 
@@ -495,6 +557,14 @@ document.addEventListener("DOMContentLoaded", function () {
 
         // Atualiza histórico se necessário
         atualizarHistorico();
+
+        // Atualizar dados para persistência, apenas se estiver ativo
+        if (data.ativo) {
+          // Atualizar valores para persistência
+          saldoAtual = data.saldo;
+          lucroAtual = data.lucro;
+          contadorOperacoes = data.operacoes;
+        }
       })
       .catch((error) => {
         console.error("Erro ao atualizar status:", error);
@@ -503,23 +573,36 @@ document.addEventListener("DOMContentLoaded", function () {
 
   function atualizarLucroEMeta() {
     fetch("/lucro_meta")
-      .then((res) => res.json())
+      .then((response) => response.json())
       .then((data) => {
-        if (data.status === "ok") {
-          const lucroEl = document.getElementById("lucro-valor");
-          const metaEl = document.getElementById("meta-valor");
-          const metaInput = document.getElementById("meta");
+        if (data.status !== "ok") return;
 
-          // Garante que mesmo quando o valor atual é igual ao valor anterior,
-          // o display é atualizado
-          if (lucroEl) {
+        const lucroEl = document.getElementById("lucro-valor");
+        const metaEl = document.getElementById("meta-valor");
+
+        // Atualizar o valor da meta apenas se o robô estiver ativo
+        // Se o robô não estiver ativo, mantém o valor que o usuário definiu na interface
+        if (metaEl && data.robo_ativo) {
+          metaEl.textContent = "/" + parseFloat(data.meta).toFixed(2);
+        }
+
+        // Verificar se o robô está ativo antes de atualizar o lucro
+        if (lucroEl) {
+          // Só atualiza o lucro se o robô estiver ativo ou for a primeira vez
+          if (
+            data.robo_ativo ||
+            lucroEl.getAttribute("data-inicializado") !== "true"
+          ) {
             const lucroAtual = parseFloat(lucroEl.textContent || "0");
             const novoLucro = parseFloat(data.lucro || "0");
 
-            // Força a atualização direta do texto, sem alterar estilos
+            // Atualiza o valor do lucro
             lucroEl.textContent = novoLucro.toFixed(2);
 
-            // Garante que nenhum estilo de fonte seja aplicado
+            // Marca como inicializado para futuras verificações
+            lucroEl.setAttribute("data-inicializado", "true");
+
+            // Limpa qualquer configuração de fonte que possa ter sido definida
             if (lucroEl.style.fontFamily) {
               lucroEl.style.fontFamily = "";
             }
@@ -527,46 +610,23 @@ document.addEventListener("DOMContentLoaded", function () {
               lucroEl.style.fontWeight = "";
             }
 
-            // Só anima se houver diferença
-            if (lucroAtual !== novoLucro) {
-              // Usa uma versão modificada que não afeta a fonte
-              const valorInicial = lucroAtual;
-              const valorFinal = novoLucro;
-              const duracao = 1200;
-              const inicio = Date.now();
-              const incremento = valorFinal - valorInicial;
+            // Adiciona estilo para garantir que a fonte não mude
+            lucroEl.style.fontFamily = "inherit !important";
+            lucroEl.style.fontWeight = "bold !important";
 
-              if (incremento !== 0) {
-                const animarNumero = () => {
-                  const decorrido = Date.now() - inicio;
-                  const fracao = Math.min(decorrido / duracao, 1);
-                  const progresso = 1 - Math.pow(1 - fracao, 3);
-                  const valorAtual = valorInicial + incremento * progresso;
-
-                  // Atualiza apenas o texto sem modificar estilos
-                  lucroEl.textContent = valorAtual.toFixed(2);
-
-                  if (fracao < 1) {
-                    requestAnimationFrame(animarNumero);
-                  } else {
-                    lucroEl.textContent = valorFinal.toFixed(2);
-                  }
-                };
-
-                requestAnimationFrame(animarNumero);
-              }
-            }
-          }
-
-          // Só atualiza meta se o robô estiver ativo; caso contrário mantemos valor local
-          if (roboAtivo) {
-            const meta = parseFloat(data.meta).toFixed(2);
-            if (metaEl) metaEl.textContent = "/" + meta;
-            if (metaInput && !roboAtivo) {
-              metaInput.value = meta;
+            // Aplica a classe de estilo correspondente ao valor
+            if (novoLucro > 0) {
+              lucroEl.className = "positivo";
+            } else if (novoLucro < 0) {
+              lucroEl.className = "negativo";
+            } else {
+              lucroEl.className = "neutro";
             }
           }
         }
+      })
+      .catch((error) => {
+        console.error("Erro ao atualizar lucro/meta:", error);
       });
   }
 
@@ -584,44 +644,34 @@ document.addEventListener("DOMContentLoaded", function () {
       });
   }
 
+  // Adicionar a função trocarAba à janela para chamar do HTML
   window.trocarAba = function (aba) {
-    // Oculta todos os painéis
+    // Oculta todas as abas
     document.getElementById("tabela-historico").style.display = "none";
-    document.getElementById("resumo-diario").style.display = "none";
-    document.getElementById("grafico-diario").style.display = "none";
     document.getElementById("historico-completo").style.display = "none";
+    document.getElementById("grafico-diario").style.display = "none";
 
-    // Mostra o painel selecionado
-    if (aba === "tabela")
+    // Remove a classe ativo de todos os botões
+    document.getElementById("btn-historico-atual").classList.remove("ativo");
+    document.getElementById("btn-historico-completo").classList.remove("ativo");
+    document.getElementById("btn-graficos").classList.remove("ativo");
+    document.getElementById("btn-limpar").classList.remove("ativo");
+
+    // Exibe a aba selecionada e marca o botão correspondente como ativo
+    if (aba === "tabela") {
       document.getElementById("tabela-historico").style.display = "block";
-    else if (aba === "resumo")
-      document.getElementById("resumo-diario").style.display = "block";
-    else if (aba === "grafico")
-      document.getElementById("grafico-diario").style.display = "block";
-    else if (aba === "historico-completo")
+      document.getElementById("btn-historico-atual").classList.add("ativo");
+    } else if (aba === "historico-completo") {
       document.getElementById("historico-completo").style.display = "block";
-
-    // Remove a classe 'ativo' de todos os botões
-    document.querySelectorAll(".icone-historico").forEach((btn) => {
-      btn.classList.remove("ativo");
-    });
-
-    // Adiciona a classe 'ativo' ao botão correspondente
-    let botaoAtivo;
-    switch (aba) {
-      case "tabela":
-        botaoAtivo = document.getElementById("btn-historico-atual");
-        break;
-      case "historico-completo":
-        botaoAtivo = document.getElementById("btn-historico-completo");
-        break;
-      case "grafico":
-        botaoAtivo = document.getElementById("btn-graficos");
-        break;
-    }
-
-    if (botaoAtivo) {
-      botaoAtivo.classList.add("ativo");
+      document.getElementById("btn-historico-completo").classList.add("ativo");
+      atualizarHistoricoCompleto(); // Atualiza os dados ao mudar para esta aba
+    } else if (aba === "grafico") {
+      document.getElementById("grafico-diario").style.display = "block";
+      document.getElementById("btn-graficos").classList.add("ativo");
+      atualizarGraficoTempoReal(); // Atualiza o gráfico ao mudar para esta aba
+    } else if (aba === "limpar") {
+      document.getElementById("btn-limpar").classList.add("ativo");
+      zerarTudo(); // Chama a função para zerar tudo
     }
   };
 
@@ -954,12 +1004,8 @@ document.addEventListener("DOMContentLoaded", function () {
 
       console.log("Estado do robô restaurado com sucesso");
 
-      // Se o robô estava ativo, precisamos reiniciá-lo
-      if (estado.roboAtivo) {
-        precisaRestaurarEstado = true;
-        console.log("Robô estava ativo, marcando para reiniciar");
-        atualizarLog("📋 Restaurando sessão anterior do robô...", "info");
-      }
+      // MODIFICADO: Não definimos mais a flag de restauração automática
+      // aqui, isso será decidido com base no status real do servidor
 
       return true;
     } catch (erro) {
@@ -1026,7 +1072,7 @@ document.addEventListener("DOMContentLoaded", function () {
     console.log("Histórico de operações restaurado");
   }
 
-  // Modificar a função inicializar para verificar se há estado salvo
+  // Inicializações
   function inicializar() {
     // Define valor inicial da meta
     if (metaInput) {
@@ -1038,355 +1084,255 @@ document.addEventListener("DOMContentLoaded", function () {
 
     // Inicia timers de verificação
     verificacaoDerivTimer = setInterval(verificarStatusDeriv, 10000);
-    verificacaoStatusTimer = setInterval(verificarStatusRobo, 5000);
+    verificacaoStatusTimer = setInterval(atualizarStatusRobo, 5000);
 
     // Atualiza saldo inicial
     atualizarSaldo();
 
-    // Novo: Tenta restaurar o estado salvo
-    restaurarEstadoRobo();
-
-    // Novo: Configurar evento para salvar estado quando a página for fechada/atualizada
-    window.addEventListener("beforeunload", salvarEstadoRobo);
-
-    // Novo: Verificar a cada 30 segundos para salvar o estado (backup)
-    setInterval(salvarEstadoRobo, 30000);
-
-    // Novo: Se o robô estava ativo, reiniciá-lo após alguns segundos
-    if (precisaRestaurarEstado) {
-      atualizarLog("🔄 Restaurando operações do robô...", "config");
-      setTimeout(() => {
-        iniciarRoboAutomaticamente();
-      }, 3000);
-    }
-  }
-
-  // Nova função para iniciar o robô automaticamente após restauração de estado
-  function iniciarRoboAutomaticamente() {
-    if (!precisaRestaurarEstado) return;
-
-    console.log("Iniciando robô automaticamente após restauração de estado");
-
-    // Envia comando para o servidor para iniciar o robô com os valores restaurados
-    fetch("/toggle_bot", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        modo: modoOperacao,
-        meta: metaDiaria,
-      }),
-    })
-      .then((response) => response.json())
-      .then((data) => {
-        if (data.status === "iniciado") {
-          roboAtivo = true;
-          botaoControle.textContent = "Parar Robô";
-          botaoControle.classList.add("ativo");
-          atualizarLog(
-            "✅ Robô restaurado com sucesso no modo " + modoOperacao,
-            "sucesso"
-          );
-
-          // Atualiza valores na interface
-          if (metaValor) metaValor.textContent = "/" + metaDiaria.toFixed(2);
-          document.getElementById("modo-selecionado").style.display = "block";
-          document.getElementById("modo-texto").textContent =
-            modoOperacao.toUpperCase();
-
-          // Inicia atualização contínua
-          atualizacaoTimer = setInterval(atualizarStatusRobo, 1000);
-
-          // Reset da flag
-          precisaRestaurarEstado = false;
-        } else {
-          atualizarLog(
-            "⚠️ Erro ao restaurar robô: " +
-              (data.mensagem || "Falha na conexão"),
-            "erro"
-          );
-          precisaRestaurarEstado = false;
-        }
-      })
-      .catch((error) => {
-        atualizarLog("⚠️ Erro de conexão ao restaurar robô", "erro");
-        console.error("Erro:", error);
-        precisaRestaurarEstado = false;
-      });
-  }
-
-  // Modificar a função iniciarRobo para salvar estado após iniciar
-  function iniciarRobo() {
-    // Obtem valores atuais de modo e meta
-    if (modoSelect) modoOperacao = modoSelect.value;
-    if (metaInput) metaDiaria = parseFloat(metaInput.value);
-
-    // Valida meta
-    if (isNaN(metaDiaria) || metaDiaria < 10) {
-      adicionarLog("⚠️ Meta inválida! Mínimo: $10.00");
-      return;
-    }
-
-    // Configuração do botão
-    botaoControle.textContent = "Parando...";
-    botaoControle.disabled = true;
-
-    // Envia comando para o servidor
-    fetch("/toggle_bot", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        modo: modoOperacao,
-        meta: metaDiaria,
-      }),
-    })
-      .then((response) => response.json())
-      .then((data) => {
-        if (data.status === "iniciado") {
-          roboAtivo = true;
-          botaoControle.textContent = "Parar Robô";
-          botaoControle.classList.add("ativo");
-          adicionarLog("🚀 Robô iniciado no modo " + modoOperacao);
-
-          // Atualiza valores na interface
-          if (metaValor) metaValor.textContent = "/" + metaDiaria.toFixed(2);
-          document.getElementById("modo-selecionado").style.display = "block";
-          document.getElementById("modo-texto").textContent =
-            modoOperacao.toUpperCase();
-
-          // Inicia atualização contínua
-          atualizacaoTimer = setInterval(atualizarStatusRobo, 1000);
-
-          // Salvar estado imediatamente
-          salvarEstadoRobo();
-        } else {
-          adicionarLog(
-            "⚠️ Erro ao iniciar: " + (data.mensagem || "Falha desconhecida")
-          );
-        }
-        botaoControle.disabled = false;
-      })
-      .catch((error) => {
-        adicionarLog("⚠️ Erro de conexão");
-        console.error("Erro:", error);
-        botaoControle.disabled = false;
-      });
-  }
-
-  // Modificar a função pararRobo para limpar estado ao parar
-  function pararRobo() {
-    botaoControle.textContent = "Parando...";
-    botaoControle.disabled = true;
-
-    fetch("/toggle_bot", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({}),
-    })
-      .then((response) => response.json())
-      .then((data) => {
-        if (data.status === "parado") {
-          roboAtivo = false;
-          botaoControle.textContent = "Iniciar Robô";
-          botaoControle.classList.remove("ativo");
-          adicionarLog("🛑 Robô parado");
-
-          // Para atualização contínua
-          if (atualizacaoTimer) {
-            clearInterval(atualizacaoTimer);
-            atualizacaoTimer = null;
-          }
-
-          // Atualiza uma última vez
-          atualizarStatusRobo();
-
-          // Remover estado salvo quando o robô é parado intencionalmente
-          localStorage.removeItem("derivbot_estado");
-        }
-        botaoControle.disabled = false;
-      })
-      .catch((error) => {
-        adicionarLog("⚠️ Erro de conexão");
-        console.error("Erro:", error);
-        botaoControle.disabled = false;
-      });
-  }
-
-  // Verifica status atual do robô
-  function verificarStatusRobo() {
+    // Verifica primeiro status do robô no servidor antes de restaurar qualquer estado
     fetch("/status_robo")
       .then((response) => response.json())
       .then((data) => {
-        if (data.ativo && !roboAtivo) {
-          // Robô está rodando mas interface não reflete
+        // Restaura o estado do robô apenas se ele estiver realmente rodando no servidor
+        if (data && data.ativo) {
+          console.log("Robô está rodando no servidor - restaurando interface");
           roboAtivo = true;
-          botaoControle.textContent = "Parar Robô";
-          botaoControle.classList.add("ativo");
-
-          // Inicia atualização contínua
-          if (!atualizacaoTimer) {
-            atualizacaoTimer = setInterval(atualizarStatusRobo, 1000);
-          }
-
-          // Salvar o estado quando detectamos que o robô está rodando
-          salvarEstadoRobo();
-        } else if (!data.ativo && roboAtivo) {
-          // Robô está parado mas interface não reflete
-          roboAtivo = false;
-          botaoControle.textContent = "Iniciar Robô";
-          botaoControle.classList.remove("ativo");
-
-          // Para atualização contínua
-          if (atualizacaoTimer) {
-            clearInterval(atualizacaoTimer);
-            atualizacaoTimer = null;
-          }
-
-          // Remover o estado salvo quando o robô é detectado como parado
-          localStorage.removeItem("derivbot_estado");
-        }
-
-        // Atualizar dados do robô para persistência, apenas se estiver ativo
-        if (data.ativo && roboAtivo) {
-          // Atualizar valores para persistência
-          saldoAtual = data.saldo;
-          lucroAtual = data.lucro;
-          contadorOperacoes = data.operacoes;
-
-          // Salvar estado atualizado
-          salvarEstadoRobo();
-        }
-      })
-      .catch((error) => {
-        console.error("Erro ao verificar status:", error);
-      });
-  }
-
-  // Verifica status da conexão com Deriv
-  function verificarStatusDeriv() {
-    fetch("/status_deriv")
-      .then((response) => response.json())
-      .then((data) => {
-        if (data.status === "ok") {
-          statusDeriv.textContent = "✅ Conectado ao servidor Deriv";
-          statusDeriv.style.color = "var(--cor-verde)";
+          atualizarStatusRobo(); // Isso vai atualizar a interface
         } else {
-          statusDeriv.textContent =
-            "❌ " + (data.mensagem || "Erro de conexão com Deriv");
-          statusDeriv.style.color = "var(--cor-vermelha)";
+          // Robô não está rodando, apenas restaurar configurações
+          restaurarEstadoRobo();
         }
       })
       .catch((error) => {
-        statusDeriv.textContent = "❌ Falha ao verificar conexão";
-        statusDeriv.style.color = "var(--cor-vermelha)";
+        console.error("Erro ao verificar status do robô:", error);
+        // Em caso de erro, tenta restaurar o estado mesmo assim
+        restaurarEstadoRobo();
       });
+
+    // Adiciona estilos para análise da IA e inicia atualização
+    adicionarEstilosAnaliseIA();
+    atualizarAnaliseIA();
+
+    // Atualizações periódicas
+    setInterval(atualizarSaldoEmTempoReal, 5000);
+    setInterval(atualizarStatusRobo, 4000);
+    setInterval(atualizarLucroEMeta, 3000);
+    setInterval(atualizarOperacoesDiarias, 30000);
+    setInterval(atualizarAnaliseIA, 4000); // Atualiza análise da IA a cada 4 segundos
   }
 
-  // Atualiza o saldo atual
-  function atualizarSaldo() {
-    fetch("/saldo_atual")
+  // Função para atualizar os dados em tempo real
+  function atualizarDadosOperacao() {
+    fetch("/status_detalhado")
       .then((response) => response.json())
       .then((data) => {
-        if (data.status === "ok" && saldoValor) {
-          saldoAtual = parseFloat(data.saldo);
-          saldoValor.textContent = saldoAtual.toFixed(2);
-        }
-      })
-      .catch((error) => {
-        console.error("Erro ao atualizar saldo:", error);
-      });
-  }
+        if (!data || data.status !== "ok") return;
 
-  // Atualiza a tabela de histórico
-  function atualizarHistorico() {
-    fetch("/historico_resultados")
-      .then((response) => response.json())
-      .then((data) => {
-        if (historicoTabela) {
-          // Limpa a tabela atual
-          historicoTabela.innerHTML = "";
+        // Atualiza informações de operação atual (se existir)
+        const operacaoAtual = data.operacao_atual;
+        if (operacaoAtual) {
+          // Atualiza data e hora da última operação
+          const dataOperacao =
+            operacaoAtual.timestamp || new Date().toISOString();
+          const dataObj = new Date(dataOperacao);
 
-          // Adiciona as operações na ordem (mais recentes primeiro)
-          data.reverse().forEach((op) => {
-            // Cria nova linha
-            const linha = document.createElement("tr");
+          // Formata a data e hora no formato brasileiro
+          const dataFormatada = dataObj.toLocaleDateString("pt-BR");
+          const horaFormatada = dataObj.toLocaleTimeString("pt-BR");
 
-            // Data
-            const celulaData = document.createElement("td");
-            celulaData.textContent = op.data;
-            linha.appendChild(celulaData);
+          // Atualiza os dados no histórico (primeira linha da tabela)
+          const tabela = document.getElementById("historico-tabela-body");
+          if (tabela && tabela.rows.length > 0) {
+            const primeiraLinha = tabela.rows[0];
 
-            // Hora
-            const celulaHora = document.createElement("td");
-            celulaHora.textContent = op.hora;
-            linha.appendChild(celulaHora);
+            // Atualiza a data e hora
+            if (primeiraLinha.cells[0])
+              primeiraLinha.cells[0].textContent = dataFormatada;
+            if (primeiraLinha.cells[1])
+              primeiraLinha.cells[1].textContent = horaFormatada;
 
-            // Tipo
-            const celulaTipo = document.createElement("td");
-            celulaTipo.textContent = op.tipo.toUpperCase();
-            linha.appendChild(celulaTipo);
-
-            // Valor
-            const celulaValor = document.createElement("td");
-            celulaValor.textContent = "$" + parseFloat(op.valor).toFixed(2);
-            linha.appendChild(celulaValor);
-
-            // Resultado - Agora com animação
-            const celulaResultado = document.createElement("td");
-            celulaResultado.classList.add("resultado");
-
-            // Aplicar classe baseada no valor
-            if (op.resultado_real > 0) {
-              celulaResultado.classList.add("positivo");
-            } else if (op.resultado_real < 0) {
-              celulaResultado.classList.add("negativo");
-            } else {
-              celulaResultado.classList.add("neutro");
+            // Atualiza tipo de operação
+            if (primeiraLinha.cells[2] && operacaoAtual.tipo) {
+              primeiraLinha.cells[2].textContent =
+                operacaoAtual.tipo.toUpperCase();
             }
 
-            celulaResultado.textContent =
-              "$" + parseFloat(op.resultado_real).toFixed(2);
+            // Atualiza valor de entrada
+            if (primeiraLinha.cells[3] && operacaoAtual.valor) {
+              primeiraLinha.cells[3].textContent = `$${parseFloat(
+                operacaoAtual.valor
+              ).toFixed(2)}`;
+            }
 
-            linha.appendChild(celulaResultado);
-
-            // Adiciona linha na tabela
-            historicoTabela.appendChild(linha);
-          });
-
-          // Mantém rolagem no final
-          const tabela = document.getElementById("tabela-historico");
-          if (tabela) {
-            tabela.scrollTop = tabela.scrollHeight;
+            // Atualiza resultado (se disponível)
+            if (
+              primeiraLinha.cells[4] &&
+              operacaoAtual.resultado !== undefined
+            ) {
+              const resultado = parseFloat(operacaoAtual.resultado);
+              primeiraLinha.cells[4].textContent = `$${resultado.toFixed(2)}`;
+              primeiraLinha.cells[4].className =
+                resultado >= 0 ? "positivo" : "negativo";
+            }
           }
         }
+
+        // Atualiza gráfico se estivermos na aba de gráfico
+        if (
+          document.getElementById("grafico-diario").style.display !== "none"
+        ) {
+          atualizarGraficoTempoReal(data.par_atual);
+        }
       })
-      .catch((error) => {
-        console.error("Erro ao atualizar histórico:", error);
-      });
+      .catch((error) =>
+        console.error("Erro ao atualizar dados da operação:", error)
+      );
   }
 
-  // Adiciona log temporário na interface
-  function adicionarLog(mensagem) {
-    if (logTemp) {
-      logTemp.textContent = mensagem;
+  // Função para atualizar o gráfico em tempo real do ativo
+  function atualizarGraficoTempoReal(ativo) {
+    const graficoEl = document.getElementById("grafico-diario");
+    if (!graficoEl) return;
 
-      // Efeito de fade
-      logTemp.style.opacity = "1";
-      setTimeout(() => {
-        logTemp.style.opacity = "0.7";
-      }, 3000);
+    // Verifica se o iframe já existe
+    let iframe = document.getElementById("grafico-tradingview");
+
+    // Se não existir, cria um novo
+    if (!iframe) {
+      iframe = document.createElement("iframe");
+      iframe.id = "grafico-tradingview";
+      iframe.width = "100%";
+      iframe.height = "400px";
+      iframe.style.border = "none";
+      iframe.allowFullscreen = true;
+      graficoEl.innerHTML = ""; // Limpa o conteúdo anterior
+      graficoEl.appendChild(iframe);
     }
+
+    // Atualiza o src do iframe com o ativo atual
+    const ativoFormatado = ativo || "R_10";
+    iframe.src = `https://br.tradingview.com/chart/?symbol=DERIV:${ativoFormatado}&interval=1`;
+  }
+
+  // Função para limpar todos os dados do robô
+  function zerarTudo() {
+    if (
+      confirm(
+        "Tem certeza que deseja zerar todos os dados do robô? Esta ação não pode ser desfeita."
+      )
+    ) {
+      fetch("/limpar_historico", { method: "POST" })
+        .then((response) => response.json())
+        .then((data) => {
+          if (data.status === "ok") {
+            // Limpa a tabela de histórico
+            const tabela = document.getElementById("historico-tabela-body");
+            if (tabela) tabela.innerHTML = "";
+
+            // Reseta o lucro
+            const lucroEl = document.getElementById("lucro-valor");
+            if (lucroEl) lucroEl.textContent = "0.00";
+
+            // Atualiza o resumo
+            const resumoTotal = document.getElementById("resumo-total");
+            const resumoLucros = document.getElementById("resumo-lucros");
+            const resumoPrejuizos = document.getElementById("resumo-prejuizos");
+            const resumoAssertividade = document.getElementById(
+              "resumo-assertividade"
+            );
+            const resumoLucroTotal =
+              document.getElementById("resumo-lucro-total");
+
+            if (resumoTotal) resumoTotal.textContent = "0";
+            if (resumoLucros) resumoLucros.textContent = "0";
+            if (resumoPrejuizos) resumoPrejuizos.textContent = "0";
+            if (resumoAssertividade) resumoAssertividade.textContent = "0";
+            if (resumoLucroTotal) resumoLucroTotal.textContent = "$0.00";
+
+            // Exibe mensagem de sucesso
+            const log = document.getElementById("log-temporario");
+            if (log) {
+              log.innerHTML =
+                '<span class="log-emoji">✅</span><span class="log-texto">Todos os dados foram zerados com sucesso!</span>';
+              log.className = "log-temp sucesso";
+            }
+          }
+        })
+        .catch((error) => console.error("Erro ao zerar dados:", error));
+    }
+  }
+
+  // Adiciona a função à janela para chamar do HTML
+  window.zerarTudo = zerarTudo;
+
+  // Adiciona a chamada para atualizar dados em tempo real
+  setInterval(atualizarDadosOperacao, 1000); // Atualiza a cada segundo
+
+  // Função para atualizar o histórico completo
+  function atualizarHistoricoCompleto() {
+    fetch("/historico_resultados")
+      .then((response) => response.json())
+      .then((dados) => {
+        const historicoEl = document.getElementById("historico-completo");
+        if (!historicoEl) return;
+
+        if (dados.length === 0) {
+          historicoEl.innerHTML = "<p>Nenhuma operação registrada ainda.</p>";
+          return;
+        }
+
+        // Cria a tabela HTML
+        let html = `
+          <div class="tabela-wrapper">
+            <table role="table">
+              <thead>
+                <tr>
+                  <th scope="col">Data</th>
+                  <th scope="col">Hora</th>
+                  <th scope="col">Tipo</th>
+                  <th scope="col">Entrada</th>
+                  <th scope="col">Resultado</th>
+                </tr>
+              </thead>
+              <tbody>
+        `;
+
+        // Adiciona as linhas de dados
+        dados.forEach((op) => {
+          const resultado = parseFloat(op.resultado_real || 0);
+          const classeResultado = resultado >= 0 ? "positivo" : "negativo";
+
+          html += `
+            <tr>
+              <td>${op.data || "--"}</td>
+              <td>${op.hora || "--"}</td>
+              <td>${(op.tipo || "--").toUpperCase()}</td>
+              <td title="Valor da entrada">$${parseFloat(op.valor || 0).toFixed(
+                2
+              )}</td>
+              <td class="resultado ${classeResultado}">$${resultado.toFixed(
+            2
+          )}</td>
+            </tr>
+          `;
+        });
+
+        html += `
+              </tbody>
+            </table>
+          </div>
+        `;
+
+        historicoEl.innerHTML = html;
+      })
+      .catch((error) =>
+        console.error("Erro ao carregar histórico completo:", error)
+      );
   }
 
   // Inicializações - Modificado para garantir que as bolinhas estejam desativadas no início
   modoSelect.dispatchEvent(new Event("change"));
   atualizarSaldoEmTempoReal();
-  verificarConexaoDeriv();
   atualizarStatusRobo();
   atualizarLucroEMeta();
   atualizarOperacoesDiarias();
@@ -1397,22 +1343,12 @@ document.addEventListener("DOMContentLoaded", function () {
 
   // Atualizações periódicas
   setInterval(atualizarSaldoEmTempoReal, 5000);
-  setInterval(verificarConexaoDeriv, 5000);
   setInterval(atualizarStatusRobo, 4000);
   setInterval(atualizarLucroEMeta, 3000); // Mais frequente
   setInterval(atualizarOperacoesDiarias, 4000);
   setInterval(atualizarStatusDetalhado, 3000);
   setInterval(atualizarHistorico, 2000); // Mais frequente
-  setInterval(() => {
-    fetch("/status_robo")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.ativo) {
-          // Usa a nova implementação
-          atualizarHistorico();
-        }
-      });
-  }, 5000);
+  setInterval(verificarStatusDeriv, 5000); // Mantendo apenas uma verificação de status
 
   const btnConectarDemo = document.getElementById("btn-conectar-demo");
   if (btnConectarDemo) {
@@ -1532,55 +1468,79 @@ document.addEventListener("DOMContentLoaded", function () {
       return;
     }
 
-    // Etapas com pontos de progresso e tipos de feedback
-    let etapasDemo = [
+    // Obtém o valor da meta para calcular o valor da operação
+    const metaValor = parseFloat(
+      document.getElementById("meta-valor").textContent.replace("/", "") || "50"
+    );
+    const modoSelecionado =
+      document.getElementById("modo").value || "iniciante";
+
+    // Calcula o valor da entrada baseado no modo selecionado (similar ao backend)
+    let percentEntrada = 0.01; // Padrão 1%
+    switch (modoSelecionado) {
+      case "iniciante":
+        percentEntrada = 0.005; // 0.5% da meta
+        break;
+      case "conservador":
+        percentEntrada = 0.01; // 1% da meta
+        break;
+      case "agressivo":
+        percentEntrada = 0.05; // 5% da meta
+        break;
+    }
+
+    // Calcula o valor de entrada e garante que seja pelo menos 0,35 (mínimo para R_10)
+    let valorEntrada = Math.max(metaValor * percentEntrada, 0.35);
+    valorEntrada = valorEntrada.toFixed(2);
+
+    // Define etapas da demonstração para operações de 1 segundo (micro scalping)
+    const etapas = [
       {
-        nome: "analisando",
-        progresso: 0,
-        tipo: "analise",
-        mensagem: "Analisando mercado em busca de oportunidades ideais...",
+        id: "analisando",
+        mensagem: "Analisando padrões de mercado...",
+        tempo: 1500,
+        classe: "info",
       },
       {
-        nome: "medio",
-        progresso: 33,
-        tipo: "info",
-        mensagem: "Sinal identificado! Padrão de alta detectado em EUR/USD",
+        id: "sinal",
+        mensagem: `Sinal identificado! Possível tendência de ALTA em R_10`,
+        tempo: 2000,
+        classe: "info",
       },
       {
-        nome: "abrindo",
-        progresso: 50,
-        tipo: "contrato",
-        mensagem: "Abrindo contrato CALL de $5.00 com expiração de 1 minuto",
+        id: "executando",
+        mensagem: `Executando MULTUP $${valorEntrada} em R_10 (micro scalping 1s)`,
+        tempo: 1500,
+        classe: "processing",
       },
       {
-        nome: "aguardando",
-        progresso: 75,
-        tipo: "espera",
-        mensagem: "Contrato aberto! Aguardando resultado (30s restantes)",
+        id: "aguardando",
+        mensagem: "Aguardando fechamento automático (1s)...",
+        tempo: 1500,
+        classe: "processing",
       },
       {
-        nome: "finalizado-win",
-        progresso: 100,
-        tipo: "ganho",
-        mensagem: "✅ Operação finalizada com GANHO! +$4.30 (86% de lucro)",
+        id: "resultado",
+        mensagem: `✅ GANHO! +$${(valorEntrada * 0.9).toFixed(2)}`,
+        tempo: 2500,
+        classe: "success",
       },
       {
-        nome: "parado",
-        progresso: 0,
-        tipo: "config",
-        mensagem: "Robô pronto para nova análise de mercado",
+        id: "pronto",
+        mensagem: "Analisando próxima oportunidade...",
+        tempo: 2000,
+        classe: "info",
       },
     ];
 
-    // Adapta mensagens para dispositivos móveis, se disponível
-    if (
-      window.mobileUtils &&
-      typeof window.mobileUtils.adaptarMensagensDemo === "function"
-    ) {
-      etapasDemo = window.mobileUtils.adaptarMensagensDemo(etapasDemo);
-    }
+    // Adaptação para dispositivos móveis se necessário
+    const etapasDemo = verificarMobile()
+      ? adaptarMensagensDemo(etapas)
+      : etapas;
 
-    let etapaAtual = 0;
+    // Mostra cada etapa em sequência
+    const progresso = document.getElementById("progresso");
+    let atual = 0;
 
     // Limpa qualquer intervalo anterior
     if (window.demoInterval) clearInterval(window.demoInterval);
@@ -1602,25 +1562,27 @@ document.addEventListener("DOMContentLoaded", function () {
         return;
       }
 
-      const etapa = etapasDemo[etapaAtual];
+      const etapa = etapasDemo[atual];
 
       // Usa a função centralizada para atualizar bolinhas e barra de progresso
-      atualizarProgressoBolinhas(etapa.nome, etapa.mensagem, etapa.tipo);
+      atualizarProgressoBolinhas(etapa.id, etapa.mensagem, etapa.classe);
 
       // Chama a função específica para dispositivos móveis
       if (
         window.mobileUtils &&
         typeof window.mobileUtils.atualizarBarraProgressoMobile === "function"
       ) {
-        window.mobileUtils.atualizarBarraProgressoMobile(etapa.nome);
+        window.mobileUtils.atualizarBarraProgressoMobile(etapa.id);
       }
 
       // Se for etapa de ganho, atualiza o lucro no cabeçalho
-      if (etapa.nome === "finalizado-win") {
+      if (etapa.id === "resultado") {
         const lucroEl = document.getElementById("lucro-valor");
         if (lucroEl) {
           const lucroAtual = parseFloat(lucroEl.textContent || "0");
-          lucroEl.textContent = (lucroAtual + 4.3).toFixed(2);
+          lucroEl.textContent = (lucroAtual + parseFloat(valorEntrada)).toFixed(
+            2
+          );
           lucroEl.classList.add("destaque-resultado");
 
           // Remove a classe após a animação
@@ -1631,10 +1593,10 @@ document.addEventListener("DOMContentLoaded", function () {
       }
 
       // Avança para a próxima etapa
-      etapaAtual = (etapaAtual + 1) % etapasDemo.length;
+      atual = (atual + 1) % etapasDemo.length;
 
       // Se chegarmos à etapa final (parado), fazemos uma pausa maior
-      if (etapaAtual === 0) {
+      if (atual === 0) {
         clearInterval(window.demoInterval);
         setTimeout(() => demonstrarProgresso(), 3000);
       }
@@ -1646,4 +1608,359 @@ document.addEventListener("DOMContentLoaded", function () {
     // Detecta se é dispositivo móvel - removido, agora gerenciado pelo mobile.js
     // ... resto do código existente ...
   });
+
+  // Adicionar funções para exibir análise da IA
+  function atualizarAnaliseIA() {
+    fetch("/ultima_analise")
+      .then((response) => response.json())
+      .then((data) => {
+        if (data.status !== "ok") return;
+
+        // Verifica se o elemento de área de análise existe, se não, cria
+        let areaAnalise = document.getElementById("area-analise-ia");
+        if (!areaAnalise) {
+          // Cria área de análise e adiciona à tela
+          const infoBar = document.querySelector(".info-bar");
+          areaAnalise = document.createElement("div");
+          areaAnalise.id = "area-analise-ia";
+          areaAnalise.className = "analise-ia-container";
+
+          // Adiciona após a info-bar
+          if (infoBar && infoBar.parentNode) {
+            infoBar.parentNode.insertBefore(areaAnalise, infoBar.nextSibling);
+          } else {
+            // Fallback: adiciona ao topo da área de conteúdo
+            const areaConteudo = document.querySelector(".content-area");
+            if (areaConteudo) {
+              areaConteudo.prepend(areaAnalise);
+            }
+          }
+
+          // Adiciona o título e container interno
+          areaAnalise.innerHTML = `
+            <h3>Análise da IA <span class="atualizacao-timestamp"></span></h3>
+            <div class="analise-detalhes">
+              <div class="analise-coluna">
+                <div class="analise-item">
+                  <label>Preço Atual:</label>
+                  <span id="preco-atual-ia">-</span>
+                </div>
+                <div class="analise-item">
+                  <label>Suportes Detectados:</label>
+                  <span id="suportes-ia">-</span>
+                </div>
+                <div class="analise-item">
+                  <label>Resistências:</label>
+                  <span id="resistencias-ia">-</span>
+                </div>
+              </div>
+              <div class="analise-coluna">
+                <div class="analise-item">
+                  <label>Sinal Recomendado:</label>
+                  <span id="sinal-ia">-</span>
+                </div>
+                <div class="analise-item">
+                  <label>Confiança:</label>
+                  <span id="confianca-ia">-</span>
+                </div>
+                <div class="analise-item">
+                  <label>Análise:</label>
+                  <span id="razao-ia">-</span>
+                </div>
+              </div>
+            </div>
+            <div class="analise-ponto-otimo"></div>
+          `;
+        }
+
+        // Atualiza os dados da análise
+        document.getElementById("preco-atual-ia").textContent =
+          data.preco.toFixed(5);
+
+        // Exibe suportes detectados
+        const suportesEl = document.getElementById("suportes-ia");
+        if (data.suportes && data.suportes.length > 0) {
+          suportesEl.textContent = data.suportes
+            .map((s) => s.toFixed(5))
+            .join(", ");
+        } else {
+          suportesEl.textContent = "Nenhum detectado";
+        }
+
+        // Exibe resistências detectadas
+        const resistenciasEl = document.getElementById("resistencias-ia");
+        if (data.resistencias && data.resistencias.length > 0) {
+          resistenciasEl.textContent = data.resistencias
+            .map((r) => r.toFixed(5))
+            .join(", ");
+        } else {
+          resistenciasEl.textContent = "Nenhuma detectada";
+        }
+
+        // Exibe sinal atual
+        const sinalEl = document.getElementById("sinal-ia");
+        if (data.sinal) {
+          const textoSinal =
+            data.sinal === "compra" ? "CALL (COMPRA)" : "PUT (VENDA)";
+          sinalEl.innerHTML = `<strong>${textoSinal}</strong>`;
+          sinalEl.className =
+            data.sinal === "compra" ? "sinal-compra" : "sinal-venda";
+        } else {
+          sinalEl.textContent = "Aguardar";
+          sinalEl.className = "";
+        }
+
+        // Exibe confiança
+        const confiancaEl = document.getElementById("confianca-ia");
+        if (data.confianca) {
+          const confiancaPercent = (data.confianca * 100).toFixed(1);
+          confiancaEl.textContent = `${confiancaPercent}%`;
+
+          // Adiciona classe baseada na confiança
+          confiancaEl.className = "";
+          if (data.confianca >= 0.7) confiancaEl.className = "confianca-alta";
+          else if (data.confianca >= 0.5)
+            confiancaEl.className = "confianca-media";
+          else confiancaEl.className = "confianca-baixa";
+        } else {
+          confiancaEl.textContent = "-";
+          confiancaEl.className = "";
+        }
+
+        // Exibe razão
+        document.getElementById("razao-ia").textContent = data.razao || "-";
+
+        // Destaca ponto ótimo se estiver em suporte ou resistência
+        const pontOtimoEl = document.querySelector(".analise-ponto-otimo");
+        if (data.em_suporte || data.em_resistencia) {
+          const tipo = data.em_suporte ? "suporte" : "resistência";
+          const acao = data.em_suporte ? "CALL" : "PUT";
+          pontOtimoEl.innerHTML = `<div class="ponto-otimo-alerta">🎯 Ponto de ${tipo} detectado! Oportunidade para ${acao}</div>`;
+          pontOtimoEl.style.display = "block";
+        } else {
+          pontOtimoEl.style.display = "none";
+        }
+
+        // Atualiza timestamp
+        const timestampEl = document.querySelector(".atualizacao-timestamp");
+        if (data.timestamp) {
+          const dataObj = new Date(data.timestamp);
+          const hora = dataObj.toLocaleTimeString("pt-BR");
+          timestampEl.textContent = `(Atualizado: ${hora})`;
+        }
+      })
+      .catch((error) => {
+        console.error("Erro ao obter análise da IA:", error);
+      });
+  }
+
+  // Adiciona CSS para a área de análise da IA
+  function adicionarEstilosAnaliseIA() {
+    const estilos = `
+      .analise-ia-container {
+        margin: 15px 0;
+        padding: 15px;
+        background-color: rgba(255, 255, 255, 0.05);
+        border-radius: 8px;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+      }
+      
+      .analise-ia-container h3 {
+        margin-top: 0;
+        margin-bottom: 10px;
+        font-size: 1.2em;
+        color: #f0f0f0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      
+      .atualizacao-timestamp {
+        font-size: 0.8em;
+        opacity: 0.7;
+        font-weight: normal;
+      }
+      
+      .analise-detalhes {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 20px;
+      }
+      
+      .analise-coluna {
+        flex: 1;
+        min-width: 180px;
+      }
+      
+      .analise-item {
+        margin-bottom: 10px;
+      }
+      
+      .analise-item label {
+        display: block;
+        font-size: 0.8em;
+        opacity: 0.8;
+        margin-bottom: 2px;
+      }
+      
+      .analise-item span {
+        font-size: 0.95em;
+        word-break: break-word;
+      }
+      
+      .sinal-compra {
+        color: #4CAF50;
+      }
+      
+      .sinal-venda {
+        color: #F44336;
+      }
+      
+      .confianca-alta {
+        color: #4CAF50;
+        font-weight: bold;
+      }
+      
+      .confianca-media {
+        color: #FFC107;
+      }
+      
+      .confianca-baixa {
+        color: #F44336;
+      }
+      
+      .ponto-otimo-alerta {
+        margin-top: 10px;
+        padding: 8px 12px;
+        background-color: rgba(76, 175, 80, 0.2);
+        border-left: 4px solid #4CAF50;
+        border-radius: 4px;
+        font-weight: bold;
+      }
+      
+      @media (max-width: 768px) {
+        .analise-detalhes {
+          flex-direction: column;
+          gap: 10px;
+        }
+        
+        .analise-item {
+          margin-bottom: 8px;
+        }
+      }
+    `;
+
+    // Adiciona os estilos ao documento
+    const style = document.createElement("style");
+    style.textContent = estilos;
+    document.head.appendChild(style);
+  }
+
+  function atualizarHistorico() {
+    fetch("/historico_resultados")
+      .then((response) => response.json())
+      .then((dados) => {
+        // Se nenhum dado foi retornado, não fazemos nada
+        if (!dados || dados.length === 0) return;
+
+        // Recupera a tabela
+        const tabela = document.getElementById("historico-tabela-body");
+        if (!tabela) return;
+
+        // Limpa tabela antes de adicionar novos dados
+        tabela.innerHTML = "";
+
+        // Log para debug
+        console.log(`Recebidos ${dados.length} registros de histórico`);
+
+        // Contador para operações com lucro e perda
+        let contadorLucros = 0;
+        let contadorPerdas = 0;
+        let totalResultados = 0;
+
+        // Percorre os dados recebidos (limitando a 20 por questão de performance)
+        const dadosLimitados = dados.slice(0, 20);
+        dadosLimitados.forEach((operacao, index) => {
+          // Cria a linha da tabela
+          const linha = document.createElement("tr");
+
+          // Adiciona as colunas com os dados da operação
+          // Data
+          const colunaData = document.createElement("td");
+          colunaData.textContent = operacao.data || "--";
+          linha.appendChild(colunaData);
+
+          // Hora
+          const colunaHora = document.createElement("td");
+          colunaHora.textContent = operacao.hora || "--";
+          linha.appendChild(colunaHora);
+
+          // Tipo (CALL/PUT)
+          const colunaTipo = document.createElement("td");
+          colunaTipo.textContent = operacao.tipo || "--";
+          linha.appendChild(colunaTipo);
+
+          // Valor
+          const colunaValor = document.createElement("td");
+          colunaValor.textContent = operacao.valor
+            ? `$${parseFloat(operacao.valor).toFixed(2)}`
+            : "--";
+          linha.appendChild(colunaValor);
+
+          // Resultado
+          const colunaResultado = document.createElement("td");
+          const resultado = parseFloat(operacao.resultado_real || 0);
+          colunaResultado.textContent = `$${resultado.toFixed(2)}`;
+
+          // Adiciona classe apropriada baseada no resultado
+          if (resultado > 0) {
+            colunaResultado.classList.add("positivo");
+            contadorLucros++;
+          } else if (resultado < 0) {
+            colunaResultado.classList.add("negativo");
+            contadorPerdas++;
+          } else {
+            colunaResultado.classList.add("neutro");
+          }
+
+          linha.appendChild(colunaResultado);
+
+          // Adiciona a linha à tabela
+          tabela.appendChild(linha);
+
+          // Acumula o total para cálculos
+          totalResultados += resultado;
+        });
+
+        // Atualiza o resumo
+        const totalOperacoes = contadorLucros + contadorPerdas;
+        const assertividade =
+          totalOperacoes > 0
+            ? ((contadorLucros / totalOperacoes) * 100).toFixed(1)
+            : "0.0";
+
+        // Atualiza os campos de resumo
+        document.getElementById("resumo-total").textContent = totalOperacoes;
+        document.getElementById("resumo-lucros").textContent = contadorLucros;
+        document.getElementById("resumo-prejuizos").textContent =
+          contadorPerdas;
+        document.getElementById(
+          "resumo-assertividade"
+        ).textContent = `${assertividade}%`;
+        document.getElementById(
+          "resumo-lucro-total"
+        ).textContent = `$${totalResultados.toFixed(2)}`;
+
+        // Destaca o resumo com animação se houver mudanças
+        const resumoLucroTotal = document.getElementById("resumo-lucro-total");
+        resumoLucroTotal.classList.add("destaque-resultado");
+        setTimeout(
+          () => resumoLucroTotal.classList.remove("destaque-resultado"),
+          1000
+        );
+      })
+      .catch((erro) => {
+        console.error("Erro ao atualizar histórico:", erro);
+      });
+  }
 });

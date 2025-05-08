@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from typing import List, Dict, Optional, Tuple, Any, Union
 from dataclasses import dataclass
 from enum import Enum
+import asyncio
 
 # Novo import do arquivo de configurações globais
 import config
@@ -303,27 +304,92 @@ class DeepseekAPI:
 
     def __init__(self):
         """Inicializa o cliente HTTP"""
-        self.client = httpx.Client(timeout=CONFIG["api"]["timeout"])
+        # Carrega configurações de IA
+        self.async_mode = config.IA_CONFIG.get("async_mode", False)
+        self.timeout = config.IA_CONFIG.get("timeout", 2.5)
+
+        # Cria cliente apropriado (síncrono ou assíncrono)
+        if self.async_mode:
+            self.client = httpx.AsyncClient(timeout=self.timeout)
+        else:
+            self.client = httpx.Client(timeout=self.timeout)
+
         self.headers = {
             "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
             "Content-Type": "application/json",
         }
 
+        # Contador para decisões AGUARDAR consecutivas
+        self.aguardar_consecutivo = 0
+        self.ultima_decisao = None
+        self.ultima_confianca = 0.0
+
+        # Histórico de decisões para análise
+        self.historico_decisoes = []
+        self.max_historico = 100  # Limite para evitar crescimento excessivo
+
     def __del__(self):
         """Fecha o cliente HTTP quando o objeto é destruído"""
         if hasattr(self, "client"):
-            self.client.close()
+            if self.async_mode:
+                # Para clientes assíncronos, não podemos fechar diretamente
+                # O garbage collector deve lidar com isso
+                pass
+            else:
+                self.client.close()
 
-    def chamar_api(
-        self, mensagens: List[Dict], max_retries: Optional[int] = None
-    ) -> str:
+    def registrar_decisao(
+        self,
+        decisao: str,
+        confianca: float,
+        contexto: Dict,
+        cliente_id: str = "default",
+    ):
         """
-        Interface com API DeepSeek para análise de decisões
+        Registra uma decisão no histórico
+
+        Args:
+            decisao: Decisão tomada
+            confianca: Nível de confiança
+            contexto: Dados contextuais da decisão
+            cliente_id: ID do cliente
+        """
+        registro = {
+            "timestamp": time.time(),
+            "decisao": decisao,
+            "confianca": confianca,
+            "cliente_id": cliente_id,
+            "contexto": contexto,
+        }
+
+        # Adiciona ao histórico (limitando o tamanho)
+        self.historico_decisoes.append(registro)
+        if len(self.historico_decisoes) > self.max_historico:
+            self.historico_decisoes = self.historico_decisoes[-self.max_historico :]
+
+        # Opcionalmente, salva no arquivo de log específico do cliente
+        try:
+            log_dir = os.path.join(MEMORIA_DIR, "logs")
+            if not os.path.exists(log_dir):
+                os.makedirs(log_dir)
+
+            log_file = os.path.join(log_dir, f"{cliente_id}_decisoes.log")
+            with open(log_file, "a", encoding="utf-8") as f:
+                log_entry = f"{time.strftime('%Y-%m-%d %H:%M:%S')} - {decisao} ({confianca:.2f})\n"
+                f.write(log_entry)
+        except Exception as e:
+            logger.error(f"Erro ao registrar decisão no log: {e}")
+
+    async def chamar_api_async(
+        self, mensagens: List[Dict], max_retries: Optional[int] = None
+    ) -> Tuple[str, float]:
+        """
+        Versão assíncrona da interface com API DeepSeek
         Args:
             mensagens: Contexto para análise
             max_retries: Número máximo de tentativas (opcional)
         Returns:
-            Decisão da IA ou fallback seguro
+            Tupla (decisão, confiança) da IA ou fallback seguro
         """
         if max_retries is None:
             max_retries = CONFIG["api"]["max_retries"]
@@ -331,8 +397,103 @@ class DeepseekAPI:
         payload = {
             "model": CONFIG["api"]["model"],
             "messages": mensagens,
-            "temperature": 0.1,
-            "max_tokens": 5,
+            "temperature": config.IA_CONFIG.get("temperature", 0.1),
+            "max_tokens": config.IA_CONFIG.get("max_tokens", 5),
+            "stop": ["\n"],
+        }
+
+        for attempt in range(max_retries):
+            try:
+                response = await self.client.post(
+                    CONFIG["api"]["url"],
+                    headers=self.headers,
+                    json=payload,
+                    timeout=self.timeout,
+                )
+                if response.status_code == 200:
+                    response_json = response.json()
+                    decisao = (
+                        response_json["choices"][0]["message"]["content"]
+                        .strip()
+                        .upper()
+                    )
+
+                    # Tenta extrair confiança do response
+                    confianca = 0.8  # Valor padrão
+                    try:
+                        # Tenta extrair probabilidade/score da resposta da IA, se disponível
+                        if "score" in response_json["choices"][0]:
+                            confianca = float(response_json["choices"][0]["score"])
+                        elif "confidence" in response_json["choices"][0]:
+                            confianca = float(response_json["choices"][0]["confidence"])
+                        # Limita a confiança entre 0 e 1
+                        confianca = max(0.0, min(1.0, confianca))
+                    except (KeyError, ValueError, TypeError):
+                        # Se não conseguir extrair, mantém o padrão
+                        pass
+
+                    # Verifica se é decisão AGUARDAR consecutiva
+                    if decisao == DecisaoTipo.AGUARDAR.value:
+                        self.aguardar_consecutivo += 1
+                        if self.aguardar_consecutivo >= config.IA_CONFIG.get(
+                            "max_aguardar_consecutivo", 5
+                        ):
+                            logger.warning(
+                                f"Alerta: {self.aguardar_consecutivo} decisões AGUARDAR consecutivas. Possível mercado lateral ou problema."
+                            )
+                    else:
+                        self.aguardar_consecutivo = 0
+
+                    self.ultima_decisao = decisao
+                    self.ultima_confianca = confianca
+
+                    # Registra contexto simplificado da decisão
+                    contexto_simples = {
+                        "message": mensagens[-1]["content"] if mensagens else "",
+                        "attempt": attempt + 1,
+                        "async": True,
+                    }
+                    self.registrar_decisao(decisao, confianca, contexto_simples)
+
+                    return decisao, confianca
+                else:
+                    logger.warning(
+                        f"Resposta não-200: {response.status_code} - {response.text}"
+                    )
+            except Exception as e:
+                logger.error(f"Erro API ({attempt+1}/{max_retries}): {str(e)}")
+
+            # Esperar antes de tentar novamente
+            if attempt < max_retries - 1:
+                await asyncio.sleep(CONFIG["api"]["retry_delay"])
+
+        return DecisaoTipo.AGUARDAR.value, 0.0
+
+    def chamar_api(
+        self, mensagens: List[Dict], max_retries: Optional[int] = None
+    ) -> Tuple[str, float]:
+        """
+        Interface com API DeepSeek para análise de decisões
+        Args:
+            mensagens: Contexto para análise
+            max_retries: Número máximo de tentativas (opcional)
+        Returns:
+            Tupla (decisão, confiança) da IA ou fallback seguro
+        """
+        if self.async_mode:
+            # Não podemos executar async em um contexto síncrono diretamente
+            logger.warning(
+                "Modo assíncrono ativado, mas chamada síncrona solicitada. Usando httpx padrão."
+            )
+
+        if max_retries is None:
+            max_retries = CONFIG["api"]["max_retries"]
+
+        payload = {
+            "model": CONFIG["api"]["model"],
+            "messages": mensagens,
+            "temperature": config.IA_CONFIG.get("temperature", 0.1),
+            "max_tokens": config.IA_CONFIG.get("max_tokens", 5),
             "stop": ["\n"],
         }
 
@@ -342,14 +503,54 @@ class DeepseekAPI:
                     CONFIG["api"]["url"],
                     headers=self.headers,
                     json=payload,
-                    timeout=CONFIG["api"]["timeout"],
+                    timeout=self.timeout,
                 )
                 if response.status_code == 200:
-                    return (
-                        response.json()["choices"][0]["message"]["content"]
+                    response_json = response.json()
+                    decisao = (
+                        response_json["choices"][0]["message"]["content"]
                         .strip()
                         .upper()
                     )
+
+                    # Tenta extrair confiança do response
+                    confianca = 0.8  # Valor padrão
+                    try:
+                        # Tenta extrair probabilidade/score da resposta da IA, se disponível
+                        if "score" in response_json["choices"][0]:
+                            confianca = float(response_json["choices"][0]["score"])
+                        elif "confidence" in response_json["choices"][0]:
+                            confianca = float(response_json["choices"][0]["confidence"])
+                        # Limita a confiança entre 0 e 1
+                        confianca = max(0.0, min(1.0, confianca))
+                    except (KeyError, ValueError, TypeError):
+                        # Se não conseguir extrair, mantém o padrão
+                        pass
+
+                    # Verifica se é decisão AGUARDAR consecutiva
+                    if decisao == DecisaoTipo.AGUARDAR.value:
+                        self.aguardar_consecutivo += 1
+                        if self.aguardar_consecutivo >= config.IA_CONFIG.get(
+                            "max_aguardar_consecutivo", 5
+                        ):
+                            logger.warning(
+                                f"Alerta: {self.aguardar_consecutivo} decisões AGUARDAR consecutivas. Possível mercado lateral ou problema."
+                            )
+                    else:
+                        self.aguardar_consecutivo = 0
+
+                    self.ultima_decisao = decisao
+                    self.ultima_confianca = confianca
+
+                    # Registra contexto simplificado da decisão
+                    contexto_simples = {
+                        "message": mensagens[-1]["content"] if mensagens else "",
+                        "attempt": attempt + 1,
+                        "async": False,
+                    }
+                    self.registrar_decisao(decisao, confianca, contexto_simples)
+
+                    return decisao, confianca
                 else:
                     logger.warning(
                         f"Resposta não-200: {response.status_code} - {response.text}"
@@ -361,7 +562,7 @@ class DeepseekAPI:
             if attempt < max_retries - 1:
                 time.sleep(CONFIG["api"]["retry_delay"])
 
-        return "AGUARDAR"
+        return DecisaoTipo.AGUARDAR.value, 0.0
 
 
 class VerificadorDados:
@@ -455,20 +656,30 @@ class DecisaoTrading:
 
             # Tentar decisão baseada em IA
             api = DeepseekAPI.get_instance()
-            resposta = api.chamar_api(
+            resposta, confianca = api.chamar_api(
                 [
                     {"role": "system", "content": "Decisão rápida: CALL/PUT/AGUARDAR"},
                     {"role": "user", "content": relatorio},
                 ]
             )
 
+            # Verifica a confiança mínima configurada
+            min_confianca = config.IA_CONFIG.get("min_confianca", 0.6)
+            if confianca < min_confianca:
+                logger.info(
+                    f"Confiança baixa ({confianca:.2f} < {min_confianca:.2f}), decidindo AGUARDAR"
+                )
+                decisao = DecisaoTipo.AGUARDAR.value
             # Interpretar resposta
-            if DecisaoTipo.CALL.value in resposta:
+            elif DecisaoTipo.CALL.value in resposta:
                 decisao = DecisaoTipo.CALL.value
+                logger.info(f"Decisão IA: CALL com confiança {confianca:.2f}")
             elif DecisaoTipo.PUT.value in resposta:
                 decisao = DecisaoTipo.PUT.value
+                logger.info(f"Decisão IA: PUT com confiança {confianca:.2f}")
             else:
                 decisao = DecisaoTipo.AGUARDAR.value
+                logger.info(f"Decisão IA: AGUARDAR com confiança {confianca:.2f}")
 
             # Fallback técnico aprimorado
             if decisao == DecisaoTipo.AGUARDAR.value:
@@ -504,6 +715,7 @@ class DecisaoTrading:
                 {
                     "timestamp": time.time(),
                     "decisao": decisao,
+                    "confianca": confianca,
                     "latencia": latencia,
                     "contexto": contexto.to_dict(),
                 },
@@ -554,18 +766,26 @@ class DecisaoTrading:
 
             # Decisão baseada em IA
             api = DeepseekAPI.get_instance()
-            resposta = api.chamar_api(
+            resposta, confianca = api.chamar_api(
                 [
                     {"role": "system", "content": "Decisão rápida: SAIR/MANTER"},
                     {"role": "user", "content": relatorio},
                 ]
             )
 
-            decisao = (
-                DecisaoTipo.SAIR.value
-                if DecisaoTipo.SAIR.value in resposta
-                else DecisaoTipo.MANTER.value
-            )
+            # Verifica a confiança mínima configurada
+            min_confianca = config.IA_CONFIG.get("min_confianca", 0.6)
+            if confianca < min_confianca:
+                logger.info(
+                    f"Confiança baixa ({confianca:.2f} < {min_confianca:.2f}), decidindo SAIR por precaução"
+                )
+                decisao = DecisaoTipo.SAIR.value
+            elif DecisaoTipo.SAIR.value in resposta:
+                decisao = DecisaoTipo.SAIR.value
+                logger.info(f"Decisão IA: SAIR com confiança {confianca:.2f}")
+            else:
+                decisao = DecisaoTipo.MANTER.value
+                logger.info(f"Decisão IA: MANTER com confiança {confianca:.2f}")
 
             # Regras de saída
             limites = CONFIG["analise"]["limites"]
@@ -602,18 +822,187 @@ def analisar_entrada_chatgpt(
     lucro_total: float,
     entradas_recentes: List[str],
     cliente_id: str = "default",
-) -> str:
-    """Wrapper compatível com a interface original"""
-    return DecisaoTrading.analisar_entrada(
+) -> Tuple[str, float]:
+    """
+    Wrapper compatível com a interface original
+
+    Returns:
+        Uma tupla (decisão, confiança)
+    """
+    # Chamamos a implementação da classe, mas ignoramos a confiança por compatibilidade
+    decisao = DecisaoTrading.analisar_entrada(
         velas, lucro_total, entradas_recentes, cliente_id
     )
+
+    # Tenta recuperar a confiança da última chamada da API
+    api = DeepseekAPI.get_instance()
+    confianca = 0.7  # Valor padrão de fallback se não conseguirmos recuperar
+
+    # Se o API tiver um valor de confiança salvo da última chamada, usa-o
+    if hasattr(api, "ultima_confianca"):
+        confianca = api.ultima_confianca
+
+    return decisao, confianca
+
+
+async def analisar_entrada_chatgpt_async(
+    velas: List[Dict],
+    lucro_total: float,
+    entradas_recentes: List[str],
+    cliente_id: str = "default",
+) -> Tuple[str, float]:
+    """
+    Versão assíncrona do wrapper para análise de entrada
+
+    Returns:
+        Uma tupla (decisão, confiança)
+    """
+    # Obtém a instância do API para uso assíncrono
+    api = DeepseekAPI.get_instance()
+
+    # Verifica se o async_mode está configurado
+    if not api.async_mode:
+        # Se não estiver no modo assíncrono, chama o método síncrono
+        return analisar_entrada_chatgpt(
+            velas, lucro_total, entradas_recentes, cliente_id
+        )
+
+    try:
+        # Prepara o contexto estruturado para análise
+        analise = AnalisadorTecnico()
+
+        # Criar contexto estruturado
+        contexto = Contexto(
+            preco_atual=velas[-1]["close"],
+            fibonacci=analise.identificar_fibonacci(velas),
+            rsi=analise.calcular_rsi(velas),
+            mhi=analise.padrao_mhi(velas),
+            tendencia=analise.tendencia_velas(velas),
+            volume=analise.tendencia_volume(velas),
+            volatilidade=np.mean([v["high"] - v["low"] for v in velas[-5:]]),
+            lucro_total=lucro_total,
+            historico=entradas_recentes[-5:],
+        )
+
+        relatorio = contexto.gerar_relatorio()
+
+        # Chama a API de forma assíncrona
+        decisao, confianca = await api.chamar_api_async(
+            [
+                {"role": "system", "content": "Decisão rápida: CALL/PUT/AGUARDAR"},
+                {"role": "user", "content": relatorio},
+            ]
+        )
+
+        # Registra a decisão na última vela para histórico
+        if len(velas) > 0:
+            vela_atual = velas[-1]
+            if "ia_decisoes" not in vela_atual:
+                vela_atual["ia_decisoes"] = []
+
+            vela_atual["ia_decisoes"].append(
+                {
+                    "timestamp": time.time(),
+                    "decisao": decisao,
+                    "confianca": confianca,
+                    "tipo": "entrada",
+                    "cliente_id": cliente_id,
+                }
+            )
+
+        return decisao, confianca
+
+    except Exception as e:
+        logger.error(f"Erro em análise assíncrona: {str(e)}", exc_info=True)
+        return DecisaoTipo.AGUARDAR.value, 0.0
 
 
 def analisar_saida_chatgpt(
     velas: List[Dict], lucro_atual: float, cliente_id: str = "default"
-) -> str:
-    """Wrapper compatível com a interface original"""
-    return DecisaoTrading.analisar_saida(velas, lucro_atual, cliente_id)
+) -> Tuple[str, float]:
+    """
+    Wrapper compatível com a interface original para análise de saída
+
+    Returns:
+        Uma tupla (decisão, confiança)
+    """
+    # Chamamos a implementação da classe, mas ignoramos a confiança por compatibilidade
+    decisao = DecisaoTrading.analisar_saida(velas, lucro_atual, cliente_id)
+
+    # Tenta recuperar a confiança da última chamada da API
+    api = DeepseekAPI.get_instance()
+    confianca = 0.7  # Valor padrão de fallback se não conseguirmos recuperar
+
+    # Se o API tiver um valor de confiança salvo da última chamada, usa-o
+    if hasattr(api, "ultima_confianca"):
+        confianca = api.ultima_confianca
+
+    return decisao, confianca
+
+
+async def analisar_saida_chatgpt_async(
+    velas: List[Dict], lucro_atual: float, cliente_id: str = "default"
+) -> Tuple[str, float]:
+    """
+    Versão assíncrona do wrapper para análise de saída
+
+    Returns:
+        Uma tupla (decisão, confiança)
+    """
+    # Obtém a instância do API para uso assíncrono
+    api = DeepseekAPI.get_instance()
+
+    # Verifica se o async_mode está configurado
+    if not api.async_mode:
+        # Se não estiver no modo assíncrono, chama o método síncrono
+        return analisar_saida_chatgpt(velas, lucro_atual, cliente_id)
+
+    try:
+        # Prepara o contexto estruturado para análise
+        analise = AnalisadorTecnico()
+
+        # Criar contexto estruturado
+        contexto = ContextoSaida(
+            duracao=len(velas),
+            lucro=lucro_atual,
+            rsi=analise.calcular_rsi(velas),
+            fibonacci=analise.identificar_fibonacci(velas),
+            tendencia=analise.tendencia_velas(velas),
+            volatilidade=np.mean([v["high"] - v["low"] for v in velas[-3:]]),
+        )
+
+        relatorio = contexto.gerar_relatorio()
+
+        # Chama a API de forma assíncrona
+        decisao, confianca = await api.chamar_api_async(
+            [
+                {"role": "system", "content": "Decisão rápida: SAIR/MANTER"},
+                {"role": "user", "content": relatorio},
+            ]
+        )
+
+        # Registra a decisão na última vela para histórico
+        if len(velas) > 0:
+            vela_atual = velas[-1]
+            if "ia_decisoes" not in vela_atual:
+                vela_atual["ia_decisoes"] = []
+
+            vela_atual["ia_decisoes"].append(
+                {
+                    "timestamp": time.time(),
+                    "decisao": decisao,
+                    "confianca": confianca,
+                    "tipo": "saida",
+                    "cliente_id": cliente_id,
+                    "lucro_atual": lucro_atual,
+                }
+            )
+
+        return decisao, confianca
+
+    except Exception as e:
+        logger.error(f"Erro em análise de saída assíncrona: {str(e)}", exc_info=True)
+        return DecisaoTipo.SAIR.value, 0.0
 
 
 # Função para testes
@@ -626,12 +1015,14 @@ def executar_teste(velas_teste: List[Dict]) -> None:
         return
 
     # Análise de entrada
-    decisao = analisar_entrada_chatgpt(velas_teste, 0.0, ["CALL", "PUT", "AGUARDAR"])
-    logger.info(f"Teste de entrada: {decisao}")
+    decisao, confianca = analisar_entrada_chatgpt(
+        velas_teste, 0.0, ["CALL", "PUT", "AGUARDAR"]
+    )
+    logger.info(f"Teste de entrada: {decisao} (confiança: {confianca:.2f})")
 
     # Análise de saída
-    decisao_saida = analisar_saida_chatgpt(velas_teste, 2.5)
-    logger.info(f"Teste de saída: {decisao_saida}")
+    decisao_saida, confianca_saida = analisar_saida_chatgpt(velas_teste, 2.5)
+    logger.info(f"Teste de saída: {decisao_saida} (confiança: {confianca_saida:.2f})")
 
     logger.info("Teste concluído")
 
@@ -651,30 +1042,78 @@ class Catalogador:
         self._current_candle: Optional[Dict[str, Union[int, float]]] = None
         self._current_candle_start: Optional[int] = None
 
+        # Carrega configurações de armazenamento
+        armazenamento_config = getattr(config, "ARMAZENAMENTO", {})
+
+        # Tempo máximo para armazenar dados (6 horas por padrão)
+        self.max_data_age_seconds = armazenamento_config.get(
+            "max_duracao_velas", 6 * 60 * 60
+        )
+
+        # Tempo máximo para armazenar ticks brutos (1 hora por padrão)
+        self.max_ticks_age_seconds = armazenamento_config.get(
+            "max_duracao_ticks", 1 * 60 * 60
+        )
+
+        # Limite de velas e ticks a armazenar
+        self.max_velas = armazenamento_config.get("max_velas", 1000)
+        self.max_ticks = armazenamento_config.get("max_ticks", 1000)
+
+        # Timestamp da última limpeza
+        self.last_cleanup_time = time.time()
+
+        # Intervalo para limpeza automática (a cada 30 minutos)
+        self.cleanup_interval = armazenamento_config.get("intervalo_limpeza", 30 * 60)
+
+        # Inicializa o logger específico
+        self.logger = logging.getLogger("catalogador")
+        self.logger.info(
+            f"Catalogador iniciado (max_velas={self.max_velas}, retenção={self.max_data_age_seconds/3600}h)"
+        )
+
     # --------- Novo método usado pelo Motor para decidir entradas ----------
     def analisar_scalping(self, cliente_id: str = "default") -> dict:
         """Analisa as velas acumuladas e retorna um sinal de CALL/PUT ou None.
 
         Retorna:
-            {"sinal": "compra"|"venda"|None, "confianca": float(0-1)}
+            {"sinal": "compra"|"venda"|None, "confianca": float(0-1), "razao": str}
         """
         try:
+            # Verifica se é hora de limpar dados antigos
+            self._check_cleanup()
+
             # Precisamos de pelo menos 20 velas para a IA tomar decisão
             if len(self.velas) < CONFIG["analise"]["limites"]["min_velas"]:
-                return {"sinal": None, "confianca": 0.0}
+                return {"sinal": None, "confianca": 0.0, "razao": "Dados insuficientes"}
 
             # Usa a pipeline de decisão já implementada (IA + técnico)
-            decisao = analisar_entrada_chatgpt(self.velas, 0.0, [], cliente_id)
+            decisao, confianca = analisar_entrada_chatgpt(
+                self.velas, 0.0, [], cliente_id
+            )
 
+            # Mapeia a decisão para o formato esperado pelo Motor
             if decisao == DecisaoTipo.CALL.value:
-                return {"sinal": "compra", "confianca": 0.8}
+                sinal = "compra"
+                razao = "Tendência de alta identificada"
             elif decisao == DecisaoTipo.PUT.value:
-                return {"sinal": "venda", "confianca": 0.8}
+                sinal = "venda"
+                razao = "Tendência de queda identificada"
             else:
-                return {"sinal": None, "confianca": 0.0}
+                return {"sinal": None, "confianca": 0.0, "razao": "Sem sinal claro"}
+
+            # Log da decisão
+            self.logger.info(
+                f"Scalping: Sinal de {sinal} detectado com confiança {confianca:.2f}"
+            )
+
+            return {
+                "sinal": sinal,
+                "confianca": confianca,
+                "razao": razao,
+            }
         except Exception as e:
-            logger.error(f"Erro em analisar_scalping: {e}")
-            return {"sinal": None, "confianca": 0.0}
+            self.logger.error(f"Erro em analisar_scalping: {e}", exc_info=True)
+            return {"sinal": None, "confianca": 0.0, "razao": f"Erro: {str(e)}"}
 
     def adicionar_tick(self, preco):
         """Adiciona um tick de preço e consolida em velas do timeframe definido.
@@ -682,64 +1121,220 @@ class Catalogador:
         Args:
             preco (float): Último preço cotado.
         """
+        try:
+            # Marca temporal do tick (segundos desde epoch)
+            ts: float = time.time()
 
-        import time  # import local para evitar impactos em outros módulos
+            # Verifica se é hora de limpar dados antigos
+            self._check_cleanup()
 
-        # Marca temporal do tick (segundos desde epoch)
-        ts: float = time.time()
+            # Salva tick bruto para auditoria/depuração (mantém apenas os últimos max_ticks)
+            self.ticks.append((ts, preco))
+            if len(self.ticks) > self.max_ticks:
+                self.ticks = self.ticks[-self.max_ticks :]
 
-        # Salva tick bruto para auditoria/depuração (mantém apenas os últimos 5.000)
-        self.ticks.append((ts, preco))
-        if len(self.ticks) > 5000:
-            self.ticks = self.ticks[-5000:]
+            # Determina o início da vela corrente (alinha ao timeframe)
+            candle_start: int = int(ts // self.timeframe * self.timeframe)
 
-        # Determina o início da vela corrente (alinha ao timeframe)
-        candle_start: int = int(ts // self.timeframe * self.timeframe)
+            # Se ainda não existe vela aberta, cria uma nova
+            if self._current_candle is None:
+                self._current_candle_start = candle_start
+                self._current_candle = {
+                    "timestamp": candle_start,
+                    "open": preco,
+                    "high": preco,
+                    "low": preco,
+                    "close": preco,
+                    "volume": 1,
+                }
+                return
 
-        # Se ainda não existe vela aberta, cria uma nova
-        if self._current_candle is None:
-            self._current_candle_start = candle_start
-            self._current_candle = {
-                "timestamp": candle_start,
-                "open": preco,
-                "high": preco,
-                "low": preco,
-                "close": preco,
-                "volume": 1,
-            }
-            return
+            # Caso o tick ainda pertença à janela da vela atual
+            if candle_start == self._current_candle_start:
+                self._current_candle["high"] = max(self._current_candle["high"], preco)
+                self._current_candle["low"] = min(self._current_candle["low"], preco)
+                self._current_candle["close"] = preco
+                self._current_candle["volume"] += 1
+            else:
+                # Vela atual é finalizada e armazenada
+                self.velas.append(self._current_candle)
 
-        # Caso o tick ainda pertença à janela da vela atual
-        if candle_start == self._current_candle_start:
-            self._current_candle["high"] = max(self._current_candle["high"], preco)
-            self._current_candle["low"] = min(self._current_candle["low"], preco)
-            self._current_candle["close"] = preco
-            self._current_candle["volume"] += 1
-        else:
-            # Vela atual é finalizada e armazenada
-            self.velas.append(self._current_candle)
+                # Inicia uma nova vela com o tick recebido
+                self._current_candle_start = candle_start
+                self._current_candle = {
+                    "timestamp": candle_start,
+                    "open": preco,
+                    "high": preco,
+                    "low": preco,
+                    "close": preco,
+                    "volume": 1,
+                }
 
-            # Mantém apenas as últimas 1.000 velas para economizar memória
-            if len(self.velas) > 1000:
-                self.velas = self.velas[-1000:]
-
-            # Inicia uma nova vela com o tick recebido
-            self._current_candle_start = candle_start
-            self._current_candle = {
-                "timestamp": candle_start,
-                "open": preco,
-                "high": preco,
-                "low": preco,
-                "close": preco,
-                "volume": 1,
-            }
+                # Limpa dados antigos imediatamente se temos muitas velas
+                if len(self.velas) > self.max_velas / 2:
+                    self._cleanup_old_data()
+        except Exception as e:
+            self.logger.error(f"Erro ao adicionar tick: {e}", exc_info=True)
 
     def obter_velas(self):
-        # Retorna as velas já processadas
-        return self.velas
+        """Retorna as velas já processadas, incluindo a vela atual em formação."""
+        try:
+            # Verifica se é hora de limpar dados antigos
+            self._check_cleanup()
+
+            # Cria uma cópia das velas armazenadas para evitar race conditions
+            result = list(self.velas)
+
+            # Adiciona a vela atual se existir
+            if self._current_candle is not None:
+                result.append(dict(self._current_candle))
+
+            return result
+        except Exception as e:
+            self.logger.error(f"Erro ao obter velas: {e}", exc_info=True)
+            return list(self.velas)  # Retorna apenas as velas fechadas em caso de erro
+
+    def obter_velas_preview(
+        self, num_velas: int = None, incluir_em_formacao: bool = True
+    ):
+        """
+        Retorna as últimas N velas, incluindo dados preliminares da vela em formação.
+
+        Args:
+            num_velas: Número de velas a retornar. Se None, retorna todas.
+            incluir_em_formacao: Se True, inclui a vela atual mesmo que não esteja fechada.
+
+        Returns:
+            Lista de velas OHLCV, possivelmente incluindo a vela em formação.
+        """
+        try:
+            # Verifica se é hora de limpar dados antigos
+            self._check_cleanup()
+
+            # Obtém velas fechadas
+            result = list(self.velas)
+
+            # Limita ao número solicitado
+            if num_velas is not None and len(result) > num_velas:
+                if incluir_em_formacao:
+                    # Se vamos incluir a vela em formação, deixamos espaço para ela
+                    result = result[-(num_velas - 1) :]
+                else:
+                    result = result[-num_velas:]
+
+            # Adiciona a vela atual em formação, se solicitado
+            if incluir_em_formacao and self._current_candle is not None:
+                # Faz uma cópia para não modificar o original
+                vela_atual = dict(self._current_candle)
+                # Adiciona metadados para indicar que é uma vela em formação
+                vela_atual["em_formacao"] = True
+                vela_atual["progresso"] = (
+                    time.time() - vela_atual["timestamp"]
+                ) / self.timeframe
+                result.append(vela_atual)
+
+            # Adiciona metadados sobre a fonte dos dados
+            for vela in result:
+                if "em_formacao" not in vela:
+                    vela["em_formacao"] = False
+
+            self.logger.debug(
+                f"Preview: {len(result)} velas retornadas (incluindo_formacao={incluir_em_formacao})"
+            )
+            return result
+
+        except Exception as e:
+            self.logger.error(f"Erro ao obter preview de velas: {e}", exc_info=True)
+            return list(self.velas)  # Fallback seguro
 
     def limpar_dados(self):
-        self.ticks.clear()
-        self.velas.clear()
-        self._current_candle = None
-        self._current_candle_start = None
+        """Limpa todos os dados armazenados."""
+        try:
+            self.ticks.clear()
+            self.velas.clear()
+            self._current_candle = None
+            self._current_candle_start = None
+            self.last_cleanup_time = time.time()
+            self.logger.info("Todos os dados foram limpos")
+            return True
+        except Exception as e:
+            self.logger.error(f"Erro ao limpar dados: {e}", exc_info=True)
+            return False
+
+    def _check_cleanup(self):
+        """Verifica se é hora de limpar dados antigos."""
+        current_time = time.time()
+        if current_time - self.last_cleanup_time > self.cleanup_interval:
+            self._cleanup_old_data()
+            self.last_cleanup_time = current_time
+
+    def _cleanup_old_data(self):
+        """Limpa dados mais antigos que o limite configurado."""
+        try:
+            current_time = time.time()
+
+            # Limpa ticks antigos (1 hora)
+            ticks_cutoff_time = current_time - self.max_ticks_age_seconds
+            old_ticks_count = len(self.ticks)
+            self.ticks = [
+                (ts, price) for ts, price in self.ticks if ts >= ticks_cutoff_time
+            ]
+            ticks_removed = old_ticks_count - len(self.ticks)
+
+            # Limpa velas antigas (6 horas)
+            velas_cutoff_time = current_time - self.max_data_age_seconds
+            old_velas_count = len(self.velas)
+            self.velas = [
+                candle
+                for candle in self.velas
+                if candle["timestamp"] >= velas_cutoff_time
+            ]
+            velas_removed = old_velas_count - len(self.velas)
+
+            # Se removeu algo, registra no log
+            if ticks_removed > 0 or velas_removed > 0:
+                self.logger.info(
+                    f"Limpeza: {velas_removed} velas e {ticks_removed} ticks antigos removidos"
+                )
+
+            # Força limite máximo de velas mesmo que não sejam antigas
+            if len(self.velas) > self.max_velas:
+                excess = len(self.velas) - self.max_velas
+                self.velas = self.velas[excess:]
+                self.logger.info(
+                    f"Limpeza por limite: {excess} velas removidas (limite máximo: {self.max_velas})"
+                )
+
+            # Força limite máximo de ticks mesmo que não sejam antigos
+            if len(self.ticks) > self.max_ticks:
+                excess = len(self.ticks) - self.max_ticks
+                self.ticks = self.ticks[excess:]
+
+            # Estima uso de memória
+            velas_size = len(self.velas) * 8 * 6  # 6 valores float por vela (~48 bytes)
+            ticks_size = len(self.ticks) * (8 + 8)  # timestamp + preço (16 bytes)
+            total_size_kb = (velas_size + ticks_size) / 1024
+            self.logger.debug(
+                f"Uso de memória estimado: {total_size_kb:.2f} KB - Velas: {len(self.velas)}, Ticks: {len(self.ticks)}"
+            )
+
+            return True
+        except Exception as e:
+            self.logger.error(f"Erro durante limpeza de dados: {e}", exc_info=True)
+            return False
+
+    def estatisticas(self) -> Dict:
+        """Retorna estatísticas do catalogador para monitoramento."""
+        return {
+            "num_velas": len(self.velas),
+            "num_ticks": len(self.ticks),
+            "primeira_vela": self.velas[0]["timestamp"] if self.velas else None,
+            "ultima_vela": self.velas[-1]["timestamp"] if self.velas else None,
+            "periodo_segundos": (
+                self.velas[-1]["timestamp"] - self.velas[0]["timestamp"]
+                if len(self.velas) > 1
+                else 0
+            ),
+            "memoria_estimada_kb": (len(self.velas) * 8 * 6 + len(self.ticks) * 16)
+            / 1024,
+        }

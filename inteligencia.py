@@ -360,15 +360,67 @@ def analisar_micro_scalping(
         # Verifica se está em suporte ou resistência
         if esta_em_resistencia(preco_atual, resistencias, 0.03) and rsi > 70:
             decisao = "venda"
-            confianca = min(0.7 + (rsi - 70) / 100, 0.95)
+            confianca = min(0.8 + (rsi - 70) / 100, 0.98)
             razao = (
                 f"Resistência encontrada em {preco_atual:.5f} com RSI alto ({rsi:.1f})"
             )
 
         elif esta_em_suporte(preco_atual, suportes, 0.03) and rsi < 30:
             decisao = "compra"
-            confianca = min(0.7 + (30 - rsi) / 100, 0.95)
+            confianca = min(0.8 + (30 - rsi) / 100, 0.98)
             razao = f"Suporte encontrado em {preco_atual:.5f} com RSI baixo ({rsi:.1f})"
+
+        # Adiciona novas condições para tendências claras
+        # Tendência de alta forte com confirmação
+        elif (
+            direcao_curta == "ALTA" and forca_tendencia > 0.15 and rsi > 40 and rsi < 65
+        ):
+            # Verifica se temos 3 velas consecutivas de alta
+            if (
+                velas[-1]["close"] > velas[-1]["open"]
+                and velas[-2]["close"] > velas[-2]["open"]
+                and velas[-3]["close"] > velas[-3]["open"]
+            ):
+                decisao = "compra"
+                confianca = 0.65 + min(forca_tendencia / 100, 0.25)
+                razao = f"Tendência de alta confirmada com força {forca_tendencia:.2f}%, RSI={rsi:.1f}"
+
+        # Tendência de baixa forte com confirmação
+        elif (
+            direcao_curta == "BAIXA"
+            and forca_tendencia > 0.15
+            and rsi < 60
+            and rsi > 35
+        ):
+            # Verifica se temos 3 velas consecutivas de baixa
+            if (
+                velas[-1]["close"] < velas[-1]["open"]
+                and velas[-2]["close"] < velas[-2]["open"]
+                and velas[-3]["close"] < velas[-3]["open"]
+            ):
+                decisao = "venda"
+                confianca = 0.65 + min(forca_tendencia / 100, 0.25)
+                razao = f"Tendência de baixa confirmada com força {forca_tendencia:.2f}%, RSI={rsi:.1f}"
+
+        # Reversão de tendência em zona neutra
+        elif abs(rsi - 50) < 10 and volatilidade > 0:
+            # Detecta uma reversão recente
+            if (
+                velas[-1]["close"] > velas[-1]["open"]
+                and velas[-2]["close"] < velas[-2]["open"]
+                and velas[-3]["close"] < velas[-3]["open"]
+            ):
+                decisao = "compra"
+                confianca = 0.62
+                razao = f"Possível reversão de baixa para alta detectada, RSI={rsi:.1f}"
+            elif (
+                velas[-1]["close"] < velas[-1]["open"]
+                and velas[-2]["close"] > velas[-2]["open"]
+                and velas[-3]["close"] > velas[-3]["open"]
+            ):
+                decisao = "venda"
+                confianca = 0.62
+                razao = f"Possível reversão de alta para baixa detectada, RSI={rsi:.1f}"
 
         # Resultado final
         resultado = {

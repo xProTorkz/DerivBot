@@ -299,7 +299,7 @@ body {
 .licenca-wrapper {
   width: var(--largura-info-bar);
   margin: 0 auto;
-  padding: 10px 20px;
+  padding: 6px 15px;
   border-radius: var(--borda-arredondada);
   background-color: var(--fundo-escuro);
   box-shadow: var(--sombra-padrao);
@@ -310,14 +310,14 @@ body {
   justify-content: space-between;
   align-items: center;
   flex-wrap: nowrap;
-  gap: 16px;
+  gap: 12px;
   width: 100%;
 }
 
 .licenca-mini-item {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 1px;
   color: var(--cinza-claro);
   white-space: nowrap;
   border-left: none;
@@ -326,29 +326,29 @@ body {
 }
 
 .licenca-mini-icone {
-  font-size: 14px;
+  font-size: 12px;
   color: var(--amarelo-claro);
   line-height: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 16px;
+  min-width: 14px;
 }
 
 .licenca-mini-text {
   color: var(--cinza-claro);
-  font-size: 0.65rem;
-  margin-right: 3px;
+  font-size: 0.6rem;
+  margin-right: 1px;
 }
 
 .licenca-mini-valor {
   display: inline-block;
   width: auto;
   white-space: nowrap;
-  padding: 0px 3px;
+  padding: 0px 2px;
   border-radius: 3px;
   color: var(--branco);
-  font-size: 0.65rem;
+  font-size: 0.6rem;
   font-weight: 600;
 }
 
@@ -356,10 +356,10 @@ body {
   display: inline-block;
   width: auto;
   white-space: nowrap;
-  padding: 2px 6px;
+  padding: 1px 4px;
   border-radius: 3px;
   font-weight: 700;
-  font-size: 0.65rem;
+  font-size: 0.6rem;
 }
 
 /* Estilos dos planos */
@@ -409,7 +409,7 @@ body {
     rgba(45, 35, 60, 0.8) 100%
   );
   border-radius: var(--borda-arredondada);
-  margin: 25px auto;
+  margin: 15px auto;
   box-shadow: var(--sombra-padrao);
   border: none;
 }
@@ -443,6 +443,14 @@ body {
 #lucro-valor {
   font-size: 1.6em;
   font-weight: bold;
+  font-family: inherit !important; /* Força a manter a fonte herdada */
+  transition: color 0.3s ease, font-size 0.3s ease;
+}
+
+/* Garantir que nenhum script altere a fonte */
+#lucro-valor {
+  font-family: inherit !important;
+  font-weight: bold !important;
 }
 
 #meta-valor {
@@ -637,8 +645,8 @@ body {
 
 /* === COMPONENTE: BARRA DE STATUS === */
 #barra-status {
-  margin: 1.5rem auto;
-  padding: 1.5rem 1.5rem;
+  margin: 0.8rem auto;
+  padding: 0.8rem 1.5rem;
   border-radius: var(--borda-arredondada);
   background-color: var(--fundo-escuro);
   width: var(--largura-status);
@@ -655,8 +663,8 @@ body {
   justify-content: space-between;
   width: 100%;
   position: relative;
-  height: 45px;
-  margin: 18px 0;
+  height: 40px;
+  margin: 12px 0;
   padding: 0;
   overflow: visible;
 }
@@ -672,16 +680,16 @@ body {
 }
 
 .status-etapas::before {
-  left: 20px !important; /* Aumentado para além da largura da bolinha */
+  left: 22px !important; /* Ajustado para ficar após a primeira bolinha */
   right: 18px !important; /* Valor igual à largura total da bolinha */
   background-color: var(--transparente-claro);
 }
 
 .status-etapas::after {
-  left: 20px !important; /* Aumentado para além da largura da bolinha */
+  left: 22px !important; /* Ajustado para ficar após a primeira bolinha */
   width: 0;
   max-width: calc(
-    100% - 38px
+    100% - 40px
   ) !important; /* Ajustado para compensar o aumento do left */
   background-color: var(--amarelo-escuro);
   box-shadow: 0 0 5px var(--amarelo-claro);
@@ -698,7 +706,7 @@ body {
   color: rgba(204, 204, 204, 0.8);
   z-index: 3;
   position: relative;
-  gap: 6px;
+  gap: 4px;
   width: auto;
 }
 
@@ -1035,6 +1043,37 @@ body {
 
 #historico-tabela tr:nth-child(even) {
   background-color: var(--transparente-claro);
+}
+
+/* Ajustes específicos para campos da tabela de histórico - apenas 4 colunas lado a lado */
+#historico-tabela th:nth-child(3), /* Tipo - ocultar */
+#historico-tabela td:nth-child(3) {
+  display: none;
+}
+
+#historico-tabela td:nth-child(1) {
+  /* Data */
+  max-width: 120px;
+  min-width: 100px;
+}
+
+#historico-tabela td:nth-child(2) {
+  /* Hora */
+  max-width: 120px;
+  min-width: 100px;
+}
+
+#historico-tabela td:nth-child(4) {
+  /* Valor/Entrada */
+  max-width: 120px;
+  min-width: 100px;
+}
+
+#historico-tabela td:nth-child(5) {
+  /* Resultado */
+  max-width: 120px;
+  min-width: 100px;
+  font-weight: bold;
 }
 
 /* === COMPONENTE: RODAPÉ === */
