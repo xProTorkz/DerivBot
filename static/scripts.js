@@ -3,6 +3,32 @@
 // O mobile.js é responsável por detectar e ajustar a interface para dispositivos móveis
 
 document.addEventListener("DOMContentLoaded", function () {
+  // Código para garantir que a barra de progresso termine nas bolinhas
+  (function fixProgressBar() {
+    // Adicionar um estilo específico que force os limites da barra
+    const styleEl = document.createElement("style");
+    styleEl.id = "progress-bar-fix";
+    styleEl.textContent = `
+      .status-etapas::before {
+        left: 20px !important;
+        right: 18px !important;
+      }
+      .status-etapas::after {
+        left: 20px !important;
+        max-width: calc(100% - 38px) !important;
+      }
+    `;
+    document.head.appendChild(styleEl);
+
+    // Forçar recálculo
+    setTimeout(() => {
+      const statusEl = document.querySelector(".status-etapas");
+      if (statusEl) {
+        void statusEl.offsetWidth;
+      }
+    }, 500);
+  })();
+
   const modoSelect = document.getElementById("modo");
   const metaInput = document.getElementById("meta");
   const logTemp = document.getElementById("log-temporario");

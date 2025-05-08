@@ -31,8 +31,12 @@
   /* === DIMENSÕES DESKTOP === */
   --largura-maxima: 1200px;
   --largura-container: 95%;
-  --largura-info-bar: 90%;
-  --largura-bot-control: 70%;
+  --largura-info-bar: 80%; /* Ajustado para padrão 80% */
+  --largura-log: 80%; /* Nova variável para log */
+  --largura-status: 80%; /* Nova variável para status */
+  --largura-bot-control: 80%; /* Ajustado para padrão 80% */
+  --largura-historico: 80%; /* Nova variável para histórico */
+  --largura-rodape: 80%; /* Nova variável para rodapé */
 
   /* === SOMBRAS === */
   --sombra-padrao: 0 2px 8px rgba(0, 0, 0, 0.2);
@@ -293,10 +297,11 @@ body {
 
 /* === COMPONENTE: LICENÇA === */
 .licenca-wrapper {
-  width: 100%;
-  padding: 6px 10px;
-  background-color: var(--fundo-escuro);
+  width: var(--largura-info-bar);
+  margin: 0 auto;
+  padding: 10px 20px;
   border-radius: var(--borda-arredondada);
+  background-color: var(--fundo-escuro);
   box-shadow: var(--sombra-padrao);
 }
 
@@ -392,7 +397,7 @@ body {
 .info-bar {
   width: var(--largura-info-bar);
   height: 60px;
-  padding: 0 60px;
+  padding: 0 30px;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -461,32 +466,39 @@ body {
   max-width: var(--largura-maxima);
   padding: 0;
   margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 .painel-robo {
   margin: var(--espacamento-padrao) 0 0.75rem;
   width: 100%;
-  padding: 0 1rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 .modo-meta-wrapper {
   background-color: var(--fundo-escuro);
   border-radius: var(--borda-arredondada);
-  padding: 25px;
+  padding: 18px 25px;
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  gap: var(--gap-padrao);
-  width: 60%;
+  gap: 12px;
+  width: 45%;
+  max-width: 350px;
   box-shadow: var(--sombra-padrao);
   border: none;
   height: auto;
-  margin: 0 auto 30px auto;
+  margin: 0 auto 20px auto;
 }
 
 .painel-central > .modo-meta-wrapper {
-  margin: 0 auto 30px auto;
+  margin: 0 auto 20px auto;
 }
 
 #modo-container,
@@ -497,7 +509,7 @@ body {
 }
 
 #modo-container {
-  margin-bottom: var(--gap-padrao);
+  margin-bottom: var(--gap-pequeno);
 }
 
 #modo-container label,
@@ -505,10 +517,10 @@ body {
   display: block;
   font-weight: bold;
   color: var(--branco);
-  font-size: 1em;
+  font-size: 0.9em;
   white-space: nowrap;
   text-align: left;
-  margin: 0 0 8px 0;
+  margin: 0 0 6px 0;
 }
 
 #modo-container label:after {
@@ -520,21 +532,21 @@ body {
 .input-meta {
   width: 100%;
   min-width: 50px;
-  padding: 8px 12px;
+  padding: 6px 10px;
   border-radius: var(--borda-arredondada-pequena);
   border: 1px solid var(--branco-transparente);
   background-color: rgba(30, 30, 30, 0.7);
   color: var(--branco);
-  font-size: 15px;
-  height: 38px;
+  font-size: 14px;
+  height: 34px;
   display: block;
 }
 
 #bot-control-btn {
   width: var(--largura-bot-control);
   height: 60px;
-  padding: 0 60px;
-  margin: 25px auto;
+  padding: 0 30px;
+  margin: 20px auto;
   font-size: 20px;
   font-weight: bold;
   border: none;
@@ -557,20 +569,22 @@ body {
 
 /* === COMPONENTE: LOG PERSONALIZADO === */
 .log-temp {
-  width: 85%;
+  width: var(--largura-log);
   padding: 1rem 1.5rem;
-  margin: 1rem auto;
+  margin: 1.2rem auto;
   border-radius: var(--borda-arredondada);
-  background-color: rgba(20, 20, 25, 0.8);
+  background-color: var(--fundo-escuro);
   color: var(--branco);
   font-size: 0.9rem;
-  text-align: left;
+  text-align: center;
   min-height: 3rem;
   display: flex;
   align-items: center;
+  justify-content: center;
   border-left: 3px solid var(--azul-claro);
   transition: all 0.3s ease;
   line-height: 1.5;
+  box-shadow: var(--sombra-padrao);
 }
 
 .log-temp.info {
@@ -610,7 +624,7 @@ body {
 }
 
 .log-emoji {
-  margin-right: 15px;
+  margin-right: 10px;
   font-size: 1.2rem;
   flex-shrink: 0;
   display: flex;
@@ -623,52 +637,56 @@ body {
 
 /* === COMPONENTE: BARRA DE STATUS === */
 #barra-status {
-  display: flex;
-  flex-direction: column;
-  width: 85%;
-  margin: 1rem auto;
-  padding: 0.75rem;
+  margin: 1.5rem auto;
+  padding: 1.5rem 1.5rem;
   border-radius: var(--borda-arredondada);
   background-color: var(--fundo-escuro);
+  width: var(--largura-status);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  position: relative;
   box-shadow: var(--sombra-padrao);
 }
 
-/* === ETAPAS DE STATUS (CONTAINER PRINCIPAL) === */
 .status-etapas {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1rem;
-  padding: 0;
+  width: 100%;
   position: relative;
-  height: 40px;
+  height: 45px;
+  margin: 18px 0;
+  padding: 0;
+  overflow: visible;
 }
 
-/* Linha base cinza (barra não preenchida) */
-.status-etapas::before {
-  content: "";
-  position: absolute;
-  top: 9px;
-  left: 18px; /* Centro da primeira bolinha */
-  right: 18px; /* Centro da última bolinha */
-  height: 3px;
-  background-color: var(--transparente-claro);
-  z-index: 1;
-}
-
-/* Barra de progresso amarela (preenchimento) */
+/* Ajustando precisamente os pseudo-elementos para não ultrapassar as bolinhas */
+.status-etapas::before,
 .status-etapas::after {
   content: "";
   position: absolute;
   top: 9px;
-  left: 18px; /* Centro da primeira bolinha */
   height: 3px;
+  z-index: 1;
+}
+
+.status-etapas::before {
+  left: 20px !important; /* Aumentado para além da largura da bolinha */
+  right: 18px !important; /* Valor igual à largura total da bolinha */
+  background-color: var(--transparente-claro);
+}
+
+.status-etapas::after {
+  left: 20px !important; /* Aumentado para além da largura da bolinha */
+  width: 0;
+  max-width: calc(
+    100% - 38px
+  ) !important; /* Ajustado para compensar o aumento do left */
   background-color: var(--amarelo-escuro);
   box-shadow: 0 0 5px var(--amarelo-claro);
+  transition: width 0.3s ease-in-out;
   z-index: 2;
-  transition: width 0.5s ease-in-out;
-  /* IMPORTANTE: O width será definido inline pelo JavaScript */
-  width: 0%;
 }
 
 /* Container de cada etapa */
@@ -678,8 +696,10 @@ body {
   align-items: center;
   font-size: 0.75rem;
   color: rgba(204, 204, 204, 0.8);
-  z-index: 3; /* Acima das barras de progresso */
+  z-index: 3;
   position: relative;
+  gap: 6px;
+  width: auto;
 }
 
 /* === BOLINHAS DE STATUS === */
@@ -692,6 +712,7 @@ body {
   transition: all 0.3s ease;
   z-index: 3;
   position: relative;
+  margin-bottom: 2px;
 }
 
 .bolinha.grande {
@@ -713,6 +734,9 @@ body {
 
 .bolinha.pisca {
   animation: piscar 1.5s infinite;
+  -webkit-animation: piscar 1.5s infinite;
+  -moz-animation: piscar 1.5s infinite;
+  -ms-animation: piscar 1.5s infinite;
 }
 
 /* === ANIMAÇÕES COM PREFIXOS CROSS-BROWSER === */
@@ -885,13 +909,6 @@ body {
   -ms-transform: scale(1.05);
 }
 
-.bolinha.pisca {
-  animation: piscar 1.5s infinite;
-  -webkit-animation: piscar 1.5s infinite;
-  -moz-animation: piscar 1.5s infinite;
-  -ms-animation: piscar 1.5s infinite;
-}
-
 .destaque-resultado {
   animation: brilhoResultado 1.5s;
   font-weight: bold;
@@ -918,13 +935,14 @@ body {
 /* === COMPONENTE: HISTÓRICO === */
 .historico {
   background-color: var(--fundo-escuro);
-  border: none;
   border-radius: var(--borda-arredondada);
-  padding: 22px;
-  margin-top: var(--espacamento-padrao);
-  width: 85%;
-  overflow: hidden;
-  margin: 0 auto;
+  padding: 1.5rem 2rem;
+  margin: 1.5rem auto;
+  width: var(--largura-historico);
+  box-shadow: var(--sombra-padrao);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-padrao);
 }
 
 .linha-titulo-historico {
@@ -1024,7 +1042,7 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  width: 85%;
+  width: var(--largura-rodape);
   margin: var(--espacamento-padrao) auto;
   padding: 10px 15px;
   background: rgba(20, 20, 25, 0.6);
@@ -1135,13 +1153,13 @@ body {
 /* Status de conexão da Deriv */
 #status-deriv {
   text-align: left;
-  margin: 12px 0;
-  font-size: 0.9rem;
+  margin: 20px auto;
+  font-size: 0.95rem;
   color: var(--cinza-claro);
   background-color: var(--fundo-escuro);
-  padding: 10px 18px;
-  border-radius: var(--borda-arredondada-pequena);
+  padding: 16px 18px;
+  border-radius: var(--borda-arredondada);
   display: block;
-  width: 100%;
+  width: var(--largura-info-bar);
   box-shadow: var(--sombra-padrao);
 }
