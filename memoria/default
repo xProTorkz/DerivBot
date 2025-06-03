@@ -1,0 +1,22 @@
+{
+  "timestamp": 1748974639.415425,
+  "decisao": "AGUARDAR",
+  "confianca": 0.8,
+  "latencia": 3.9660892486572266,
+  "contexto": {
+    "preco_atual": 90226.68,
+    "fib": {
+      "23.6%": 90229.10012,
+      "38.2%": 90228.39494,
+      "50%": 90227.82500000001,
+      "61.8%": 90227.25506000001
+    },
+    "rsi": 30.9178743961115,
+    "mhi": -5,
+    "tendencia": "BAIXA",
+    "volume": "ESTÁVEL",
+    "volatilidade": 0.0,
+    "lucro_total": 0.0,
+    "historico": []
+  }
+}

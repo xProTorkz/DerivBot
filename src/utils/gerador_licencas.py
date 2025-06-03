@@ -681,7 +681,7 @@ def validar_dispositivo(licenca, hwid=None, ip=None):
     logger.info(f"Validando dispositivo - HWID: {hwid}, IP: {ip}")
 
     # Se é primeiro acesso (nenhum dispositivo vinculado), permite
-    if not licenca.get("hwids") and not licenca.get("ips"):
+    if not licenca.get("hwid") and not licenca.get("ip"):
         logger.info("Primeiro acesso - Permitindo")
         return True
 
@@ -689,12 +689,12 @@ def validar_dispositivo(licenca, hwid=None, ip=None):
     metodos_conferidos = 0
 
     # Verifica HWID
-    if hwid and hwid in licenca.get("hwids", []):
+    if hwid and hwid == licenca.get("hwid"):
         metodos_conferidos += 1
         logger.info("HWID válido")
 
     # Verifica IP
-    if ip and ip in licenca.get("ips", []):
+    if ip and ip == licenca.get("ip"):
         metodos_conferidos += 1
         logger.info("IP válido")
 
@@ -706,7 +706,7 @@ def validar_dispositivo(licenca, hwid=None, ip=None):
     logger.info(f"Total de métodos conferidos: {metodos_conferidos}")
 
     # Se nenhum método está configurado, permite o acesso
-    if not licenca.get("hwids") and not licenca.get("ips"):
+    if not licenca.get("hwid") and not licenca.get("ip"):
         logger.info("Nenhum dispositivo vinculado - Permitindo")
         return True
 
@@ -725,20 +725,14 @@ def vincular_dispositivo(licenca, hwid=None, ip=None):
 
     logger.info(f"Vinculando dispositivo - HWID: {hwid}, IP: {ip}")
 
-    # Garante que as listas existem
-    if "hwids" not in licenca:
-        licenca["hwids"] = []
-    if "ips" not in licenca:
-        licenca["ips"] = []
-
-    # Adiciona HWID se não existir
-    if hwid and hwid not in licenca["hwids"]:
-        licenca["hwids"].append(hwid)
+    # Vincula HWID (apenas um por licença)
+    if hwid:
+        licenca["hwid"] = hwid
         logger.info(f"HWID vinculado: {hwid}")
 
-    # Adiciona IP se não existir
-    if ip and ip not in licenca["ips"]:
-        licenca["ips"].append(ip)
+    # Vincula IP (apenas um por licença)
+    if ip:
+        licenca["ip"] = ip
         logger.info(f"IP vinculado: {ip}")
 
     # Carrega todas as licenças

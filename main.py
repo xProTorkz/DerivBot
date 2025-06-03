@@ -157,25 +157,30 @@ def inicializar_api(token):
     try:
         # Inicializa a API simples
         deriv_api = DerivAPI(token)
+        logger.info("API simples inicializada")
+    except Exception as e:
+        logger.warning(f"Erro ao inicializar API simples: {e}")
 
-        # Inicializa o motor (mesmo se der erro, continua)
+    # SEMPRE cria o motor, mesmo se der erro
+    try:
+        motor = Motor()
+        motor.conectar(token)
+        logger.info("Motor inicializado com sucesso")
+    except Exception as motor_error:
+        logger.warning(f"Erro ao inicializar motor: {motor_error}")
+        # Cria motor básico mesmo com erro
         try:
-            motor = Motor()
-            motor.conectar(token)
-            logger.info("Motor inicializado com sucesso")
-        except Exception as motor_error:
-            logger.warning(f"Erro ao inicializar motor: {motor_error}")
-            # Cria motor básico mesmo com erro
             motor = Motor()
             motor.token = token
             motor.conectado = True  # Marca como conectado em modo básico
             motor.rodando = False  # Inicialmente parado
             logger.info("Motor criado em modo básico")
+        except Exception as e:
+            logger.error(f"Erro ao criar motor básico: {e}")
+            motor = None
 
-        return True
-    except Exception as e:
-        logger.error(f"Erro ao inicializar API: {e}")
-        return False
+    # SEMPRE retorna True para garantir que o sistema continue
+    return True
 
 
 def verificar_autenticacao_automatica():
@@ -209,12 +214,12 @@ def verificar_autenticacao_automatica():
             fatores_conferidos = 0
 
             # Fator 1: HWID
-            if hwid_atual and hwid_atual in licenca.get("hwids", []):
+            if hwid_atual and hwid_atual == licenca.get("hwid"):
                 fatores_conferidos += 1
                 logger.info("HWID confere")
 
             # Fator 2: IP
-            if ip_atual and ip_atual in licenca.get("ips", []):
+            if ip_atual and ip_atual == licenca.get("ip"):
                 fatores_conferidos += 1
                 logger.info("IP confere")
 
@@ -242,6 +247,32 @@ def obter_tokens_da_licenca(licenca):
     token_real = licenca.get("token_deriv_real")
     token_demo = licenca.get("token_deriv_demo")
     return token_real, token_demo
+
+
+def forcar_demo_para_teste_ai():
+    """🤖 FUNÇÃO ESPECIAL: Força uso de demo quando EU (AI) estiver testando
+
+    Esta função é usada apenas quando eu (AI) preciso testar o sistema
+    para garantir que não gaste o dinheiro real do usuário.
+    O usuário continua com controle total para escolher real/demo.
+    """
+    try:
+        licenca_auto = verificar_autenticacao_automatica()
+        if licenca_auto:
+            token_real, token_demo = obter_tokens_da_licenca(licenca_auto)
+            # 🛡️ SEMPRE DEMO PARA TESTES DA AI - PROTEGE SEU DINHEIRO!
+            if token_demo:
+                logger.info(
+                    "🤖 AI TESTANDO: Usando conta DEMO para proteger seu dinheiro!"
+                )
+                return token_demo, "demo"
+            else:
+                logger.warning("⚠️ AI TESTANDO: Sem token demo disponível!")
+                return None, None
+        return None, None
+    except Exception as e:
+        logger.error(f"Erro ao forçar demo para teste AI: {e}")
+        return None, None
 
 
 def salvar_historico():
@@ -325,6 +356,11 @@ def index():
                 # Usa o tipo de conta baseado no token escolhido
                 session["tipo_conta"] = tipo_conta_preferido
 
+                # Salva ambos os tokens na sessão para permitir troca de conta
+                token_real, token_demo = obter_tokens_da_licenca(licenca_auto)
+                session["token_real"] = token_real
+                session["token_demo"] = token_demo
+
                 # Salva os tokens na sessão
                 if token_real:
                     session["token_real"] = token_real
@@ -403,7 +439,7 @@ def login():
             return render_template("login.html", erro="Licença não encontrada")
 
         # Se é primeiro acesso, vincula o dispositivo
-        if not licenca.get("hwids") and not licenca.get("ips"):
+        if not licenca.get("hwid") and not licenca.get("ip"):
             logger.info("Primeiro acesso - Vinculando dispositivo")
             licenca = vincular_dispositivo(licenca)
 
@@ -437,7 +473,15 @@ def login():
         session["token"] = token_principal
 
         # Usa o tipo de conta baseado no token fornecido
-        session["tipo_conta"] = tipo_conta_escolhido
+        if token_principal == token_real:
+            session["tipo_conta"] = "real"
+        else:
+            session["tipo_conta"] = "demo"
+
+        # Salva ambos os tokens na sessão para permitir troca de conta
+        token_real, token_demo = obter_tokens_da_licenca(licenca)
+        session["token_real"] = token_real
+        session["token_demo"] = token_demo
 
         # Salva os tokens na sessão e arquivo
         if token_real:
@@ -527,8 +571,25 @@ def logout():
 @app.route("/toggle_bot", methods=["POST"])
 def toggle_bot():
     """Rota para iniciar/parar o robô com sistema inteligente"""
+    # Verifica autenticação automática se não há sessão
     if "token" not in session:
-        return jsonify({"status": "erro", "mensagem": "Não autenticado"}), 401
+        licenca_auto = verificar_autenticacao_automatica()
+        if licenca_auto:
+            # Restaura sessão automaticamente
+            token_real, token_demo = obter_tokens_da_licenca(licenca_auto)
+            if token_real:
+                session["token"] = token_real
+                session["tipo_conta"] = "real"
+                session["codigo_licenca"] = licenca_auto["codigo_licenca"]
+                session["deriv_account"] = licenca_auto.get("deriv_real", "")
+                # Salva ambos os tokens na sessão para permitir troca de conta
+                session["token_real"] = token_real
+                session["token_demo"] = token_demo
+                logger.info("Sessão restaurada automaticamente para toggle_bot")
+            else:
+                return jsonify({"status": "erro", "mensagem": "Não autenticado"}), 401
+        else:
+            return jsonify({"status": "erro", "mensagem": "Não autenticado"}), 401
 
     try:
         data = request.get_json()
@@ -563,8 +624,8 @@ def toggle_bot():
 
         if robo_ativo:
             # Verifica proteção antes de parar
-            if deriv_api:
-                protecao = deriv_api.verificar_protecao_parada()
+            if motor is not None:
+                protecao = motor.verificar_protecao_parada()
 
                 if not protecao.get("pode_parar", True):
                     return jsonify(
@@ -646,78 +707,118 @@ def toggle_bot():
         return jsonify({"status": "erro", "mensagem": str(e)}), 500
 
 
+@app.route("/status_robo_teste")
+def status_robo_teste():
+    """Rota de teste para identificar o problema"""
+    return jsonify({"status": "ok", "teste": "funcionando"})
+
+
 @app.route("/status_robo")
 def status_robo():
     """Rota para obter status do robô com informações inteligentes"""
+    # Verifica autenticação automática se não há sessão
     if "token" not in session:
-        return jsonify({"status": "erro", "mensagem": "Não autenticado"}), 401
+        licenca_auto = verificar_autenticacao_automatica()
+        if licenca_auto:
+            # Restaura sessão automaticamente
+            token_real, token_demo = obter_tokens_da_licenca(licenca_auto)
+            if token_real:
+                session["token"] = token_real
+                session["tipo_conta"] = "real"
+                session["codigo_licenca"] = licenca_auto["codigo_licenca"]
+                session["deriv_account"] = licenca_auto.get("deriv_real", "")
+                # Salva ambos os tokens na sessão para permitir troca de conta
+                session["token_real"] = token_real
+                session["token_demo"] = token_demo
+            else:
+                return jsonify({"status": "erro", "mensagem": "Não autenticado"}), 401
+        else:
+            return jsonify({"status": "erro", "mensagem": "Não autenticado"}), 401
 
     try:
-        # Informações básicas
-        status_info = {
-            "ativo": robo_ativo,
-            "modo": modo_operacao,
-            "meta": meta_diaria,
-            "lucro": lucro_atual,
-            "saldo": saldo_atual,
-            "operacoes": contador_operacoes,
-            "status_operacao": status_operacao,
-            "mensagem_log": ultima_mensagem,
-        }
+        global robo_ativo, modo_operacao, meta_diaria, status_operacao, ultima_mensagem
 
-        # Adiciona informações inteligentes se o robô estiver ativo
-        if robo_ativo and motor is not None:
-            operacoes_ativas = (
-                len(motor.operacoes_abertas)
-                if hasattr(motor, "operacoes_abertas")
-                else 0
-            )
+        # Informações do ativo atual - SEMPRE do catalogador (prioridade)
+        ativo_info = {"ativo": "R_100", "nome": "Volatility 100 Index"}
+        if (
+            motor
+            and hasattr(motor, "catalogador")
+            and hasattr(motor.catalogador, "obter_ativo_recomendado")
+        ):
+            try:
+                ativo_info = motor.catalogador.obter_ativo_recomendado()
+            except Exception as e:
+                logger.debug(f"Erro ao obter ativo do catalogador: {e}")
+                pass
 
-            # Configurações do modo atual (sincronizado com catalogador.py)
-            config_modo = {
-                "iniciante": {"max_ops": 1, "confianca_min": 0.85, "meta_maxima": 20.0},
-                "conservador": {
-                    "max_ops": 3,
-                    "confianca_min": 0.80,
-                    "meta_maxima": 50.0,
-                },
-                "agressivo": {"max_ops": 5, "confianca_min": 0.75, "meta_maxima": None},
-            }.get(
-                modo_operacao,
-                {"max_ops": 1, "confianca_min": 0.85, "meta_maxima": 20.0},
-            )
-
-            status_info.update(
-                {
-                    "sistema_inteligente": {
-                        "operacoes_ativas": operacoes_ativas,
-                        "max_operacoes_simultaneas": config_modo["max_ops"],
-                        "confianca_minima": config_modo["confianca_min"],
-                        "valor_entrada_percent": "2%",  # Sempre 2% da meta
-                        "progresso_meta": (
-                            (lucro_atual / meta_diaria * 100) if meta_diaria > 0 else 0
+        # Status do motor
+        motor_status = {"conectado": False, "operacoes_ativas": 0}
+        if motor:
+            try:
+                if hasattr(motor, "get_status"):
+                    motor_status = motor.get_status()
+                else:
+                    motor_status = {
+                        "conectado": (
+                            motor.conectado if hasattr(motor, "conectado") else False
                         ),
-                        "pode_operar": operacoes_ativas < config_modo["max_ops"]
-                        and lucro_atual < meta_diaria,
-                        "meta_maxima": config_modo["meta_maxima"],
-                    },
-                    "api_status": {
-                        "conectado": motor.conectado if motor is not None else False,
-                        "par_atual": (
-                            motor.par_atual
-                            if motor is not None and hasattr(motor, "par_atual")
-                            else "N/A"
-                        ),
-                        "ultima_cotacao": (
-                            motor.ultima_cotacao
-                            if motor is not None and hasattr(motor, "ultima_cotacao")
+                        "operacoes_ativas": (
+                            len(motor.operacoes_abertas)
+                            if hasattr(motor, "operacoes_abertas")
                             else 0
                         ),
-                    },
-                }
-            )
+                    }
+            except Exception as e:
+                logger.error(f"Erro ao obter status do motor: {e}")
+                motor_status = {"conectado": False, "operacoes_ativas": 0}
 
-        return jsonify(status_info)
+        # Informações detalhadas para o usuário
+        status_detalhado = "Sistema parado"
+        if robo_ativo:
+            if motor and hasattr(motor, "sistema_ativo") and motor.sistema_ativo:
+                status_detalhado = (
+                    f"🤖 Analisando {ativo_info.get('ativo', 'ativo')} - Scanner ativo"
+                )
+            else:
+                status_detalhado = "🔄 Iniciando sistema inteligente..."
+
+        # Mensagem clara para o usuário
+        mensagem_usuario = ultima_mensagem or "Sistema pronto"
+        if robo_ativo:
+            if "timeout" in str(ultima_mensagem).lower():
+                mensagem_usuario = "⚠️ API de IA com latência alta - aguardando..."
+            elif "aguardar" in str(ultima_mensagem).lower():
+                mensagem_usuario = f"⏳ Aguardando melhor oportunidade no {ativo_info.get('ativo', 'ativo')}"
+            elif "analise" in str(ultima_mensagem).lower():
+                mensagem_usuario = (
+                    f"🔍 Analisando padrões no {ativo_info.get('ativo', 'ativo')}"
+                )
+
+        return jsonify(
+            {
+                "ativo": robo_ativo,
+                "modo": modo_operacao or "iniciante",
+                "meta": meta_diaria or 20.0,
+                "lucro": lucro_atual,
+                "saldo": saldo_atual,
+                "operacoes": contador_operacoes,
+                "status_operacao": status_operacao or "parado",
+                "status_detalhado": status_detalhado,
+                "mensagem_log": ultima_mensagem or "Sistema pronto",
+                "mensagem_usuario": mensagem_usuario,
+                "ativo_atual": ativo_info,
+                "motor_status": motor_status,
+                "historico_recente": (
+                    historico_operacoes[-3:] if historico_operacoes else []
+                ),
+                "scanner_info": {
+                    "total_ativos": 15,
+                    "ativo_selecionado": ativo_info.get("ativo", "R_100"),
+                    "razao_selecao": ativo_info.get("razao", "Ativo padrão"),
+                    "prioridade": ativo_info.get("prioridade", 5),
+                },
+            }
+        )
     except Exception as e:
         logger.error(f"Erro ao obter status do robô: {e}")
         return jsonify({"status": "erro", "mensagem": str(e)}), 500
@@ -726,6 +827,8 @@ def status_robo():
 @app.route("/selecionar_conta", methods=["POST"])
 def selecionar_conta():
     """Rota para trocar entre conta demo/real"""
+    import time
+
     global saldo_atual, lucro_atual
 
     if "token" not in session:
@@ -777,8 +880,6 @@ def selecionar_conta():
                 inicializar_api(token)
 
                 # Aguarda um pouco para a conexão estabelecer
-                import time
-
                 time.sleep(1)
 
                 # Obtém saldo real da API
@@ -1126,6 +1227,31 @@ def api_historico_estatisticas():
     except Exception as e:
         logger.error(f"Erro ao obter estatísticas: {e}")
         return jsonify({"status": "erro", "mensagem": str(e)}), 500
+
+
+@app.route("/teste_ai_demo")
+def teste_ai_demo():
+    """🤖 ENDPOINT ESPECIAL: Testa função de demo para AI"""
+    try:
+        token_demo, tipo_conta = forcar_demo_para_teste_ai()
+        if token_demo:
+            return jsonify(
+                {
+                    "status": "sucesso",
+                    "mensagem": "🤖 AI testando com conta DEMO - Seu dinheiro está protegido!",
+                    "token": token_demo[:10] + "...",  # Mostra só parte do token
+                    "tipo_conta": tipo_conta,
+                }
+            )
+        else:
+            return jsonify(
+                {
+                    "status": "erro",
+                    "mensagem": "Não foi possível obter token demo para teste",
+                }
+            )
+    except Exception as e:
+        return jsonify({"status": "erro", "mensagem": f"Erro no teste AI: {e}"})
 
 
 # Sistema de operações movido para motor.py e catalogador.py

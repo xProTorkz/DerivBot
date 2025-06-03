@@ -25,8 +25,10 @@ class Motor:
         self.callback_tick = None
         self.ultima_resposta = None
         self.ultima_cotacao = None
-        self.par_atual = config.PAR_PADRAO
-        self.modo_real = config.MODO_REAL
+        self.par_atual = getattr(config, "PAR_PADRAO", "R_100")
+        self.scanner_ativo = True  # Ativa o scanner de ativos
+        self.ultimo_scan_ativo = 0  # Timestamp do último scan
+        self.modo_real = getattr(config, "MODO_REAL", True)
         self.catalogador = Catalogador()
         self.rodando = False
         self.meta_atingida = False
@@ -73,11 +75,12 @@ class Motor:
         self._iniciar_verificador_conexao()
 
         # Configurações
-        self.config = config.get_modo_config(self.modo_atual)
+        self.config = getattr(config, "BOT_CONFIG", {}).get("MODO_INICIANTE", {})
 
         # Setup logging
+        log_level = getattr(config, "LOG_CONFIG", {}).get("level", "INFO")
         logging.basicConfig(
-            level=config.LOG_LEVEL,
+            level=getattr(logging, log_level, logging.INFO),
             format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
             handlers=[logging.FileHandler("trading.log"), logging.StreamHandler()],
         )
@@ -298,7 +301,8 @@ class Motor:
 
                     # Verifica meta
                     lucro_total = self.obter_saldo() - self.saldo_inicial
-                    if lucro_total >= config.TAKE_PROFIT:
+                    take_profit = getattr(config, "TAKE_PROFIT", self.meta_diaria)
+                    if lucro_total >= take_profit:
                         self.logger.info("🎯 Meta diária atingida!")
                         self.meta_atingida = True
                         self.rodando = False
@@ -348,6 +352,9 @@ class Motor:
                 self.logger.warning("Não é possível inscrever ticks: não conectado")
                 return False
 
+            # Verifica se deve atualizar o ativo usando o scanner
+            self._atualizar_ativo_scanner()
+
             req = {"ticks": self.par_atual, "subscribe": 1}
             self.ws.send(json.dumps(req))
             self.logger.info(f"Inscrito para receber ticks de {self.par_atual}")
@@ -355,6 +362,40 @@ class Motor:
         except Exception as e:
             self.logger.error(f"Erro ao inscrever ticks: {str(e)}")
             return False
+
+    def _atualizar_ativo_scanner(self):
+        """Atualiza o ativo usando o scanner se necessário"""
+        try:
+            import time
+
+            agora = time.time()
+
+            # Verifica se é hora de fazer novo scan (a cada 60 segundos)
+            if agora - self.ultimo_scan_ativo < 60:
+                return
+
+            self.ultimo_scan_ativo = agora
+
+            if not self.scanner_ativo:
+                return
+
+            # Inicializa o scanner se necessário
+            if not hasattr(self.catalogador, "ativos_priorizados"):
+                self.catalogador.inicializar_scanner_ativos()
+
+            # Obtém o melhor ativo
+            melhor_ativo = self.catalogador.analisar_melhor_ativo()
+
+            # Muda o ativo se necessário
+            if melhor_ativo and melhor_ativo != self.par_atual:
+                # Log mais limpo para o usuário
+                self.logger.info(f"Mudando para {melhor_ativo} (melhor oportunidade)")
+                self.definir_par(melhor_ativo)
+
+        except Exception as e:
+            self.logger.error(f"Erro no scanner de ativos: {e}")
+
+    # FUNÇÃO REMOVIDA - Usar catalogador.obter_ativo_recomendado() diretamente
 
     def registrar_callback_tick(self, callback: Callable[[float], None]):
         """Registra um callback para ser chamado a cada tick recebido."""
@@ -564,9 +605,22 @@ class Motor:
     def definir_par(self, par: str) -> bool:
         """Altera o par de negociação atual."""
         try:
-            if par not in config.PARES:
+            # Importa a lista completa de ativos de scalping
+            try:
+                from src.core.config import ATIVOS_SCALPING
+
+                pares_validos = list(ATIVOS_SCALPING.keys())
+                self.logger.debug(
+                    f"Lista de ativos carregada: {len(pares_validos)} ativos"
+                )
+            except ImportError:
+                pares_validos = getattr(
+                    config, "PARES", ["R_10", "R_25", "R_50", "R_75", "R_100"]
+                )
+                self.logger.warning("Usando lista de ativos padrão (fallback)")
+            if par not in pares_validos:
                 self.logger.error(
-                    f"Par inválido: {par}. Deve ser um dos: {config.PARES}"
+                    f"Par inválido: {par}. Deve ser um dos: {pares_validos}"
                 )
                 return False
 
@@ -840,7 +894,11 @@ class Motor:
             """Loop principal do sistema inteligente"""
             self.logger.info("Sistema inteligente de operações iniciado")
 
-            while self.rodando:
+            # Marca como rodando
+            self.rodando = True
+
+            # Loop principal - continua enquanto o robô estiver ativo
+            while self.rodando and hasattr(self, "conectado"):
                 try:
                     if not self.conectado:
                         self.logger.warning(
@@ -871,10 +929,17 @@ class Motor:
                         self.rodando = False
                         break
 
-                    # Intervalo baseado no modo
-                    intervalo = {"iniciante": 3, "conservador": 2, "agressivo": 1}.get(
-                        self.modo_operacao, 3
+                    # Log de debug para acompanhar o funcionamento
+                    self.logger.debug(
+                        f"Sistema inteligente rodando - Lucro: ${resultado['lucro_atual']:.2f} / Meta: ${self.meta_diaria:.2f}"
                     )
+
+                    # SCALPING ULTRA RÁPIDO - Intervalos muito menores
+                    intervalo = {
+                        "iniciante": 1,
+                        "conservador": 0.5,
+                        "agressivo": 0.2,
+                    }.get(self.modo_operacao, 1)
 
                     time.sleep(intervalo)
 

@@ -10,8 +10,7 @@ from typing import List, Dict, Optional, Tuple, Any, Union
 from dataclasses import dataclass
 from enum import Enum
 import asyncio
-import pandas as pd
-from datetime import datetime
+import importlib
 
 from src import config
 
@@ -65,9 +64,9 @@ CONFIG = {
     "api": {
         "url": "https://api.deepseek.com/v1/chat/completions",
         "model": "deepseek-chat",
-        "timeout": 2.5,
-        "max_retries": 3,
-        "retry_delay": 0.3,
+        "timeout": 5.0,  # Aumentado para reduzir timeouts
+        "max_retries": 2,
+        "retry_delay": 0.5,  # Aumentado para dar mais tempo
     },
     "analise": {
         "periodos": {
@@ -77,11 +76,11 @@ CONFIG = {
             "fibonacci": 10,
         },
         "limites": {
-            "rsi_sobrevenda": 30,
-            "rsi_sobrecompra": 70,
-            "min_velas": 20,
-            "max_latencia": 0.5,
-            "saida_duracao": 60,
+            "rsi_sobrevenda": 40,  # Mais agressivo - entra mais cedo
+            "rsi_sobrecompra": 60,  # Mais agressivo - entra mais cedo
+            "min_velas": 5,  # Muito menos velas - decisão rápida
+            "max_latencia": 8.0,  # Aumentado para permitir IA funcionar
+            "saida_duracao": 30,  # Saída mais rápida - 30 segundos
         },
     },
 }
@@ -332,9 +331,27 @@ class DeepseekAPI:
 
     def __init__(self):
         """Inicializa o cliente HTTP"""
+        # Força recarga do config para garantir que IA_CONFIG existe
+        try:
+            importlib.reload(config)
+        except:
+            pass
+
+        # Verifica se IA_CONFIG existe, se não, cria um padrão
+        if not hasattr(config, "IA_CONFIG"):
+            config.IA_CONFIG = {
+                "async_mode": False,
+                "timeout": 5.0,  # Aumentado para reduzir timeouts
+                "temperature": 0.1,
+                "max_tokens": 5,
+                "max_aguardar_consecutivo": 5,
+            }
+
         # Carrega configurações de IA
         self.async_mode = config.IA_CONFIG.get("async_mode", False)
-        self.timeout = config.IA_CONFIG.get("timeout", 2.5)
+        self.timeout = config.IA_CONFIG.get(
+            "timeout", 5.0
+        )  # Aumentado para reduzir timeouts
 
         # Cria cliente apropriado (síncrono ou assíncrono)
         if self.async_mode:
@@ -653,7 +670,7 @@ class DecisaoTrading:
             Decisão: CALL, PUT ou AGUARDAR
         """
         start_time = time.time()
-        logger.info(f"Iniciando análise de entrada para cliente {cliente_id}")
+        logger.info(f"Analisando oportunidades de entrada...")
 
         # Validar dados
         if (
@@ -691,8 +708,10 @@ class DecisaoTrading:
                 ]
             )
 
-            # Verifica a confiança mínima configurada
-            min_confianca = config.IA_CONFIG.get("min_confianca", 0.6)
+            # Verifica a confiança mínima configurada - MAIS AGRESSIVO
+            min_confianca = config.IA_CONFIG.get(
+                "min_confianca", 0.4
+            )  # Reduzido para 40%
             if confianca < min_confianca:
                 logger.info(
                     f"Confiança baixa ({confianca:.2f} < {min_confianca:.2f}), decidindo AGUARDAR"
@@ -709,27 +728,47 @@ class DecisaoTrading:
                 decisao = DecisaoTipo.AGUARDAR.value
                 logger.info(f"Decisão IA: AGUARDAR com confiança {confianca:.2f}")
 
-            # Fallback técnico aprimorado
+            # SISTEMA ULTRA AGRESSIVO - Entra em qualquer sinal
             if decisao == DecisaoTipo.AGUARDAR.value:
                 limites = CONFIG["analise"]["limites"]
-                if (
-                    contexto.rsi < limites["rsi_sobrevenda"]
-                    and contexto.tendencia == "ALTA"
-                    and contexto.volume == "CRESCENTE"
-                ):
+
+                # SCALPING ULTRA RÁPIDO - Condições mais flexíveis
+                if contexto.rsi < limites["rsi_sobrevenda"]:  # RSI baixo = CALL
                     decisao = DecisaoTipo.CALL.value
+                    confianca = 0.85
                     logger.info(
-                        "Fallback técnico: CALL baseado em RSI baixo + tendência alta + volume crescente"
+                        f"SCALPING RÁPIDO: CALL - RSI baixo ({contexto.rsi:.1f})"
                     )
-                elif (
-                    contexto.rsi > limites["rsi_sobrecompra"]
-                    and contexto.tendencia == "BAIXA"
-                    and contexto.volume == "CRESCENTE"
-                ):
+
+                elif contexto.rsi > limites["rsi_sobrecompra"]:  # RSI alto = PUT
                     decisao = DecisaoTipo.PUT.value
-                    logger.info(
-                        "Fallback técnico: PUT baseado em RSI alto + tendência baixa + volume crescente"
-                    )
+                    confianca = 0.85
+                    logger.info(f"SCALPING RÁPIDO: PUT - RSI alto ({contexto.rsi:.1f})")
+
+                # Se ainda aguardando, força entrada baseada em movimento
+                elif contexto.tendencia == "ALTA" and contexto.volume == "CRESCENTE":
+                    decisao = DecisaoTipo.CALL.value
+                    confianca = 0.70
+                    logger.info("SCALPING RÁPIDO: CALL - Tendência alta + volume")
+
+                elif contexto.tendencia == "BAIXA" and contexto.volume == "CRESCENTE":
+                    decisao = DecisaoTipo.PUT.value
+                    confianca = 0.70
+                    logger.info("SCALPING RÁPIDO: PUT - Tendência baixa + volume")
+
+                # ÚLTIMO RECURSO - Entra baseado só no preço atual vs média
+                elif len(velas) >= 3:
+                    preco_atual = velas[-1].get("close", 0)
+                    preco_anterior = velas[-2].get("close", 0)
+
+                    if preco_atual > preco_anterior:  # Subindo = CALL
+                        decisao = DecisaoTipo.CALL.value
+                        confianca = 0.60
+                        logger.info("SCALPING RÁPIDO: CALL - Preço subindo")
+                    else:  # Descendo = PUT
+                        decisao = DecisaoTipo.PUT.value
+                        confianca = 0.60
+                        logger.info("SCALPING RÁPIDO: PUT - Preço descendo")
 
             # Verificar latência
             latencia = time.time() - start_time
@@ -818,19 +857,27 @@ class DecisaoTrading:
             # Regras de saída
             limites = CONFIG["analise"]["limites"]
 
-            # Regras de proteção
-            if contexto.duracao > limites["saida_duracao"] and contexto.lucro > 0:
-                logger.info(f"Saída por tempo: {contexto.duracao}s com lucro positivo")
+            # REGRAS ULTRA AGRESSIVAS DE SAÍDA
+            # Saída rápida com qualquer lucro após 15 segundos
+            if contexto.duracao > 15 and contexto.lucro > 0.5:  # Qualquer lucro > 0.5%
+                logger.info(
+                    f"SCALPING: Saída rápida - {contexto.lucro:.2f}% em {contexto.duracao}s"
+                )
                 decisao = DecisaoTipo.SAIR.value
 
-            # Evitar grandes perdas (stop loss)
-            if contexto.lucro < -5.0:  # 5% de perda
-                logger.info(f"Stop loss acionado: {contexto.lucro:.2f}%")
+            # Stop loss agressivo - sai rápido para evitar perdas
+            if contexto.lucro < -2.0:  # 2% de perda máxima
+                logger.info(f"SCALPING: Stop loss rápido - {contexto.lucro:.2f}%")
                 decisao = DecisaoTipo.SAIR.value
 
-            # Take profit
-            if contexto.lucro > 7.0:  # 7% de ganho
-                logger.info(f"Take profit acionado: {contexto.lucro:.2f}%")
+            # Take profit rápido - pega lucro pequeno mas garantido
+            if contexto.lucro > 3.0:  # 3% de ganho = sai
+                logger.info(f"SCALPING: Take profit rápido - {contexto.lucro:.2f}%")
+                decisao = DecisaoTipo.SAIR.value
+
+            # Saída forçada por tempo - não fica muito tempo em operação
+            if contexto.duracao > limites["saida_duracao"]:  # 30 segundos máximo
+                logger.info(f"SCALPING: Saída por tempo limite - {contexto.duracao}s")
                 decisao = DecisaoTipo.SAIR.value
 
             # Log de performance
@@ -1092,6 +1139,14 @@ class Catalogador:
 
         # Intervalo para limpeza automática (a cada 30 minutos)
         self.cleanup_interval = armazenamento_config.get("intervalo_limpeza", 30 * 60)
+
+        # Scanner de ativos para scalping
+        self.ativo_atual = None
+        self.scanner_ativo = True
+        self.dados_ativos = {}  # Armazena dados de múltiplos ativos
+        self.ultima_analise_scanner = 0
+        self.intervalo_scanner = 60  # Analisa ativos a cada 60 segundos
+        self.ativos_priorizados = []  # Lista de ativos ordenados por prioridade
 
         # Inicializa o logger específico
         self.logger = logging.getLogger("catalogador")
@@ -1588,7 +1643,8 @@ class Catalogador:
     def _check_cleanup(self):
         """Verifica se é hora de limpar dados antigos."""
         current_time = time.time()
-        if current_time - self.last_cleanup_time > self.cleanup_interval:
+        # Aumenta intervalo de limpeza para 60 segundos para evitar spam
+        if current_time - self.last_cleanup_time > 60:  # 60 segundos
             self._cleanup_old_data()
             self.last_cleanup_time = current_time
 
@@ -1621,8 +1677,8 @@ class Catalogador:
                     f"Limpeza: {velas_removed} velas e {ticks_removed} ticks antigos removidos"
                 )
 
-            # Força limite máximo de velas mesmo que não sejam antigas
-            if len(self.velas) > self.max_velas:
+            # Força limite máximo de velas apenas se exceder muito
+            if len(self.velas) > self.max_velas * 2:  # 100% de margem
                 excess = len(self.velas) - self.max_velas
                 self.velas = self.velas[excess:]
                 self.logger.info(
@@ -1645,7 +1701,207 @@ class Catalogador:
             return True
         except Exception as e:
             self.logger.error(f"Erro durante limpeza de dados: {e}", exc_info=True)
-            return False
+
+    # --------- Sistema de Scanner de Ativos para Scalping ----------
+    def inicializar_scanner_ativos(self):
+        """Inicializa o scanner de ativos com base na configuração"""
+        try:
+            from src.core.config import ATIVOS_SCALPING
+
+            # Ordena ativos por prioridade (maior prioridade primeiro)
+            self.ativos_priorizados = sorted(
+                ATIVOS_SCALPING.items(), key=lambda x: x[1]["prioridade"], reverse=True
+            )
+
+            self.logger.info(
+                f"Scanner inicializado com {len(self.ativos_priorizados)} ativos"
+            )
+
+            # Define o primeiro ativo como padrão
+            if self.ativos_priorizados:
+                self.ativo_atual = self.ativos_priorizados[0][0]
+                self.logger.info(f"Ativo inicial selecionado: {self.ativo_atual}")
+
+        except Exception as e:
+            self.logger.error(f"Erro ao inicializar scanner: {e}")
+            # Fallback para R_100
+            self.ativo_atual = "R_100"
+
+    def analisar_melhor_ativo(self) -> str:
+        """Analisa todos os ativos e retorna o melhor para scalping no momento"""
+        try:
+            agora = time.time()
+
+            # Verifica se é hora de fazer nova análise
+            if agora - self.ultima_analise_scanner < self.intervalo_scanner:
+                return self.ativo_atual or "R_100"
+
+            self.ultima_analise_scanner = agora
+
+            if not self.ativos_priorizados:
+                self.inicializar_scanner_ativos()
+
+            melhor_ativo = None
+            melhor_score = 0
+
+            # Analisa os top 5 ativos por prioridade
+            for ativo, config in self.ativos_priorizados[:5]:
+                score = self._calcular_score_ativo(ativo, config)
+
+                if score > melhor_score:
+                    melhor_score = score
+                    melhor_ativo = ativo
+
+            if melhor_ativo and melhor_ativo != self.ativo_atual:
+                # Log mais informativo para o usuário
+                from src.core.config import ATIVOS_SCALPING
+
+                nome_ativo = ATIVOS_SCALPING.get(melhor_ativo, {}).get(
+                    "nome", melhor_ativo
+                )
+                self.logger.info(
+                    f"Scanner: {nome_ativo} selecionado (score: {melhor_score:.0f})"
+                )
+                self.ativo_atual = melhor_ativo
+
+            return self.ativo_atual or "R_100"
+
+        except Exception as e:
+            self.logger.error(f"Erro na análise de ativos: {e}")
+            return self.ativo_atual or "R_100"
+
+    def _calcular_score_ativo(self, ativo: str, config: dict) -> float:
+        """Calcula score de um ativo para scalping"""
+        try:
+            score = 0.0
+
+            # Score base pela prioridade configurada
+            score += config.get("prioridade", 5) * 10
+
+            # Bonus por spread baixo
+            spread = config.get("spread", "medio")
+            if spread == "muito-baixo":
+                score += 20
+            elif spread == "baixo":
+                score += 15
+            elif spread == "medio":
+                score += 10
+
+            # Bonus por volatilidade adequada para scalping
+            volatilidade = config.get("volatilidade", "media")
+            if volatilidade in ["baixa", "media"]:
+                score += 15  # Ideal para scalping
+            elif volatilidade == "media-alta":
+                score += 10
+            elif volatilidade == "alta":
+                score += 5
+            else:  # muito-alta ou extrema
+                score += 2  # Mais arriscado
+
+            # Bonus por disponibilidade 24/7
+            if config.get("horario") == "24/7":
+                score += 10
+
+            # Bonus por stake mínimo baixo
+            min_stake = config.get("min_stake", 1.0)
+            if min_stake <= 0.35:
+                score += 15
+            elif min_stake <= 0.5:
+                score += 10
+            elif min_stake <= 1.0:
+                score += 5
+
+            # Análise técnica se temos dados do ativo
+            if ativo in self.dados_ativos and len(self.dados_ativos[ativo]) >= 5:
+                dados = self.dados_ativos[ativo]
+
+                # Calcula volatilidade recente
+                precos = [d["close"] for d in dados[-5:]]
+                if len(precos) >= 2:
+                    volatilidade_real = np.std(precos) if len(precos) > 1 else 0
+
+                    # Volatilidade ideal para scalping (nem muito alta, nem muito baixa)
+                    if 0.0001 <= volatilidade_real <= 0.001:
+                        score += 20
+                    elif 0.00005 <= volatilidade_real <= 0.002:
+                        score += 10
+
+                # Verifica tendência clara (bom para scalping)
+                if len(precos) >= 3:
+                    tendencia_alta = all(
+                        precos[i] >= precos[i - 1] for i in range(1, len(precos))
+                    )
+                    tendencia_baixa = all(
+                        precos[i] <= precos[i - 1] for i in range(1, len(precos))
+                    )
+
+                    if tendencia_alta or tendencia_baixa:
+                        score += 10  # Tendência clara é boa para scalping
+
+            return score
+
+        except Exception as e:
+            self.logger.error(f"Erro ao calcular score do ativo {ativo}: {e}")
+            return config.get("prioridade", 5) * 10  # Score básico
+
+    def obter_ativo_recomendado(self) -> dict:
+        """Retorna informações do ativo recomendado para scalping"""
+        try:
+            from src.core.config import ATIVOS_SCALPING
+
+            ativo_atual = self.analisar_melhor_ativo()
+            config_ativo = ATIVOS_SCALPING.get(ativo_atual, {})
+
+            return {
+                "ativo": ativo_atual,
+                "nome": config_ativo.get("nome", ativo_atual),
+                "min_stake": config_ativo.get("min_stake", 0.35),
+                "max_stake": config_ativo.get("max_stake", 50000),
+                "volatilidade": config_ativo.get("volatilidade", "media"),
+                "spread": config_ativo.get("spread", "medio"),
+                "prioridade": config_ativo.get("prioridade", 5),
+                "razao": "Melhor ativo disponível para scalping",
+            }
+
+        except Exception as e:
+            self.logger.error(f"Erro ao obter ativo recomendado: {e}")
+            return {
+                "ativo": "R_100",
+                "nome": "Volatility 100 Index",
+                "min_stake": 0.35,
+                "max_stake": 50000,
+                "volatilidade": "muito-alta",
+                "spread": "baixo",
+                "prioridade": 8,
+                "razao": "Ativo padrão (fallback)",
+            }
+
+    def listar_ativos_disponiveis(self) -> list:
+        """Lista todos os ativos disponíveis para scalping"""
+        try:
+            from src.core.config import ATIVOS_SCALPING
+
+            ativos = []
+            for ativo, config in ATIVOS_SCALPING.items():
+                ativos.append(
+                    {
+                        "ativo": ativo,
+                        "nome": config.get("nome", ativo),
+                        "min_stake": config.get("min_stake", 0.35),
+                        "volatilidade": config.get("volatilidade", "media"),
+                        "spread": config.get("spread", "medio"),
+                        "prioridade": config.get("prioridade", 5),
+                        "horario": config.get("horario", "24/7"),
+                    }
+                )
+
+            # Ordena por prioridade
+            ativos.sort(key=lambda x: x["prioridade"], reverse=True)
+            return ativos
+
+        except Exception as e:
+            self.logger.error(f"Erro ao listar ativos: {e}")
+            return [{"ativo": "R_100", "nome": "Volatility 100 Index", "prioridade": 8}]
 
     def estatisticas(self) -> Dict:
         """Retorna estatísticas do catalogador para monitoramento."""

@@ -84,7 +84,7 @@ MICRO_SCALPING = {
     "meta_progresso_reducao": 75.0,  # % de progresso da meta para começar a reduzir operações
     "duracao_operacao": 1,  # Tempo para manter a operação aberta (em segundos)
     "multiplier_padrao": 1,  # Multiplicador padrão para contratos multiplier
-    "ativo_padrao": "R_10",  # Ativo padrão para micro scalping (aceita operações de 1s)
+    "ativo_padrao": "R_100",  # Ativo padrão para micro scalping (aceita operações de 1s)
 }
 
 # Configurações de contratos multipliers
@@ -102,19 +102,152 @@ BOLLINGER_PERIODO: int = int(os.getenv("BOLLINGER_PERIODO", "10"))
 BOLLINGER_DESVIO: int = int(os.getenv("BOLLINGER_DESVIO", "2"))
 
 # --------------------------- LISTA DE ATIVOS ---------------------------
-# Atualizado para incluir apenas ativos que aceitam operações de 1 segundo
-PARES = [
-    "R_10",  # Volatility 10 Index
-    "R_25",  # Volatility 25 Index
-    "R_50",  # Volatility 50 Index
-    "R_75",  # Volatility 75 Index
-    "R_100",  # Volatility 100 Index
-    "BOOM500",  # Boom 500 Index
-    "BOOM1000",  # Boom 1000 Index
-    "CRASH500",  # Crash 500 Index
-    "CRASH1000",  # Crash 1000 Index
-]
-PAR_PADRAO = os.getenv("PAR_PADRAO", "R_10")
+# Lista completa de ativos que suportam scalping ultra rápido (1-5 segundos)
+ATIVOS_SCALPING = {
+    # Volatility Indices - Ideais para scalping (24/7, alta volatilidade)
+    "R_10": {
+        "nome": "Volatility 10 Index",
+        "min_stake": 0.35,
+        "max_stake": 50000,
+        "volatilidade": "baixa",
+        "spread": "baixo",
+        "horario": "24/7",
+        "prioridade": 9,  # Alta prioridade
+    },
+    "R_25": {
+        "nome": "Volatility 25 Index",
+        "min_stake": 0.35,
+        "max_stake": 50000,
+        "volatilidade": "media",
+        "spread": "baixo",
+        "horario": "24/7",
+        "prioridade": 8,
+    },
+    "R_50": {
+        "nome": "Volatility 50 Index",
+        "min_stake": 0.35,
+        "max_stake": 50000,
+        "volatilidade": "media-alta",
+        "spread": "baixo",
+        "horario": "24/7",
+        "prioridade": 7,
+    },
+    "R_75": {
+        "nome": "Volatility 75 Index",
+        "min_stake": 0.35,
+        "max_stake": 50000,
+        "volatilidade": "alta",
+        "spread": "baixo",
+        "horario": "24/7",
+        "prioridade": 6,
+    },
+    "R_100": {
+        "nome": "Volatility 100 Index",
+        "min_stake": 0.35,
+        "max_stake": 50000,
+        "volatilidade": "muito-alta",
+        "spread": "baixo",
+        "horario": "24/7",
+        "prioridade": 8,  # Boa para scalping
+    },
+    # Jump Indices - Excelentes para scalping rápido
+    "JD10": {
+        "nome": "Jump 10 Index",
+        "min_stake": 0.35,
+        "max_stake": 50000,
+        "volatilidade": "baixa",
+        "spread": "muito-baixo",
+        "horario": "24/7",
+        "prioridade": 9,
+    },
+    "JD25": {
+        "nome": "Jump 25 Index",
+        "min_stake": 0.35,
+        "max_stake": 50000,
+        "volatilidade": "media",
+        "spread": "muito-baixo",
+        "horario": "24/7",
+        "prioridade": 8,
+    },
+    "JD50": {
+        "nome": "Jump 50 Index",
+        "min_stake": 0.35,
+        "max_stake": 50000,
+        "volatilidade": "media-alta",
+        "spread": "muito-baixo",
+        "horario": "24/7",
+        "prioridade": 7,
+    },
+    "JD75": {
+        "nome": "Jump 75 Index",
+        "min_stake": 0.35,
+        "max_stake": 50000,
+        "volatilidade": "alta",
+        "spread": "muito-baixo",
+        "horario": "24/7",
+        "prioridade": 6,
+    },
+    "JD100": {
+        "nome": "Jump 100 Index",
+        "min_stake": 0.35,
+        "max_stake": 50000,
+        "volatilidade": "muito-alta",
+        "spread": "muito-baixo",
+        "horario": "24/7",
+        "prioridade": 7,
+    },
+    # Crash/Boom Indices - Bons para scalping em momentos específicos
+    "BOOM500": {
+        "nome": "Boom 500 Index",
+        "min_stake": 0.35,
+        "max_stake": 50000,
+        "volatilidade": "extrema",
+        "spread": "medio",
+        "horario": "24/7",
+        "prioridade": 5,  # Mais arriscado
+    },
+    "BOOM1000": {
+        "nome": "Boom 1000 Index",
+        "min_stake": 0.35,
+        "max_stake": 50000,
+        "volatilidade": "extrema",
+        "spread": "medio",
+        "horario": "24/7",
+        "prioridade": 4,
+    },
+    "CRASH500": {
+        "nome": "Crash 500 Index",
+        "min_stake": 0.35,
+        "max_stake": 50000,
+        "volatilidade": "extrema",
+        "spread": "medio",
+        "horario": "24/7",
+        "prioridade": 5,
+    },
+    "CRASH1000": {
+        "nome": "Crash 1000 Index",
+        "min_stake": 0.35,
+        "max_stake": 50000,
+        "volatilidade": "extrema",
+        "spread": "medio",
+        "horario": "24/7",
+        "prioridade": 4,
+    },
+    # Step Indices - Novos ativos para scalping
+    "STPUSD": {
+        "nome": "Step Index USD",
+        "min_stake": 0.35,
+        "max_stake": 50000,
+        "volatilidade": "controlada",
+        "spread": "baixo",
+        "horario": "24/7",
+        "prioridade": 6,
+    },
+}
+
+# Lista simplificada para compatibilidade
+PARES = list(ATIVOS_SCALPING.keys())
+PAR_PADRAO = os.getenv("PAR_PADRAO", "R_100")
 
 # --------------------------- CONFIGURAÇÕES DE ARMAZENAMENTO E LIMPEZA ---------------------------
 # Configurações para gerenciamento de memória e limpeza de dados
