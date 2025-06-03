@@ -580,7 +580,7 @@ def toggle_bot():
             status_operacao = "parado"
 
             # Para o motor também
-            if motor:
+            if motor is not None:
                 motor.parar()
             return jsonify(
                 {"status": "parado", "mensagem": "Robô parado com segurança"}
@@ -666,7 +666,7 @@ def status_robo():
         }
 
         # Adiciona informações inteligentes se o robô estiver ativo
-        if robo_ativo and motor:
+        if robo_ativo and motor is not None:
             operacoes_ativas = (
                 len(motor.operacoes_abertas)
                 if hasattr(motor, "operacoes_abertas")
@@ -702,15 +702,15 @@ def status_robo():
                         "meta_maxima": config_modo["meta_maxima"],
                     },
                     "api_status": {
-                        "conectado": motor.conectado if motor else False,
+                        "conectado": motor.conectado if motor is not None else False,
                         "par_atual": (
                             motor.par_atual
-                            if motor and hasattr(motor, "par_atual")
+                            if motor is not None and hasattr(motor, "par_atual")
                             else "N/A"
                         ),
                         "ultima_cotacao": (
                             motor.ultima_cotacao
-                            if motor and hasattr(motor, "ultima_cotacao")
+                            if motor is not None and hasattr(motor, "ultima_cotacao")
                             else 0
                         ),
                     },
