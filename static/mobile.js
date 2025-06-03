@@ -1,48 +1,6 @@
 // DerivBot - Funções específicas para Mobile
 // Arquivo separado para lidar com funcionalidades exclusivas de dispositivos móveis
 
-// Adicionar estilo direto para o símbolo USD e espaçamento entre lucro e meta
-const estiloUSD = document.createElement("style");
-estiloUSD.textContent = `
-  /* Garantir que o valor-saldo tenha o símbolo USD visível após o valor */
-  #saldo-valor::after {
-    content: " USD";
-    display: inline-block;
-    visibility: visible;
-    opacity: 0.7;
-    font-weight: normal;
-    color: #aaaaaa;
-    margin-left: 15px;
-    font-size: 1rem;
-  }
-  
-  /* Ajustar espaço entre o lucro e a meta */
-  #meta-valor {
-    margin-left: 3px !important;
-    letter-spacing: 1px !important;
-  }
-  
-  /* Aumentar o tamanho dos valores de saldo e lucro */
-  #saldo-valor, #lucro-valor {
-    font-size: 1.7rem !important;
-    font-weight: bold !important;
-  }
-  
-  /* Ajustes responsivos para telas menores */
-  @media (max-width: 480px) {
-    #saldo-valor, #lucro-valor {
-      font-size: 1.5rem !important;
-    }
-  }
-  
-  @media (max-width: 320px) {
-    #saldo-valor, #lucro-valor {
-      font-size: 1.3rem !important;
-    }
-  }
-`;
-document.head.appendChild(estiloUSD);
-
 document.addEventListener("DOMContentLoaded", function () {
   let isMobile = false;
 
@@ -386,50 +344,87 @@ document.addEventListener("DOMContentLoaded", function () {
     }, 100);
   }
 
-  // Inicialização - detecta se é dispositivo móvel
-  detectarDispositivoMovel();
+  // Função para corrigir a barra de progresso em dispositivos móveis
+  function corrigirBarraProgresso() {
+    const statusEtapas = document.querySelector(".status-etapas");
+    if (!statusEtapas) return;
 
-  // Adiciona listener para redimensionamento
-  window.addEventListener("resize", function () {
-    detectarDispositivoMovel();
-    if (isMobile) {
-      // Ajustar as barras quando redimensionar
-      ajustarBarrasEmResize();
-      corrigirCamposValores(); // Reaplica a correção após redimensionar
+    // Adiciona estilo específico para dispositivos móveis
+    const styleEl = document.createElement("style");
+    styleEl.id = "mobile-progress-bar-fix";
+    styleEl.textContent = `
+      @media (max-width: 480px) {
+        .status-etapas::before {
+          left: 18px !important;
+          right: 16px !important;
+        }
+        .status-etapas::after {
+          left: 18px !important;
+          max-width: calc(100% - 34px) !important;
+        }
+      }
+    `;
+    document.head.appendChild(styleEl);
+  }
+
+  // Função para forçar atualização da barra de progresso
+  function forcarAtualizacaoBarraProgresso() {
+    // Verifica se há alguma bolinha ativa
+    const bolinhasAtivas = document.querySelectorAll(".bolinha.ativa");
+    if (bolinhasAtivas.length === 0) return; // Não há progresso para atualizar
+
+    // Determina o progresso atual com base nas bolinhas ativas
+    let progresso = 0;
+    if (document.getElementById("bolinha-finalizado").classList.contains("ativa")) {
+      progresso = 100;
+    } else if (document.getElementById("bolinha-abrindo").classList.contains("ativa")) {
+      progresso = 50;
+    } else if (document.getElementById("bolinha-analisando").classList.contains("ativa")) {
+      progresso = 25;
     }
-  });
 
-  // Adicionar a nova função ao objeto window.mobileUtils
-  window.mobileUtils = {
-    detectarDispositivoMovel,
-    ajustarInterfaceMobile,
-    restaurarTextoOriginal,
-    calcularWidthProgressoBarra,
-    adaptarMensagensDemo,
-    corrigirBarraProgresso,
-    forcarAtualizacaoBarraProgresso,
-    atualizarBarraProgressoMobile,
-    ajustarBarrasEmResize,
-    corrigirCamposValores,
-  };
+    // Atualiza a barra de progresso
+    atualizarBarraProgressoMobile(progresso);
+  }
 
-  // Inicialização adicional após carregamento completo da página
-  window.addEventListener("load", function () {
-    if (isMobile) {
-      // Garante que as barras estejam criadas e visíveis
-      corrigirBarraProgresso();
-      corrigirCamposValores(); // Aplica a correção nos valores iniciais
+  // Função para atualizar a barra de progresso em dispositivos móveis
+  function atualizarBarraProgressoMobile(progresso) {
+    const statusEtapas = document.querySelector(".status-etapas");
+    if (!statusEtapas) return;
 
-      // Aplica atualização inicial
-      setTimeout(forcarAtualizacaoBarraProgresso, 200);
+    // Calcula o valor para dispositivos móveis
+    let widthValue = calcularWidthProgressoBarra(progresso);
 
-      // Atualização secundária com atraso maior para garantir
-      setTimeout(forcarAtualizacaoBarraProgresso, 1000);
-
-      // Atualização dos campos de valores após a renderização completa
-      setTimeout(corrigirCamposValores, 500);
+    // Atualiza o CSS diretamente
+    const styleElement = document.getElementById("barra-progresso-style");
+    if (!styleElement) {
+      // Criar elemento de estilo se não existir
+      const style = document.createElement("style");
+      style.id = "barra-progresso-style";
+      document.head.appendChild(style);
     }
-  });
+
+    // Atualizar o CSS diretamente
+    const styleSheet = document.getElementById("barra-progresso-style").sheet;
+    // Limpar regras anteriores
+    while (styleSheet.cssRules.length > 0) {
+      styleSheet.deleteRule(0);
+    }
+    // Adicionar nova regra
+    styleSheet.insertRule(
+      `.status-etapas::after { width: ${widthValue} !important; }`,
+      0
+    );
+
+    // Força um reflow para garantir que a alteração seja aplicada imediatamente
+    void statusEtapas.offsetWidth;
+  }
+
+  // Função para ajustar as barras quando a janela é redimensionada
+  function ajustarBarrasEmResize() {
+    // Força atualização da barra de progresso
+    forcarAtualizacaoBarraProgresso();
+  }
 
   // Função para calcular a largura da barra de progresso com base no tamanho da tela
   function calcularWidthProgressoBarra(progresso) {
@@ -458,228 +453,47 @@ document.addEventListener("DOMContentLoaded", function () {
     }
   }
 
-  // Função para adaptar mensagens de demonstração para dispositivos móveis
-  function adaptarMensagensDemo(etapasDemo) {
-    // Só modifica se estivermos em um dispositivo móvel
-    if (!isMobile) return etapasDemo;
+  // Inicialização - detecta se é dispositivo móvel
+  detectarDispositivoMovel();
 
-    // Cria uma cópia para não modificar o original
-    const etapasAdaptadas = JSON.parse(JSON.stringify(etapasDemo));
-
-    // Obtém o valor da entrada da etapa original
-    const msgOriginal = etapasAdaptadas[2].mensagem;
-    // Extrai o valor usando expressão regular (procura por $X.XX)
-    const valorMatch = msgOriginal.match(/\$(\d+\.\d+)/);
-    const valorEntrada = valorMatch ? valorMatch[1] : "0.35";
-
-    // Reduz o tamanho das mensagens para dispositivos móveis
-    if (window.innerWidth <= 320) {
-      // Versões curtas para telas muito pequenas
-      etapasAdaptadas[0].mensagem = "Analisando mercado...";
-      etapasAdaptadas[1].mensagem = "Sinal detectado em R_10";
-      etapasAdaptadas[2].mensagem = `MULTUP $${valorEntrada} (1s)`;
-      etapasAdaptadas[3].mensagem = "Aguardando resultado...";
-      etapasAdaptadas[4].mensagem = `✅ GANHO! +$${(
-        parseFloat(valorEntrada) * 0.9
-      ).toFixed(2)}`;
-      etapasAdaptadas[5].mensagem = "Próxima análise...";
-    } else if (window.innerWidth <= 480) {
-      // Versões médias para telas pequenas
-      etapasAdaptadas[0].mensagem = "Analisando mercado...";
-      etapasAdaptadas[1].mensagem = "Sinal identificado! Alta em R_10";
-      etapasAdaptadas[2].mensagem = `MULTUP $${valorEntrada} (micro 1s)`;
-      etapasAdaptadas[3].mensagem = "Aguardando fechamento...";
-      etapasAdaptadas[4].mensagem = `✅ GANHO! +$${(
-        parseFloat(valorEntrada) * 0.9
-      ).toFixed(2)}`;
-      etapasAdaptadas[5].mensagem = "Analisando nova oportunidade...";
+  // Adiciona listener para redimensionamento
+  window.addEventListener("resize", function () {
+    detectarDispositivoMovel();
+    if (isMobile) {
+      // Ajustar as barras quando redimensionar
+      ajustarBarrasEmResize();
+      corrigirCamposValores(); // Reaplica a correção após redimensionar
     }
+  });
 
-    return etapasAdaptadas;
-  }
+  // Adicionar a nova função ao objeto window.mobileUtils
+  window.mobileUtils = {
+    detectarDispositivoMovel,
+    ajustarInterfaceMobile,
+    restaurarTextoOriginal,
+    calcularWidthProgressoBarra,
+    corrigirBarraProgresso,
+    forcarAtualizacaoBarraProgresso,
+    atualizarBarraProgressoMobile,
+    ajustarBarrasEmResize,
+    corrigirCamposValores,
+  };
 
-  // Função para corrigir a barra de progresso em dispositivos móveis
-  function corrigirBarraProgresso() {
-    if (!isMobile) return;
+  // Inicialização adicional após carregamento completo da página
+  window.addEventListener("load", function () {
+    if (isMobile) {
+      // Garante que as barras estejam criadas e visíveis
+      corrigirBarraProgresso();
+      corrigirCamposValores(); // Aplica a correção nos valores iniciais
 
-    // Busca o contêiner de status
-    const statusEtapas = document.querySelector(".status-etapas");
-    if (!statusEtapas) return;
+      // Aplica atualização inicial
+      setTimeout(forcarAtualizacaoBarraProgresso, 200);
 
-    // Cria barras DOM reais em vez de depender de pseudo-elementos
-    const barraBackgroundId = "barra-background-mobile";
-    const barraProgressoId = "barra-progresso-mobile";
+      // Atualização secundária com atraso maior para garantir
+      setTimeout(forcarAtualizacaoBarraProgresso, 1000);
 
-    // Verifica se já existem as barras
-    if (!document.getElementById(barraBackgroundId)) {
-      // Primeiro adiciona a barra de fundo (cinza)
-      const barraBackground = document.createElement("div");
-      barraBackground.id = barraBackgroundId;
-      barraBackground.style.cssText = `
-        position: absolute;
-        top: 6px;
-        left: 18px;
-        right: 18px;
-        height: 3px;
-        background-color: var(--transparente-claro);
-        z-index: 1;
-      `;
-
-      // Adiciona ao DOM
-      statusEtapas.appendChild(barraBackground);
-
-      // Agora adiciona a barra de progresso (amarela)
-      const barraProgresso = document.createElement("div");
-      barraProgresso.id = barraProgressoId;
-      barraProgresso.style.cssText = `
-        position: absolute;
-        top: 6px;
-        left: 18px;
-        height: 3px;
-        width: 0;
-        background-color: var(--amarelo-escuro);
-        box-shadow: 0 0 5px var(--amarelo-claro);
-        z-index: 2;
-        transition: width 0.3s ease-in-out;
-      `;
-
-      // Adiciona ao DOM
-      statusEtapas.appendChild(barraProgresso);
-
-      // Ajusta para telas muito pequenas
-      if (window.innerWidth <= 320) {
-        barraBackground.style.top = "4px";
-        barraBackground.style.left = "10px";
-        barraBackground.style.right = "10px";
-        barraBackground.style.height = "2px";
-
-        barraProgresso.style.top = "4px";
-        barraProgresso.style.left = "10px";
-        barraProgresso.style.height = "2px";
-      }
+      // Atualização dos campos de valores após a renderização completa
+      setTimeout(corrigirCamposValores, 500);
     }
-
-    // Esconde os pseudo-elementos que causam problemas
-    const style = document.createElement("style");
-    style.id = "disable-pseudo-bars";
-    style.textContent = `
-      .status-etapas::before, .status-etapas::after {
-        display: none !important;
-        width: 0 !important;
-        height: 0 !important;
-        content: none !important;
-      }
-    `;
-    document.head.appendChild(style);
-
-    // Função para atualizar o progresso da barra
-    window.atualizarBarraProgressoMobile = function (etapa) {
-      if (!isMobile) return;
-
-      // Converte etapa em valor de progresso
-      let progresso = 0;
-      switch (etapa) {
-        case "analisando":
-          progresso = 0;
-          break;
-        case "medio":
-          progresso = 33;
-          break;
-        case "abrindo":
-          progresso = 50;
-          break;
-        case "aguardando":
-          progresso = 75;
-          break;
-        case "finalizado":
-        case "finalizado-win":
-        case "finalizado-loss":
-          progresso = 100;
-          break;
-        default:
-          progresso = 0;
-      }
-
-      // Atualiza a largura da barra de progresso real
-      const barraProgresso = document.getElementById(barraProgressoId);
-      if (barraProgresso) {
-        // Calcula a largura baseada na tela
-        const larguraTotal =
-          statusEtapas.clientWidth - (window.innerWidth <= 320 ? 20 : 36);
-        const larguraBarra =
-          progresso === 0 ? 0 : (progresso / 100) * larguraTotal;
-
-        // Aplica a largura diretamente
-        barraProgresso.style.width = larguraBarra + "px";
-      }
-    };
-  }
-
-  // Nova função dedicada para forçar a atualização em etapas críticas
-  function forcarAtualizacaoBarraProgresso() {
-    // Obtém o estado das bolinhas
-    const bolinhaAnalisando = document.getElementById("bolinha-analisando");
-    const bolinhaAbrindo = document.getElementById("bolinha-abrindo");
-    const bolinhaFinalizado = document.getElementById("bolinha-finalizado");
-
-    // Determina a etapa atual baseada nas bolinhas ativas
-    let etapaAtual = "parado";
-
-    if (bolinhaFinalizado && bolinhaFinalizado.classList.contains("ativa")) {
-      etapaAtual = "finalizado";
-    } else if (bolinhaAbrindo && bolinhaAbrindo.classList.contains("ativa")) {
-      etapaAtual = bolinhaAbrindo.classList.contains("pisca")
-        ? "abrindo"
-        : "aguardando";
-    } else if (
-      bolinhaAnalisando &&
-      bolinhaAnalisando.classList.contains("ativa")
-    ) {
-      etapaAtual = bolinhaAnalisando.classList.contains("pisca")
-        ? "analisando"
-        : "medio";
-    }
-
-    // Aplica a atualização se a função existir
-    if (typeof window.atualizarBarraProgressoMobile === "function") {
-      window.atualizarBarraProgressoMobile(etapaAtual);
-
-      // Segunda atualização após um pequeno atraso para garantir
-      setTimeout(() => {
-        window.atualizarBarraProgressoMobile(etapaAtual);
-      }, 100);
-    }
-  }
-
-  // Função auxiliar para ajustar dinamicamente as barras ao redimensionar
-  function ajustarBarrasEmResize() {
-    // Primeiro restaura os valores padrão
-    const barraFundo = document.getElementById("barra-background-mobile");
-    const barraProgresso = document.getElementById("barra-progresso-mobile");
-
-    if (!barraFundo || !barraProgresso) return;
-
-    if (window.innerWidth <= 320) {
-      barraFundo.style.top = "4px";
-      barraFundo.style.left = "10px";
-      barraFundo.style.right = "10px";
-      barraFundo.style.height = "2px";
-
-      barraProgresso.style.top = "4px";
-      barraProgresso.style.left = "10px";
-      barraProgresso.style.height = "2px";
-    } else {
-      barraFundo.style.top = "6px";
-      barraFundo.style.left = "18px";
-      barraFundo.style.right = "18px";
-      barraFundo.style.height = "3px";
-
-      barraProgresso.style.top = "6px";
-      barraProgresso.style.left = "18px";
-      barraProgresso.style.height = "3px";
-    }
-
-    // Força uma atualização da largura da barra de progresso
-    forcarAtualizacaoBarraProgresso();
-  }
+  });
 });

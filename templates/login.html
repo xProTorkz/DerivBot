@@ -155,7 +155,7 @@
       </div>
       {% endif %}
 
-      <form method="POST" action="{{ url_for('ativacao') }}">
+      <form method="POST" action="{{ url_for('login') }}">
         <div class="form-group">
           <label for="codigo_licenca">Código de Licença</label>
           <input
@@ -163,7 +163,6 @@
             id="codigo_licenca"
             name="codigo_licenca"
             value="{{ request.form.get('codigo_licenca', '') }}"
-            required
             autocomplete="off"
           />
         </div>
@@ -186,6 +185,7 @@
             id="token_deriv_real"
             name="token_deriv_real"
             value="{{ request.form.get('token_deriv_real', '') }}"
+            required
             autocomplete="off"
           />
         </div>

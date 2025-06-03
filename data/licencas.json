@@ -5,12 +5,8 @@
     "nome": "Lucas P.",
     "plano": "vitalicio",
     "validade": "VITALÍCIO",
-    "ips": [
-      "127.0.0.1"
-    ],
-    "hwids": [
-      "0x22334d051b1a"
-    ],
+    "ips": ["127.0.0.1", "200.152.5.211"],
+    "hwids": ["0x22334d051b1a", "0x030002000400"],
     "token_deriv_demo": "RYMx6qlHahIlC53",
     "token_deriv_real": "afK88ZEXLzGdzD9",
     "deriv_demo": "VRTC13064068",
@@ -18,41 +14,5 @@
     "ativado_em": "2025-04-11 09:39",
     "status": "ativa",
     "limite_operacoes": null
-  },
-  "teste-250507-0909-1b35ce": {
-    "codigo_licenca": "Ftr9SrigeVjahLI",
-    "email": "teste@exemplo.com",
-    "nome": null,
-    "plano": "free",
-    "validade": "2025-05-14",
-    "ativado_em": "2025-05-07 09:09",
-    "ips": [],
-    "hwids": [],
-    "status": "ativa",
-    "limite_operacoes": 100
-  },
-  "cliente-vip-250507-0910-8bfd71": {
-    "codigo_licenca": "nRVauJKAY9fFVrm",
-    "email": "exemplo@vitalicio.com",
-    "nome": "Cliente VIP",
-    "plano": "vitalicio",
-    "validade": "VITALÍCIO",
-    "ativado_em": "2025-05-07 09:10",
-    "ips": [],
-    "hwids": [],
-    "status": "ativa",
-    "limite_operacoes": null
-  },
-  "pedro-sales-250507-0917-038e66": {
-    "codigo_licenca": "C8qgOvgq6s3VrW0",
-    "email": "pglucas8@gmail.com",
-    "nome": "Pedro Sales",
-    "plano": "free",
-    "validade": "2025-05-14",
-    "ativado_em": "2025-05-07 09:17",
-    "ips": [],
-    "hwids": [],
-    "status": "ativa",
-    "limite_operacoes": 100
   }
 }

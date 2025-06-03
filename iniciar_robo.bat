@@ -1,70 +1,67 @@
 @echo off
-chcp 65001 > nul
-title Deriv Bot - Sistema de Trading
+REM =====================================
+REM DerivBot - Script de inicialização para Windows
+REM =====================================
 
+echo.
 echo ===================================
-echo    Deriv Bot - Sistema de Trading
+echo    DerivBot - Inicializando...
 echo ===================================
 echo.
 
-:: Verifica se o Python está instalado
-python --version > nul 2>&1
-if errorlevel 1 (
-    echo [ERRO] Python nao encontrado!
-    echo Por favor, instale o Python 3.8 ou superior.
-    echo Visite: https://www.python.org/downloads/
+REM Verifica se o Python está instalado
+python --version >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [ERRO] Python nao encontrado. Por favor, instale o Python 3.8 ou superior.
+    echo Voce pode baixar em: https://www.python.org/downloads/
+    echo.
     pause
     exit /b 1
 )
 
-:: Verifica se o pip está instalado
-pip --version > nul 2>&1
-if errorlevel 1 (
-    echo [ERRO] pip nao encontrado!
-    echo Por favor, reinstale o Python com pip.
-    pause
-    exit /b 1
-)
-
-:: Cria ambiente virtual se não existir
-if not exist "venv" (
+REM Verifica se o ambiente virtual existe
+if not exist venv (
     echo [INFO] Criando ambiente virtual...
     python -m venv venv
-    if errorlevel 1 (
-        echo [ERRO] Falha ao criar ambiente virtual!
+    if %errorlevel% neq 0 (
+        echo [ERRO] Falha ao criar ambiente virtual.
         pause
         exit /b 1
     )
 )
 
-:: Ativa o ambiente virtual
+REM Ativa o ambiente virtual
 echo [INFO] Ativando ambiente virtual...
 call venv\Scripts\activate.bat
 
-:: Atualiza pip
-echo [INFO] Atualizando pip...
-python -m pip install --upgrade pip
-
-:: Instala/atualiza dependências
-echo [INFO] Instalando dependencias...
-pip install --no-cache-dir -r requirements.txt
-
-:: Inicia a aplicação
-echo.
-echo [INFO] Iniciando Deriv Bot...
-echo [INFO] Acesse: http://localhost:5000
-echo.
-echo Pressione CTRL+C para encerrar
-echo.
-
-python main.py
-
-:: Em caso de erro
-if errorlevel 1 (
-    echo.
-    echo [ERRO] A aplicacao foi encerrada com erro!
-    pause
+REM Instala as dependências
+echo [INFO] Verificando dependencias...
+pip install -r requirements.txt
+if %errorlevel% neq 0 (
+    echo [AVISO] Algumas dependencias podem nao ter sido instaladas corretamente.
 )
 
-:: Desativa o ambiente virtual
+REM Verifica se o arquivo .env existe
+if not exist .env (
+    echo [INFO] Criando arquivo .env...
+    echo SECRET_KEY=DerivBotSecretKey123 > .env
+)
+
+REM Cria diretório de dados se não existir
+if not exist data (
+    echo [INFO] Criando diretorio de dados...
+    mkdir data
+)
+
+REM Inicia o servidor
+echo.
+echo [INFO] Iniciando o DerivBot...
+echo [INFO] Acesse o painel em: http://localhost:5000
+echo [INFO] Pressione Ctrl+C para encerrar o servidor
+echo.
+python main.py
+
+REM Desativa o ambiente virtual ao sair
 call venv\Scripts\deactivate.bat
+
+pause

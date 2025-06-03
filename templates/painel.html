@@ -1,4 +1,4 @@
-<!-- templates/painel_robo.html -->
+<!-- templates/painel.html -->
 <!DOCTYPE html>
 <html lang="pt-br">
   <head>
@@ -66,28 +66,60 @@
 
           <!-- Menu de Opções (Dropdown) -->
           <div class="dropdown-menu" id="dropdown-conta">
-            {% if tipo_conta == 'real' and session.get('token_deriv_demo') %}
+            {% if session.get('token_demo') and session.get('tipo_conta') !=
+            'demo' %}
             <button
               type="button"
               class="dropdown-btn"
               onclick="trocarContaDemo()"
             >
-              Conta Demo
+              <i class="fas fa-vial"></i> Trocar para Demo
             </button>
-            {% elif tipo_conta == 'demo' and session.get('token_deriv_real') %}
+            {% endif %} {% if session.get('token_real') and
+            session.get('tipo_conta') != 'real' %}
             <button
               type="button"
               class="dropdown-btn"
               onclick="trocarContaReal()"
             >
-              Conta Real
+              <i class="fas fa-dollar-sign"></i> Trocar para Real
+            </button>
+            {% endif %} {% if not session.get('token_demo') or not
+            session.get('token_real') %}
+            <button
+              type="button"
+              class="dropdown-btn"
+              onclick="adicionarToken()"
+            >
+              <i class="fas fa-plus"></i> Adicionar Token
+            </button>
+            {% endif %} {% if not session.get('token_demo') and not
+            session.get('token_real') %}
+            <button
+              type="button"
+              class="dropdown-btn"
+              style="color: #888; cursor: not-allowed"
+              disabled
+            >
+              <i class="fas fa-info-circle"></i> Nenhum token adicional
             </button>
             {% endif %}
           </div>
         </div>
 
-        <!-- Botão de Desconectar (Direita) -->
+        <!-- Botões de Configurações e Desconectar (Direita) -->
         <div class="logout-container">
+          <!-- Botão de Configurações -->
+          <button
+            class="config-btn"
+            onclick="abrirConfiguracoes()"
+            aria-label="Configurações"
+            title="Configurações"
+          >
+            <span class="config-icon">⚙️</span>
+          </button>
+
+          <!-- Botão de Desconectar -->
           <button
             class="logout-btn"
             onclick="desconectar()"
@@ -155,7 +187,8 @@
           <p id="valor-saldo" class="saldo-valor">
             <span class="rs">$</span>
             <span id="saldo-valor"
-              >{{ saldo if saldo is not none else '--' }}</span
+              >{{ "%.2f"|format(saldo) if saldo is not none and saldo != 0 else
+              '--' }}</span
             >
           </p>
         </div>
@@ -396,6 +429,46 @@
       // Executa após o carregamento da página
       window.addEventListener("load", forcarRecarregamentoCSS);
     </script>
+
+    <!-- Modal de Configurações -->
+    <div id="modal-configuracoes" class="modal-overlay" style="display: none">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>⚙️ Configurações</h3>
+          <button class="modal-close" onclick="fecharConfiguracoes()">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="config-section">
+            <h4>📱 Suporte</h4>
+            <button class="config-option" onclick="abrirWhatsApp()">
+              <span class="config-icon">💬</span>
+              <span>Falar com Suporte via WhatsApp</span>
+            </button>
+          </div>
+
+          <div class="config-section">
+            <h4>⭐ Conta</h4>
+            <button class="config-option" onclick="abrirUpgrade()">
+              <span class="config-icon">🚀</span>
+              <span>Fazer Upgrade da Conta</span>
+            </button>
+          </div>
+
+          <div class="config-section">
+            <h4>🔧 Sistema</h4>
+            <button class="config-option" onclick="abrirTokens()">
+              <span class="config-icon">🔑</span>
+              <span>Gerenciar Tokens</span>
+            </button>
+            <button class="config-option" onclick="limparCache()">
+              <span class="config-icon">🗑️</span>
+              <span>Limpar Cache</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <script src="{{ url_for('static', filename='mobile.js') }}"></script>
     <script src="{{ url_for('static', filename='scripts.js') }}"></script>
     <script src="/static/persistencia.js"></script>

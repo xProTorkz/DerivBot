@@ -1,1183 +1,250 @@
-/* === MEDIA QUERIES === */
+/* Estilos específicos para dispositivos móveis */
 @media (max-width: 768px) {
-  /* Barra de status */
-  .status-etapas {
-    padding: 0;
-    height: 45px;
-    margin-bottom: 0.3rem;
-    position: relative;
-    overflow: visible;
+  /* Ajustes para o cabeçalho */
+  .navbar-topo {
+    margin: 10px auto;
   }
-
-  /* Classe para esconder texto em dispositivos móveis */
-  .esconde-texto-mobile {
+  
+  .topo-superior {
+    flex-direction: row;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+  
+  .card-conta-container {
+    max-width: 150px;
+  }
+  
+  .logout-btn {
+    padding: 6px 12px;
+    font-size: 12px;
+    height: 36px;
+  }
+  
+  .logout-text {
     display: none;
   }
-
-  /* Esconde alguns elementos em mobile para economizar espaço */
-  .hide-on-mobile {
-    display: none !important;
-  }
-
-  .status-etapas > div {
-    font-size: 0.6rem;
-    gap: 0.2rem;
-  }
-
-  .status-etapas::before {
-    content: "";
-    position: absolute;
-    top: 6px !important;
-    left: 18px !important;
-    right: 18px !important;
-    height: 3px !important;
-    background-color: var(--transparente-claro) !important;
-    z-index: 1 !important;
-  }
-
-  .status-etapas::after {
-    content: "";
-    position: absolute;
-    top: 6px !important;
-    left: 18px !important;
-    height: 3px !important;
-    background-color: var(--amarelo-escuro) !important;
-    box-shadow: 0 0 5px var(--amarelo-claro) !important;
-    z-index: 2 !important;
-    transition: width 0.3s ease-in-out !important;
-  }
-
-  #status-deriv {
-    width: calc(100% - var(--espacamento-padrao));
-    margin: 6px auto;
-    font-size: 0.75rem;
-    padding: 10px 12px;
-    box-sizing: border-box;
-  }
-
-  :root {
-    --espacamento-padrao: var(--espacamento-tablet);
-  }
-
-  /* Layout */
-  .painel-central {
-    padding: var(--espacamento-padrao) 0 20px;
-  }
-
-  .painel-central > * {
-    width: calc(100% - var(--espacamento-padrao));
-  }
-
-  /* Navbar */
-  .navbar-topo {
-    width: calc(100% - var(--espacamento-padrao)) !important;
-    margin: 8px auto 12px auto !important;
-  }
-
-  /* Licença */
+  
+  /* Ajustes para a licença */
   .licenca-wrapper {
     width: 100%;
-    margin: 0;
     padding: 4px 10px;
   }
-
+  
   .licenca-mini {
-    justify-content: space-between;
-    gap: 5px;
+    gap: 8px;
+    justify-content: space-around;
   }
-
+  
   .licenca-mini-item {
-    min-width: 36px;
-    gap: 0px;
-  }
-
-  .licenca-mini-icone {
-    display: inline;
-    font-size: 0.65rem;
-  }
-
-  .licenca-mini-text,
-  .licenca-mini-valor,
-  .licenca-mini-plano {
-    font-size: 0.65rem;
-  }
-
-  .licenca-mini-text {
-    color: var(--cinza-claro);
-    margin-right: 0px;
-  }
-
-  .licenca-mini-plano {
-    padding: 1px 3px;
-  }
-
-  /* Barra de informações */
-  .info-bar {
-    width: calc(100% - var(--espacamento-padrao));
-    padding: 0 12px;
-    margin: 6px auto 12px auto;
-  }
-
-  .info-bar .saldo,
-  .info-bar .lucro {
-    min-width: auto;
-    flex: 1;
-  }
-
-  .info-bar .saldo label,
-  .info-bar .lucro label {
-    font-size: 0.6em;
-    opacity: 0.7;
-  }
-
-  #saldo-valor,
-  #lucro-valor {
-    font-size: 1.4rem !important;
-    line-height: 1.2 !important;
-    display: inline-block !important;
-    max-width: 100% !important;
-    white-space: nowrap !important;
-    overflow: visible !important;
-    text-overflow: initial !important;
-  }
-
-  #valor-saldo,
-  #lucro-meta {
-    margin: 0 !important;
-    padding: 0 !important;
-    display: flex !important;
-    align-items: center !important;
-    flex-wrap: nowrap !important;
-    overflow: visible !important;
-  }
-
-  .saldo-valor,
-  #lucro-meta {
-    white-space: nowrap !important;
-  }
-
-  #meta-valor {
-    font-size: 0.7rem !important;
-    vertical-align: middle !important;
-    display: inline-block !important;
-    position: relative !important;
-    top: -1px !important;
-  }
-
-  .rs {
-    font-size: 0.7rem !important;
-    opacity: 0.7 !important;
-    margin-right: 3px !important;
-    vertical-align: baseline !important;
-    display: inline-block !important;
-    position: relative !important;
-    top: -1px !important;
-    visibility: visible !important;
-    font-weight: normal !important;
-    color: var(--cinza-claro, #aaaaaa) !important;
-  }
-
-  .info-bar .saldo label,
-  .info-bar .lucro label {
-    font-size: 0.7rem !important;
-    opacity: 0.8 !important;
-    margin-bottom: 3px !important;
-  }
-
-  .info-bar {
-    min-height: 70px !important;
-    padding: 10px 20px !important;
-  }
-
-  /* Botão de controle */
-  #bot-control-btn {
-    width: calc(100% - var(--espacamento-padrao)) !important;
-    padding: 0 12px !important;
-    margin: 12px auto 15px auto !important;
-    font-size: 16px !important;
-  }
-
-  /* Modo e meta */
-  .modo-meta-wrapper {
-    width: calc(80% - var(--espacamento-padrao)) !important;
-    padding: 15px !important;
-    margin: 0 auto 20px auto !important;
-  }
-
-  /* Log */
-  .log-temp {
-    width: calc(100% - var(--espacamento-padrao));
-    margin: 0.3rem auto;
-    padding: 0.7rem 0.8rem;
-    font-size: 0.85rem;
-    min-height: 2.2rem;
-  }
-
-  /* Rodapé */
-  .rodape-painel {
-    width: calc(100% - var(--espacamento-padrao));
-    margin: 12px auto;
-    padding: 7px 10px;
-    font-size: 0.75rem;
-  }
-
-  .status-conexao {
-    gap: 4px;
-    font-size: 0.7rem;
-  }
-
-  /* Mostrar apenas "Deriv" */
-  .status-conexao .texto-truncado {
-    font-size: 0.7rem;
-    color: var(--cinza-claro);
-  }
-
-  .status-conexao .texto-truncado::before {
-    content: "Deriv";
-  }
-
-  /* Esconder todo o conteúdo original */
-  .status-conexao .texto-truncado span,
-  .status-conexao .texto-truncado::after {
-    display: none;
-  }
-
-  /* Esconder todo texto original */
-  .status-conexao .texto-truncado {
-    font-size: 0;
-  }
-
-  .status-conexao .texto-truncado::before {
-    font-size: 0.7rem;
-  }
-
-  .hora-data {
-    font-size: 0.7rem;
-  }
-
-  .licenca-mini-plano {
-    font-size: 0.7rem;
-    padding: 1px 3px;
-  }
-
-  /* Barra de Status - Ajuste para alinhar com outros elementos e altura intermediária */
-  #barra-status {
-    margin: 0.8rem auto 0.5rem !important;
-    padding: 0 1.5rem !important;
-    width: calc(100% - var(--espacamento-padrao)) !important;
-    max-height: 50px !important;
-    height: 50px !important;
-    overflow: visible !important;
-  }
-
-  /* Histórico */
-  .historico {
-    margin: 0.5rem auto !important;
-    padding: 1rem 1rem !important;
-  }
-
-  .linha-titulo-historico {
-    margin-bottom: 10px !important;
-    padding: 0 5px !important;
-  }
-
-  .titulo-historico {
-    font-size: 16px !important;
-  }
-
-  .icone-historico {
-    padding: 6px !important;
-  }
-
-  .acoes-esquerda,
-  .acoes-direita {
-    gap: 8px !important;
-  }
-
-  /* Tabela de histórico - Garantir que APENAS Data, Hora, Entrada e Resultado apareçam */
-  /* Primeiro, esconder TODAS as colunas */
-  #historico-tabela th,
-  #historico-tabela td {
-    display: none !important;
-  }
-
-  /* Depois, mostrar APENAS as colunas desejadas */
-  #historico-tabela td:nth-child(1),
-  #historico-tabela th:nth-child(1),
-  #historico-tabela td:nth-child(2),
-  #historico-tabela th:nth-child(2),
-  #historico-tabela td:nth-child(4),
-  #historico-tabela th:nth-child(4),
-  #historico-tabela td:nth-child(5),
-  #historico-tabela th:nth-child(5) {
-    display: table-cell !important;
-    width: 25% !important;
-  }
-
-  /* Solução definitiva para substituir completamente os títulos */
-  #historico-tabela th {
-    font-size: 0 !important;
-    color: transparent !important;
-    position: relative !important;
-    padding: 8px 4px !important;
-  }
-
-  #historico-tabela th * {
-    display: none !important;
-  }
-
-  #historico-tabela th:nth-child(1)::before {
-    content: "Data" !important;
-    position: absolute !important;
-    top: 0 !important;
-    left: 0 !important;
-    right: 0 !important;
-    bottom: 0 !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    font-size: 0.8em !important;
-    color: var(--texto-claro, #fff) !important;
-  }
-
-  #historico-tabela th:nth-child(2)::before {
-    content: "Hora" !important;
-    position: absolute !important;
-    top: 0 !important;
-    left: 0 !important;
-    right: 0 !important;
-    bottom: 0 !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    font-size: 0.8em !important;
-    color: var(--texto-claro, #fff) !important;
-  }
-
-  #historico-tabela th:nth-child(4)::before {
-    content: "Entrada" !important;
-    position: absolute !important;
-    top: 0 !important;
-    left: 0 !important;
-    right: 0 !important;
-    bottom: 0 !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    font-size: 0.8em !important;
-    color: var(--texto-claro, #fff) !important;
-  }
-
-  #historico-tabela th:nth-child(5)::before {
-    content: "Resultado" !important;
-    position: absolute !important;
-    top: 0 !important;
-    left: 0 !important;
-    right: 0 !important;
-    bottom: 0 !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    font-size: 0.8em !important;
-    color: var(--texto-claro, #fff) !important;
-  }
-
-  /* Ajustes específicos para cada coluna */
-  #historico-tabela td:nth-child(1),
-  #historico-tabela th:nth-child(1) {
-    /* Data */
-    min-width: 60px !important;
-    max-width: 80px !important;
-  }
-
-  #historico-tabela td:nth-child(2),
-  #historico-tabela th:nth-child(2) {
-    /* Hora */
-    min-width: 60px !important;
-    max-width: 80px !important;
-  }
-
-  #historico-tabela td:nth-child(4),
-  #historico-tabela th:nth-child(4) {
-    /* Entrada */
-    min-width: 60px !important;
-    max-width: 80px !important;
-  }
-
-  #historico-tabela td:nth-child(5),
-  #historico-tabela th:nth-child(5) {
-    /* Resultado */
-    min-width: 60px !important;
-    max-width: 80px !important;
-    font-weight: bold !important;
-  }
-}
-
-@media (max-width: 480px) {
-  /* Barra de status */
-  .status-etapas {
-    padding: 0;
-    height: 45px;
-    margin-bottom: 0.5rem;
-  }
-
-  .status-etapas > div {
-    font-size: 0.6rem;
-    gap: 0.2rem;
-  }
-
-  /* Licença */
-  .licenca-wrapper {
-    width: 100%;
-    margin: 0;
-    padding: 3px 8px;
-  }
-
-  .licenca-mini {
-    justify-content: space-between;
-    gap: 3px;
-  }
-
-  .licenca-mini-item {
-    min-width: 26px;
-    gap: 0px;
-  }
-
-  .licenca-mini-icone {
-    display: inline;
-    font-size: 0.55rem;
-    min-width: 10px;
-  }
-
-  .licenca-mini-text,
-  .licenca-mini-valor,
-  .licenca-mini-plano {
-    font-size: 0.55rem;
-  }
-
-  .licenca-mini-text {
-    color: var(--cinza-claro);
-    margin-right: 0px;
-  }
-
-  /* Barra de informações - manter lado a lado */
-  .info-bar {
-    margin: 4px auto 10px auto;
-    flex-direction: row !important;
-    justify-content: space-between !important;
-    min-height: 60px !important;
-    padding: 8px 15px !important;
-  }
-
-  .info-bar .saldo,
-  .info-bar .lucro {
-    width: auto !important;
-    flex: 0 0 auto !important;
-  }
-
-  /* Mantenho a altura original das bolinhas */
-  .bolinha {
-    width: 18px;
-    height: 18px;
-  }
-
-  /* Rodapé */
-  .rodape-painel {
-    width: calc(100% - var(--espacamento-padrao));
-    margin: 10px auto;
-    padding: 6px 8px;
-    font-size: 0.7rem;
-  }
-
-  .status-conexao {
-    gap: 3px;
-    font-size: 0.65rem;
-  }
-
-  /* Mostrar apenas "Deriv" */
-  .status-conexao .texto-truncado {
-    font-size: 0;
-  }
-
-  .status-conexao .texto-truncado::before {
-    content: "Deriv";
-    font-size: 0.65rem;
-  }
-
-  /* Esconder todo o conteúdo original */
-  .status-conexao .texto-truncado span,
-  .status-conexao .texto-truncado::after {
-    display: none;
-  }
-
-  .hora-data {
-    font-size: 0.65rem;
-  }
-
-  /* Histórico */
-  .historico {
-    padding: 0.8rem 0.8rem !important;
-  }
-
-  .linha-titulo-historico {
-    margin-bottom: 8px !important;
-    padding: 0 3px !important;
-  }
-
-  .titulo-historico {
-    font-size: 14px !important;
-  }
-
-  .icone-historico {
-    padding: 4px !important;
-    font-size: 0.9rem !important;
-  }
-
-  .acoes-esquerda,
-  .acoes-direita {
-    gap: 5px !important;
-  }
-
-  /* Solução definitiva para substituir completamente os títulos */
-  #historico-tabela th {
-    font-size: 0 !important;
-    color: transparent !important;
-    position: relative !important;
-    padding: 6px 3px !important;
-  }
-
-  #historico-tabela th * {
-    display: none !important;
-  }
-
-  #historico-tabela th:nth-child(1)::before {
-    content: "Data" !important;
-    position: absolute !important;
-    top: 0 !important;
-    left: 0 !important;
-    right: 0 !important;
-    bottom: 0 !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    font-size: 0.75em !important;
-    color: var(--texto-claro, #fff) !important;
-  }
-
-  #historico-tabela th:nth-child(2)::before {
-    content: "Hora" !important;
-    position: absolute !important;
-    top: 0 !important;
-    left: 0 !important;
-    right: 0 !important;
-    bottom: 0 !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    font-size: 0.75em !important;
-    color: var(--texto-claro, #fff) !important;
-  }
-
-  #historico-tabela th:nth-child(4)::before {
-    content: "Entrada" !important;
-    position: absolute !important;
-    top: 0 !important;
-    left: 0 !important;
-    right: 0 !important;
-    bottom: 0 !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    font-size: 0.75em !important;
-    color: var(--texto-claro, #fff) !important;
-  }
-
-  #historico-tabela th:nth-child(5)::before {
-    content: "Resultado" !important;
-    position: absolute !important;
-    top: 0 !important;
-    left: 0 !important;
-    right: 0 !important;
-    bottom: 0 !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    font-size: 0.75em !important;
-    color: var(--texto-claro, #fff) !important;
-  }
-
-  /* Ajustes específicos para cada coluna */
-  #historico-tabela td:nth-child(1),
-  #historico-tabela th:nth-child(1) {
-    /* Data */
-    min-width: 50px !important;
-    max-width: 70px !important;
-    font-size: 0.7em !important;
-  }
-
-  #historico-tabela td:nth-child(2),
-  #historico-tabela th:nth-child(2) {
-    /* Hora */
-    min-width: 45px !important;
-    max-width: 65px !important;
-    font-size: 0.7em !important;
-  }
-
-  #historico-tabela td:nth-child(4),
-  #historico-tabela th:nth-child(4) {
-    /* Entrada */
-    min-width: 50px !important;
-    max-width: 70px !important;
-    font-size: 0.7em !important;
-  }
-
-  #historico-tabela td:nth-child(5),
-  #historico-tabela th:nth-child(5) {
-    /* Resultado */
-    min-width: 50px !important;
-    max-width: 70px !important;
-    font-size: 0.7em !important;
-  }
-
-  /* Ajustes específicos para telas menores */
-  .info-bar {
-    min-height: 60px !important;
-    padding: 8px 15px !important;
-  }
-
-  #saldo-valor,
-  #lucro-valor {
-    font-size: 1.2rem !important;
-  }
-
-  .rs {
-    font-size: 0.6rem !important;
-  }
-
-  #meta-valor {
-    font-size: 0.6rem !important;
-  }
-
-  /* Valor longo para telas mobile */
-  .valor-longo {
-    font-size: 0.85rem !important;
-    letter-spacing: -0.7px !important;
-  }
-}
-
-@media (max-width: 320px) {
-  /* Barra de status */
-  .status-etapas {
-    height: 45px;
-    padding: 0 3px;
-    margin-bottom: 3px;
-  }
-
-  .status-etapas > div {
-    font-size: 0.55rem;
     gap: 1px;
   }
-
-  /* Licença */
-  .licenca-wrapper {
-    width: 100%;
-    margin: 0;
-    padding: 2px 4px;
-  }
-
-  .licenca-mini {
-    gap: 2px;
-  }
-
-  .licenca-mini-item {
-    min-width: 18px;
-    gap: 0px;
-  }
-
+  
   .licenca-mini-icone {
-    font-size: 0.45rem;
-    min-width: 8px;
+    font-size: 10px;
+    min-width: 12px;
   }
-
-  .licenca-mini-text,
-  .licenca-mini-valor,
-  .licenca-mini-plano {
+  
+  .licenca-mini-text {
     font-size: 0.5rem;
   }
-
-  /* Barra de informações - manter lado a lado mesmo em telas muito pequenas */
-  .info-bar {
-    margin: 2px auto 8px auto;
-    flex-direction: row !important;
-    justify-content: space-between !important;
-    min-height: 55px !important;
-    padding: 6px 12px !important;
+  
+  .licenca-mini-valor {
+    font-size: 0.5rem;
   }
-
+  
+  /* Ajustes para a barra de informações */
+  .info-bar {
+    height: auto;
+    padding: 15px 20px;
+    flex-direction: row;
+    gap: 10px;
+  }
+  
   .info-bar .saldo,
   .info-bar .lucro {
-    width: auto !important;
-    flex: 0 0 auto !important;
+    align-items: center;
+    text-align: center;
+    min-width: auto;
   }
-
-  /* Mantenho a altura original das bolinhas */
-  .bolinha {
-    width: 12px;
-    height: 12px;
-    border-width: 1px;
-  }
-
-  /* Rodapé */
-  .rodape-painel {
-    padding: 4px 6px;
-    margin: 6px auto;
-    font-size: 0.6rem;
-  }
-
-  .status-conexao {
-    gap: 2px;
-    font-size: 0.6rem;
-  }
-
-  /* Mostrar apenas "Deriv" */
-  .status-conexao .texto-truncado {
-    font-size: 0;
-  }
-
-  .status-conexao .texto-truncado::before {
-    content: "Deriv";
-    font-size: 0.6rem;
-  }
-
-  /* Esconder todo o conteúdo original */
-  .status-conexao .texto-truncado span,
-  .status-conexao .texto-truncado::after {
-    display: none;
-  }
-
-  .hora-data {
-    font-size: 0.6rem;
-  }
-
-  /* Histórico */
-  .historico {
-    padding: 0.6rem 0.6rem !important;
-  }
-
-  .linha-titulo-historico {
-    margin-bottom: 6px !important;
-    padding: 0 2px !important;
-  }
-
-  .titulo-historico {
-    font-size: 12px !important;
-  }
-
-  .icone-historico {
-    padding: 3px !important;
-    font-size: 0.8rem !important;
-  }
-
-  .acoes-esquerda,
-  .acoes-direita {
-    gap: 3px !important;
-  }
-
-  /* Solução definitiva para substituir completamente os títulos */
-  #historico-tabela th {
-    font-size: 0 !important;
-    color: transparent !important;
-    position: relative !important;
-    padding: 4px 2px !important;
-  }
-
-  #historico-tabela th * {
-    display: none !important;
-  }
-
-  #historico-tabela th:nth-child(1)::before {
-    content: "Data" !important;
-    position: absolute !important;
-    top: 0 !important;
-    left: 0 !important;
-    right: 0 !important;
-    bottom: 0 !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    font-size: 0.7em !important;
-    color: var(--texto-claro, #fff) !important;
-  }
-
-  #historico-tabela th:nth-child(2)::before {
-    content: "Hora" !important;
-    position: absolute !important;
-    top: 0 !important;
-    left: 0 !important;
-    right: 0 !important;
-    bottom: 0 !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    font-size: 0.7em !important;
-    color: var(--texto-claro, #fff) !important;
-  }
-
-  #historico-tabela th:nth-child(4)::before {
-    content: "Entrada" !important;
-    position: absolute !important;
-    top: 0 !important;
-    left: 0 !important;
-    right: 0 !important;
-    bottom: 0 !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    font-size: 0.7em !important;
-    color: var(--texto-claro, #fff) !important;
-  }
-
-  #historico-tabela th:nth-child(5)::before {
-    content: "Resultado" !important;
-    position: absolute !important;
-    top: 0 !important;
-    left: 0 !important;
-    right: 0 !important;
-    bottom: 0 !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    font-size: 0.7em !important;
-    color: var(--texto-claro, #fff) !important;
-  }
-
-  /* Ajustes específicos para cada coluna */
-  #historico-tabela td:nth-child(1),
-  #historico-tabela th:nth-child(1) {
-    /* Data */
-    min-width: 35px !important;
-    max-width: 50px !important;
-    font-size: 0.65em !important;
-  }
-
-  #historico-tabela td:nth-child(2),
-  #historico-tabela th:nth-child(2) {
-    /* Hora */
-    min-width: 35px !important;
-    max-width: 45px !important;
-    font-size: 0.65em !important;
-  }
-
-  #historico-tabela td:nth-child(4),
-  #historico-tabela th:nth-child(4) {
-    /* Entrada */
-    min-width: 35px !important;
-    max-width: 50px !important;
-    font-size: 0.65em !important;
-  }
-
-  #historico-tabela td:nth-child(5),
-  #historico-tabela th:nth-child(5) {
-    /* Resultado */
-    min-width: 35px !important;
-    max-width: 50px !important;
-    font-size: 0.65em !important;
-  }
-
-  /* Ajustes específicos para telas muito pequenas */
-  .info-bar {
-    min-height: 55px !important;
-    padding: 6px 12px !important;
-  }
-
+  
   #saldo-valor,
   #lucro-valor {
-    font-size: 1.1rem !important;
+    font-size: 1.4em;
   }
-
-  .rs {
-    font-size: 0.5rem !important;
+  
+  /* Ajustes para o controle do robô */
+  .modo-meta-wrapper {
+    width: 80%;
+    padding: 15px 20px;
   }
-
-  #meta-valor {
-    font-size: 0.55rem !important;
+  
+  #bot-control-btn {
+    height: 50px;
+    font-size: 18px;
   }
+  
+  /* Ajustes para o log */
+  .log-temp {
+    padding: 0.8rem 1rem;
+    font-size: 0.8rem;
+  }
+  
+  /* Ajustes para a barra de status */
+  #barra-status {
+    padding: 0.6rem 1rem;
+  }
+  
+  .status-etapas > div span {
+    font-size: 0.65rem;
+  }
+  
+  .bolinha {
+    width: 16px;
+    height: 16px;
+  }
+  
+  /* Ajustes para o histórico */
+  .historico {
+    padding: 1rem 1.2rem;
+  }
+  
+  .titulo-historico {
+    font-size: 1rem;
+  }
+  
+  .icone-historico {
+    font-size: 1.1rem;
+  }
+  
+  #historico-tabela {
+    font-size: 0.75rem;
+  }
+  
+  #historico-tabela th,
+  #historico-tabela td {
+    padding: 0.5rem 0.6rem;
+  }
+  
+  /* Ajustes para o rodapé */
+  .rodape-painel {
+    padding: 0.6rem 1rem;
+    font-size: 0.7rem;
+  }
+}
 
-  /* Valor longo para telas mobile */
+/* Ajustes para telas muito pequenas */
+@media (max-width: 480px) {
+  .info-bar {
+    padding: 8px 10px;
+  }
+  
+  #saldo-valor,
+  #lucro-valor {
+    font-size: 1.2em;
+  }
+  
+  .modo-meta-wrapper {
+    width: 90%;
+    padding: 12px 15px;
+  }
+  
+  .modo-select,
+  .input-meta {
+    font-size: 13px;
+    height: 30px;
+  }
+  
+  #bot-control-btn {
+    height: 45px;
+    font-size: 16px;
+  }
+  
+  .log-temp {
+    padding: 0.6rem 0.8rem;
+    font-size: 0.7rem;
+  }
+  
+  #barra-status {
+    padding: 0.5rem 0.8rem;
+  }
+  
+  .status-etapas > div span {
+    font-size: 0.6rem;
+  }
+  
+  .bolinha {
+    width: 14px;
+    height: 14px;
+  }
+  
+  .historico {
+    padding: 0.8rem 1rem;
+  }
+  
+  .titulo-historico {
+    font-size: 0.9rem;
+  }
+  
+  .icone-historico {
+    font-size: 1rem;
+  }
+  
+  #historico-tabela {
+    font-size: 0.7rem;
+  }
+  
+  #historico-tabela th,
+  #historico-tabela td {
+    padding: 0.4rem 0.5rem;
+  }
+  
+  .rodape-painel {
+    padding: 0.5rem 0.8rem;
+    font-size: 0.65rem;
+  }
+  
+  /* Ocultar colunas menos importantes em telas muito pequenas */
+  .hide-on-mobile {
+    display: none;
+  }
+  
+  /* Ajustes para valores longos */
   .valor-longo {
-    font-size: 0.75rem !important;
-    letter-spacing: -1px !important;
+    font-size: 1rem !important;
   }
 }
 
-/* Estilos adicionais para mobile.js */
-.destaque-mobile {
-  animation: pulseMobile 1.5s ease-in-out;
+/* Estilos para valores e animações */
+#saldo-valor::after {
+  content: " USD";
+  display: inline-block;
+  visibility: visible;
+  opacity: 0.7;
+  font-weight: normal;
+  color: #aaaaaa;
+  margin-left: 15px;
+  font-size: 1rem;
 }
 
-@keyframes pulseMobile {
+#meta-valor {
+  margin-left: 3px !important;
+  letter-spacing: 1px !important;
+}
+
+.destaque-mobile {
+  animation: pulse 1.5s ease-in-out;
+}
+
+@keyframes pulse {
   0% {
     transform: scale(1);
-    opacity: 1;
   }
   50% {
-    transform: scale(1.15);
-    opacity: 0.7;
-    text-shadow: 0 0 10px rgba(255, 255, 255, 0.8);
+    transform: scale(1.05);
+    color: var(--verde-claro);
   }
   100% {
     transform: scale(1);
-    opacity: 1;
   }
-}
-
-/* === CLASSE MOBILE-DEVICE === */
-body.mobile-device {
-  touch-action: manipulation; /* Melhora o desempenho de toque */
-  -webkit-tap-highlight-color: transparent; /* Remove destaque de toque */
-  user-select: none; /* Evita seleção de texto indesejada */
-}
-
-body.mobile-device .card-conta {
-  max-width: 140px;
-}
-
-body.mobile-device .tipo-conta {
-  max-width: 80px;
-}
-
-body.mobile-device .logout-text {
-  font-size: 0.8rem;
-}
-
-body.mobile-device .bolinha {
-  width: 12px;
-  height: 12px;
-  border-width: 1px;
-}
-
-/* Solução para tela grande (desktop) - Garantir que apenas Data, Hora, Entrada e Resultado apareçam */
-/* Primeiro, esconder TODAS as colunas */
-#historico-tabela th,
-#historico-tabela td {
-  display: none !important;
-}
-
-/* Depois, mostrar APENAS as colunas desejadas */
-#historico-tabela td:nth-child(1),
-#historico-tabela th:nth-child(1),
-#historico-tabela td:nth-child(2),
-#historico-tabela th:nth-child(2),
-#historico-tabela td:nth-child(4),
-#historico-tabela th:nth-child(4),
-#historico-tabela td:nth-child(5),
-#historico-tabela th:nth-child(5) {
-  display: table-cell !important;
-  width: 25% !important;
-}
-
-/* Solução definitiva para substituir completamente os títulos */
-#historico-tabela th {
-  font-size: 0 !important;
-  color: transparent !important;
-  position: relative !important;
-  padding: 10px 6px !important;
-}
-
-#historico-tabela th * {
-  display: none !important;
-}
-
-#historico-tabela th:nth-child(1)::before {
-  content: "Data" !important;
-  position: absolute !important;
-  top: 0 !important;
-  left: 0 !important;
-  right: 0 !important;
-  bottom: 0 !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  font-size: 0.9em !important;
-  color: var(--texto-claro, #fff) !important;
-}
-
-#historico-tabela th:nth-child(2)::before {
-  content: "Hora" !important;
-  position: absolute !important;
-  top: 0 !important;
-  left: 0 !important;
-  right: 0 !important;
-  bottom: 0 !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  font-size: 0.9em !important;
-  color: var(--texto-claro, #fff) !important;
-}
-
-#historico-tabela th:nth-child(4)::before {
-  content: "Entrada" !important;
-  position: absolute !important;
-  top: 0 !important;
-  left: 0 !important;
-  right: 0 !important;
-  bottom: 0 !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  font-size: 0.9em !important;
-  color: var(--texto-claro, #fff) !important;
-}
-
-#historico-tabela th:nth-child(5)::before {
-  content: "Resultado" !important;
-  position: absolute !important;
-  top: 0 !important;
-  left: 0 !important;
-  right: 0 !important;
-  bottom: 0 !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  font-size: 0.9em !important;
-  color: var(--texto-claro, #fff) !important;
-}
-
-/* Ajustes para células de dados */
-#historico-tabela td:nth-child(1) {
-  /* Data */
-  min-width: 80px !important;
-  max-width: 120px !important;
-  font-size: 0.9em !important;
-}
-
-#historico-tabela td:nth-child(2) {
-  /* Hora */
-  min-width: 80px !important;
-  max-width: 120px !important;
-  font-size: 0.9em !important;
-}
-
-#historico-tabela td:nth-child(4) {
-  /* Entrada */
-  min-width: 80px !important;
-  max-width: 120px !important;
-  font-size: 0.9em !important;
-}
-
-#historico-tabela td:nth-child(5) {
-  /* Resultado */
-  min-width: 80px !important;
-  max-width: 120px !important;
-  font-size: 0.9em !important;
-  font-weight: bold !important;
-}
-
-/* === RESPONSIVIDADE PARA DISPOSITIVOS MÓVEIS === */
-@media screen and (max-width: 768px) {
-  /* Ajustes para fontes e paddings */
-  body {
-    font-size: 14px;
-  }
-
-  /* Ajustes para o campo de lucro */
-  #lucro-valor {
-    font-family: inherit !important; /* Força a manter a fonte herdada */
-    font-weight: bold !important;
-  }
-
-  /* Card de informações - CORRIGIDO: manter lado a lado */
-  .info-bar {
-    flex-direction: row !important; /* Forçar layout horizontal */
-    justify-content: space-between !important;
-    gap: 10px;
-    align-items: center;
-    padding: 10px 15px;
-  }
-
-  .info-bar .saldo,
-  .info-bar .lucro {
-    align-items: flex-start !important; /* Saldo alinhado à esquerda */
-    text-align: left !important;
-    min-width: unset;
-    width: auto !important;
-  }
-
-  .info-bar .lucro {
-    align-items: flex-end !important; /* Lucro alinhado à direita */
-    text-align: right !important;
-  }
-
-  /* Tabela de histórico */
-  .tabela-wrapper {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    padding: 0 5px;
-  }
-
-  #historico-tabela {
-    min-width: 100%;
-    font-size: 12px;
-  }
-
-  #historico-tabela th,
-  #historico-tabela td {
-    padding: 8px 5px;
-  }
-
-  /* Melhorias para o gráfico */
-  #grafico-tradingview {
-    height: 300px;
-  }
-
-  /* Botão de controle do robô */
-  #bot-control-btn {
-    width: 90%;
-    font-size: 16px;
-    height: 50px;
-  }
-
-  /* Ajustes para a meta */
-  .modo-meta-wrapper {
-    width: 90%;
-    max-width: none;
-  }
-}
-
-/* === RESPONSIVIDADE PARA TELAS GRANDES === */
-@media screen and (min-width: 1200px) {
-  .painel-central {
-    max-width: 1000px;
-  }
-
-  .info-bar {
-    padding: 20px 40px;
-  }
-
-  #historico-tabela {
-    font-size: 16px;
-  }
-
-  #grafico-tradingview {
-    height: 500px;
-  }
-
-  /* Ajustes para o campo de lucro em telas grandes */
-  #saldo-valor,
-  #lucro-valor {
-    font-size: 2em;
-  }
-
-  /* Garantir que o lucro não tenha problemas de fonte em telas grandes também */
-  #lucro-valor {
-    font-family: inherit !important;
-    font-weight: bold !important;
-  }
-}
-
-/* Valor longo para telas mobile */
-.valor-longo {
-  font-size: 0.95rem !important;
-  letter-spacing: -0.5px !important;
 }

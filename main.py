@@ -1,728 +1,1177 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# main.py - Versão completa com integração ao painel e API JS + controle de lucro/meta/histórico
-from flask import (
-    Flask,
-    render_template,
-    request,
-    jsonify,
-    session,
-    redirect,
-    url_for,
-    flash,
-    send_from_directory,
-)
-from app import App
-import config
-import os
-from datetime import datetime, timedelta
-import json
-from dotenv import load_dotenv
-from motor import Motor
-import admin  # Importa o módulo de administração
-import sys
-import uuid
-import string
-import re
-import requests
-import traceback
-import time
-import logging
+"""
+Arquivo principal do DerivBot - Versão Enxuta
+Responsável por inicializar o servidor Flask e gerenciar as rotas principais
+"""
 
+import os
+import json
+import logging
+import secrets
+
+from datetime import datetime, timedelta
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify
+from dotenv import load_dotenv
+
+# Importações locais
+from utils.motor import DerivAPI
+from src.core.motor import Motor
+from utils.endpoints_estado import EstadoAPI
+from src.utils.gerador_licencas import (
+    carregar_licencas,
+    salvar_licencas,
+    validar_dispositivo,
+    vincular_dispositivo,
+    obter_hwid,
+    obter_ip,
+)
+
+# Carrega variáveis de ambiente
 load_dotenv()
 
-ADMIN_EMAIL = os.getenv("ADMIN_EMAIL")
-ADMIN_TOKEN = os.getenv("ADMIN_TOKEN")
-ADMIN_TOKEN_DEMO = os.getenv("ADMIN_TOKEN_DEMO")
-ADMIN_TOKEN_REAL = os.getenv("ADMIN_TOKEN_REAL")
-ADMIN_DERIV_DEMO = os.getenv("ADMIN_DERIV_DEMO")
-ADMIN_DERIV_REAL = os.getenv("ADMIN_DERIV_REAL")
+# Configuração de logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.FileHandler("derivbot.log"), logging.StreamHandler()],
+)
+logger = logging.getLogger("DerivBot")
 
-app = Flask(__name__, template_folder="templates")
-# Gera chave secreta estática (para persistir cookies entre reinícios) ou lê do .env
-app.secret_key = os.getenv("FLASK_SECRET_KEY", "minha_chave_flask_super_secreta")
+# Diretório para armazenamento de dados
+DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+os.makedirs(DATA_DIR, exist_ok=True)
 
-# Registra o tempo de início da aplicação para cálculo de uptime
-app.start_time = time.time()
+# Arquivo para armazenamento de licenças
+LICENCAS_FILE = os.path.join(DATA_DIR, "licencas.json")
+
+# Garante que o arquivo de licenças existe
+if not os.path.exists(LICENCAS_FILE):
+    try:
+        with open(LICENCAS_FILE, "w", encoding="utf-8") as f:
+            json.dump({}, f, indent=2, ensure_ascii=False)
+        logger.info("Arquivo de licenças criado com sucesso")
+    except Exception as e:
+        logger.error(f"Erro ao criar arquivo de licenças: {e}")
+
+# Inicialização do Flask
+app = Flask(__name__)
+app.secret_key = os.getenv("SECRET_KEY", secrets.token_hex(16))
+app.config["SESSION_TYPE"] = "filesystem"
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=7)
+app.config["SESSION_FILE_DIR"] = os.path.join(DATA_DIR, "flask_session")
+app.config["SESSION_PERMANENT"] = True
+
+# Garante que o diretório de sessão existe
+os.makedirs(app.config["SESSION_FILE_DIR"], exist_ok=True)
+
+# Inicialização das APIs
+estado_api = EstadoAPI()
+deriv_api = None
+motor = None
+
+# Variáveis globais
+robo_ativo = False
+modo_operacao = "iniciante"
+meta_diaria = 100.0  # Meta padrão alterada para 100
+historico_operacoes = []
+lucro_atual = 0.0
+saldo_atual = 0.0
+ultima_mensagem = "Robô pronto para iniciar."
+contador_operacoes = 0
+status_operacao = "parado"
+
+# Sistema de autenticação baseado apenas em licencas.json
+# Não criamos mais tokens.json - tudo é gerenciado via licenças
 
 
-# Rota para servir arquivos da pasta img
-@app.route("/img/<path:filename>")
-def serve_image(filename):
-    return send_from_directory(os.path.join(os.getcwd(), "img"), filename)
+def verificar_token(token):
+    """Verifica se o token é válido"""
+    if not token:
+        return False, "Token não fornecido"
+
+    try:
+        # Carrega as licenças para obter dados corretos da conta
+        licencas = carregar_licencas()
+        conta_id = None
+        tipo_conta = None
+        saldo = None
+
+        # Procura o token nas licenças para obter dados corretos
+        for licenca in licencas.values():
+            if licenca.get("token_deriv_real") == token:
+                conta_id = licenca.get("deriv_real")
+                tipo_conta = "real"
+                # Tenta obter saldo real da API
+                api_temp = DerivAPI(token)
+                if api_temp.conectado:
+                    resultado_saldo = api_temp.obter_saldo()
+                    if resultado_saldo.get("status") == "ok":
+                        saldo = resultado_saldo["saldo"]
+                    else:
+                        saldo = 0.0  # Saldo padrão se não conseguir obter
+                else:
+                    saldo = 0.0
+                break
+            elif licenca.get("token_deriv_demo") == token:
+                conta_id = licenca.get("deriv_demo")
+                tipo_conta = "demo"
+                # Tenta obter saldo real da API
+                api_temp = DerivAPI(token)
+                if api_temp.conectado:
+                    resultado_saldo = api_temp.obter_saldo()
+                    if resultado_saldo.get("status") == "ok":
+                        saldo = resultado_saldo["saldo"]
+                    else:
+                        saldo = 10000.0  # Saldo padrão demo se não conseguir obter
+                else:
+                    saldo = 10000.0
+                break
+
+        # Se não encontrou nas licenças, usa verificação padrão
+        if not conta_id:
+            api_temp = DerivAPI(token)
+            resultado = api_temp.verificar_token()
+            if resultado.get("status") == "ok":
+                return True, resultado
+            else:
+                return False, resultado.get("mensagem", "Token inválido")
+
+        # Retorna dados da licença
+        return True, {
+            "status": "ok",
+            "conta_id": conta_id,
+            "conta_nome": "Usuário",
+            "conta_tipo": tipo_conta,
+            "saldo": saldo,
+        }
+
+    except Exception as e:
+        logger.error(f"Erro ao verificar token: {e}")
+        return False, str(e)
 
 
-trading_app = App()
-meta_diaria = config.TAKE_PROFIT
+def inicializar_api(token):
+    """Inicializa a API e o Motor com o token fornecido"""
+    global deriv_api, motor
+    try:
+        # Inicializa a API simples
+        deriv_api = DerivAPI(token)
+
+        # Inicializa o motor (mesmo se der erro, continua)
+        try:
+            motor = Motor()
+            motor.conectar(token)
+            logger.info("Motor inicializado com sucesso")
+        except Exception as motor_error:
+            logger.warning(f"Erro ao inicializar motor: {motor_error}")
+            # Cria motor básico mesmo com erro
+            motor = Motor()
+            motor.token = token
+            motor.conectado = True  # Marca como conectado em modo básico
+            motor.rodando = False  # Inicialmente parado
+            logger.info("Motor criado em modo básico")
+
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao inicializar API: {e}")
+        return False
 
 
+def verificar_autenticacao_automatica():
+    """Verifica se o usuário pode fazer login automático baseado em HWID, IP e licença ativa"""
+    try:
+        hwid_atual = obter_hwid()
+        ip_atual = obter_ip()
+
+        logger.info(
+            f"Verificando autenticação automática - HWID: {hwid_atual}, IP: {ip_atual}"
+        )
+
+        licencas = carregar_licencas()
+
+        for _, licenca in licencas.items():
+            # Verifica se a licença está ativa
+            if licenca.get("status") != "ativa":
+                continue
+
+            # Verifica se a licença não expirou
+            validade = licenca.get("validade")
+            if validade != "VITALÍCIO":
+                try:
+                    data_validade = datetime.strptime(validade, "%Y-%m-%d")
+                    if datetime.now() > data_validade:
+                        continue
+                except:
+                    continue
+
+            # Conta quantos fatores conferem
+            fatores_conferidos = 0
+
+            # Fator 1: HWID
+            if hwid_atual and hwid_atual in licenca.get("hwids", []):
+                fatores_conferidos += 1
+                logger.info("HWID confere")
+
+            # Fator 2: IP
+            if ip_atual and ip_atual in licenca.get("ips", []):
+                fatores_conferidos += 1
+                logger.info("IP confere")
+
+            # Fator 3: Licença ativa (sempre confere se chegou até aqui)
+            fatores_conferidos += 1
+            logger.info("Licença ativa confere")
+
+            # Se pelo menos 2 dos 3 fatores conferem, permite login automático
+            if fatores_conferidos >= 2:
+                logger.info(
+                    f"Autenticação automática aprovada para licença {licenca.get('codigo_licenca')}"
+                )
+                return licenca
+
+        logger.info("Nenhuma licença válida encontrada para autenticação automática")
+        return None
+
+    except Exception as e:
+        logger.error(f"Erro na verificação de autenticação automática: {e}")
+        return None
+
+
+def obter_tokens_da_licenca(licenca):
+    """Obtém os tokens da licença"""
+    token_real = licenca.get("token_deriv_real")
+    token_demo = licenca.get("token_deriv_demo")
+    return token_real, token_demo
+
+
+def salvar_historico():
+    """Salva o histórico de operações"""
+    try:
+        with open(os.path.join(DATA_DIR, "historico.json"), "w", encoding="utf-8") as f:
+            json.dump(historico_operacoes, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        logger.error(f"Erro ao salvar histórico: {e}")
+
+
+def carregar_historico():
+    """Carrega o histórico de operações"""
+    global historico_operacoes
+    try:
+        if os.path.exists(os.path.join(DATA_DIR, "historico.json")):
+            with open(
+                os.path.join(DATA_DIR, "historico.json"), "r", encoding="utf-8"
+            ) as f:
+                historico_operacoes = json.load(f)
+    except Exception as e:
+        logger.error(f"Erro ao carregar histórico: {e}")
+        historico_operacoes = []
+
+
+def adicionar_operacao(tipo, valor, resultado):
+    """Adiciona uma operação ao histórico"""
+    global historico_operacoes, contador_operacoes
+
+    agora = datetime.now()
+    operacao = {
+        "data": agora.strftime("%d/%m/%Y"),
+        "hora": agora.strftime("%H:%M:%S"),
+        "timestamp": agora.timestamp(),
+        "tipo": tipo,
+        "valor": valor,
+        "resultado_real": resultado,
+    }
+
+    historico_operacoes.append(operacao)
+    contador_operacoes += 1
+    salvar_historico()
+
+
+# Rotas do Flask
 @app.route("/")
+def index():
+    """Rota principal - Login"""
+    # Verifica se já está logado
+    if "token" in session:
+        return redirect(url_for("painel"))
+
+    # Tenta autenticação automática
+    licenca_auto = verificar_autenticacao_automatica()
+    if licenca_auto:
+        logger.info("Realizando login automático...")
+
+        # Obtém os tokens da licença
+        token_real, token_demo = obter_tokens_da_licenca(licenca_auto)
+
+        # Prioriza token real se disponível
+        if token_real:
+            token_principal = token_real
+            tipo_conta_preferido = "real"
+        elif token_demo:
+            token_principal = token_demo
+            tipo_conta_preferido = "demo"
+        else:
+            token_principal = None
+
+        if token_principal:
+            # Verifica se o token ainda é válido
+            valido, resultado = verificar_token(token_principal)
+
+            if valido:
+                # Configura a sessão automaticamente
+                session.permanent = True
+                session["codigo_licenca"] = licenca_auto.get("codigo_licenca")
+                session["token"] = token_principal
+
+                # Usa o tipo de conta baseado no token escolhido
+                session["tipo_conta"] = tipo_conta_preferido
+
+                # Salva os tokens na sessão
+                if token_real:
+                    session["token_real"] = token_real
+                if token_demo:
+                    session["token_demo"] = token_demo
+
+                # Usa o ID da conta da licença se disponível
+                if tipo_conta_preferido == "real" and licenca_auto.get("deriv_real"):
+                    session["deriv_account"] = licenca_auto["deriv_real"]
+                elif tipo_conta_preferido == "demo" and licenca_auto.get("deriv_demo"):
+                    session["deriv_account"] = licenca_auto["deriv_demo"]
+                else:
+                    session["deriv_account"] = resultado.get("conta_id", "")
+
+                session["saldo"] = resultado.get("saldo", 0)
+
+                # Inicializa a API
+                inicializar_api(token_principal)
+
+                logger.info("Login automático realizado com sucesso")
+                return redirect(url_for("painel"))
+            else:
+                logger.warning(
+                    "Token da licença inválido, redirecionando para login manual"
+                )
+        else:
+            logger.warning(
+                "Nenhum token encontrado na licença, redirecionando para login manual"
+            )
+
+    return render_template("login.html")
+
+
+@app.route("/login", methods=["POST"])
+def login():
+    """Rota de login"""
+    token_real = request.form.get("token_deriv_real")
+    token_demo = request.form.get("token_deriv_demo")
+    codigo_licenca = request.form.get("codigo_licenca")
+
+    logger.info(f"Tentativa de login - Código: {codigo_licenca}")
+
+    # Verifica se pelo menos um token foi fornecido
+    if not token_real and not token_demo:
+        return render_template(
+            "login.html", erro="Pelo menos um token deve ser fornecido"
+        )
+
+    # Determina qual token usar e o tipo de conta
+    if token_real:
+        token_principal = token_real
+        tipo_conta_escolhido = "real"
+    else:
+        token_principal = token_demo
+        tipo_conta_escolhido = "demo"
+
+    # Verifica se o token é válido
+    valido, resultado = verificar_token(token_principal)
+
+    if valido:
+        # Carrega a licença
+        licencas = carregar_licencas()
+        licenca = None
+
+        # Procura a licença pelo código
+        for l in licencas.values():
+            if l.get("codigo_licenca") == codigo_licenca:
+                licenca = l
+                logger.info(
+                    f"Licença encontrada: {json.dumps(licenca, indent=2, ensure_ascii=False)}"
+                )
+                break
+
+        if not licenca:
+            logger.warning(f"Licença não encontrada para o código: {codigo_licenca}")
+            return render_template("login.html", erro="Licença não encontrada")
+
+        # Se é primeiro acesso, vincula o dispositivo
+        if not licenca.get("hwids") and not licenca.get("ips"):
+            logger.info("Primeiro acesso - Vinculando dispositivo")
+            licenca = vincular_dispositivo(licenca)
+
+            # Salva os tokens na licença se fornecidos
+            if token_real:
+                licenca["token_deriv_real"] = token_real
+            if token_demo:
+                licenca["token_deriv_demo"] = token_demo
+
+            # Atualiza o arquivo de licenças
+            for key, lic in licencas.items():
+                if lic.get("codigo_licenca") == codigo_licenca:
+                    licencas[key] = licenca
+                    break
+            salvar_licencas(licencas)
+        else:
+            # Verifica se o dispositivo está autorizado
+            if not validar_dispositivo(licenca):
+                logger.warning("Dispositivo não autorizado")
+                return render_template(
+                    "login.html", erro="Dispositivo não autorizado. Compre uma licença."
+                )
+
+        # Marca a sessão como permanente
+        session.permanent = True
+
+        # Salva o código da licença na sessão
+        session["codigo_licenca"] = codigo_licenca
+
+        # Salva o token principal na sessão
+        session["token"] = token_principal
+
+        # Usa o tipo de conta baseado no token fornecido
+        session["tipo_conta"] = tipo_conta_escolhido
+
+        # Salva os tokens na sessão e arquivo
+        if token_real:
+            session["token_real"] = token_real
+        if token_demo:
+            session["token_demo"] = token_demo
+
+        # Verifica se há tokens salvos na licença
+        if licenca.get("token_deriv_real") and not token_real:
+            session["token_real"] = licenca["token_deriv_real"]
+        if licenca.get("token_deriv_demo") and not token_demo:
+            session["token_demo"] = licenca["token_deriv_demo"]
+
+        # Usa o ID da conta da licença se disponível
+        if tipo_conta_escolhido == "real" and licenca.get("deriv_real"):
+            session["deriv_account"] = licenca["deriv_real"]
+        elif tipo_conta_escolhido == "demo" and licenca.get("deriv_demo"):
+            session["deriv_account"] = licenca["deriv_demo"]
+        else:
+            session["deriv_account"] = resultado.get("conta_id", "")
+
+        session["saldo"] = resultado.get("saldo", 0)
+
+        # Inicializa a API com o token principal
+        inicializar_api(token_principal)
+
+        # Redireciona para o painel
+        return redirect(url_for("painel"))
+    else:
+        # Exibe mensagem de erro
+        return render_template("login.html", erro=f"Token inválido: {resultado}")
+
+
+@app.route("/painel")
 def painel():
-    if "email" not in session:
-        return redirect(url_for("login"))
+    """Rota do painel"""
+    if "token" not in session:
+        return redirect(url_for("index"))
 
-    # Código de depuração
-    print("DEBUG - Carregando página do painel")
-    print(f"DEBUG - Email: {session.get('email')}")
-    print(f"DEBUG - Código de licença da sessão: {session.get('codigo_licenca')}")
-    print(f"DEBUG - Plano: {session.get('plano')}")
+    # Carrega o histórico
+    carregar_historico()
 
-    # Recupera o token salvo na sessão
-    token = session.get("token")
+    # Carrega a licença
+    licencas = carregar_licencas()
+    licenca = None
+    codigo_licenca = session.get("codigo_licenca")
 
-    # Conecta o motor global da aplicação se ainda não estiver conectado ou se o token mudou
-    if token and (not trading_app.motor.conectado or trading_app.motor.token != token):
-        # Garante que qualquer conexão anterior seja encerrada
-        trading_app.motor.desconectar()
-        trading_app.motor.conectar(token)
+    # Procura a licença pelo código
+    if codigo_licenca:
+        for l in licencas.values():
+            if l.get("codigo_licenca") == codigo_licenca:
+                licenca = l
+                break
 
-    # Obter informações da licença da sessão
-    codigo_licenca = session.get("codigo_licenca", "")
-    plano = session.get("plano", "free")
+    # Prepara dados para o template
+    tipo_conta = session.get("tipo_conta", "demo")
+    saldo = session.get("saldo", 0)
+
+    # Informações da licença
+    if licenca:
+        codigo_licenca = licenca.get("codigo_licenca")
+        plano = licenca.get("plano", "free")
+        validade = licenca.get("validade", "N/A")
+    else:
+        codigo_licenca = "N/A"
+        plano = "free"
+        validade = "N/A"
 
     return render_template(
         "painel.html",
-        email=session.get("email", "demo@deriv.com"),
-        tipo_conta=session.get("tipo_conta", "demo"),
-        validade=session.get("validade", "N/A"),
-        saldo=trading_app.motor.obter_saldo(),
-        moeda="USD",
-        historico=trading_app.obter_historico(),
+        tipo_conta=tipo_conta,
+        saldo=saldo,
         codigo_licenca=codigo_licenca,
         plano=plano,
+        validade=validade,
+        historico=historico_operacoes[-10:] if historico_operacoes else [],
     )
 
 
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    if request.method == "POST":
-        email = request.form.get("email")
-        senha = request.form.get("senha")
-
-        # Aqui você implementaria a validação real
-        if email and senha:
-            session["email"] = email
-            session["tipo_conta"] = "demo"  # ou "real"
-            session["validade"] = "2025-12-31"
-            return redirect(url_for("painel"))
-
-    return render_template("login.html")
-
-
-@app.route("/login_token", methods=["GET", "POST"])
-def login_token():
-    ip = request.remote_addr
-    hwid = get_hwid()
-    licenca = buscar_licenca_por_ip_ou_hwid(ip, hwid)
-
-    if licenca:
-        # Sessão automática
-        session["email"] = licenca["email"]
-        session["token"] = licenca["token"]
-        session["tipo_conta"] = licenca.get("tipo_conta", "demo")
-        session["deriv_account"] = licenca.get("deriv_account", "")
-        return redirect("/")
-
-    if request.method == "POST":
-        token = request.form.get("token")
-        licencas = carregar_licencas()
-        for key, lic in licencas.items():
-            if lic["token"] == token:
-                # Atualiza IP/HWID na licença
-                if ip not in lic.get("ips", []):
-                    lic.setdefault("ips", []).append(ip)
-                if hwid not in lic.get("hwids", []):
-                    lic.setdefault("hwids", []).append(hwid)
-                with open("data/licencas.json", "w", encoding="utf-8") as f:
-                    json.dump(licencas, f, indent=2, ensure_ascii=False)
-                # Sessão
-                session["email"] = lic["email"]
-                session["token"] = lic["token"]
-                session["tipo_conta"] = lic.get("tipo_conta", "demo")
-                session["deriv_account"] = lic.get("deriv_account", "")
-                return redirect("/")
-        # Token inválido
-        return render_template("login.html", erro="Token inválido ou não licenciado.")
-
-    return render_template("login.html")
+@app.route("/logout")
+def logout():
+    """Rota para logout"""
+    session.clear()
+    return redirect(url_for("index"))
 
 
 @app.route("/toggle_bot", methods=["POST"])
 def toggle_bot():
-    global meta_diaria
-    dados = request.get_json()
-    modo = dados.get("modo", "iniciante")
-    meta = float(dados.get("meta", config.TAKE_PROFIT))
-    meta_diaria = meta
+    """Rota para iniciar/parar o robô com sistema inteligente"""
+    if "token" not in session:
+        return jsonify({"status": "erro", "mensagem": "Não autenticado"}), 401
 
-    # Obtém token da sessão para uso no robô
-    token = session.get("token")
+    try:
+        data = request.get_json()
+        modo = data.get("modo", "iniciante")
 
-    if trading_app.rodando:
-        trading_app.parar()
-        return jsonify({"status": "parado"})
-    else:
-        if trading_app.iniciar(token, modo, meta):
-            return jsonify({"status": "iniciado", "modo": modo, "meta": meta})
-        return jsonify({"status": "erro", "mensagem": "Falha ao iniciar robô"})
+        # Configurações por modo (sincronizado com catalogador.py)
+        config_modos = {
+            "iniciante": {"meta_padrao": 20.0, "meta_maxima": 20.0},
+            "conservador": {"meta_padrao": 50.0, "meta_maxima": 50.0},
+            "agressivo": {"meta_padrao": 100.0, "meta_maxima": None},  # Ilimitado
+        }
+
+        config_modo = config_modos.get(modo, config_modos["iniciante"])
+        meta_solicitada = float(data.get("meta", config_modo["meta_padrao"]))
+
+        # Valida a meta baseada no modo
+        meta_maxima = config_modo["meta_maxima"]
+        if meta_maxima is not None and meta_solicitada > meta_maxima:
+            return (
+                jsonify(
+                    {
+                        "status": "erro",
+                        "mensagem": f"Meta excede o limite do modo {modo.upper()} (máximo: ${meta_maxima:.0f})",
+                    }
+                ),
+                400,
+            )
+
+        meta = meta_solicitada
+
+        global robo_ativo, modo_operacao, meta_diaria, status_operacao
+
+        if robo_ativo:
+            # Verifica proteção antes de parar
+            if deriv_api:
+                protecao = deriv_api.verificar_protecao_parada()
+
+                if not protecao.get("pode_parar", True):
+                    return jsonify(
+                        {
+                            "status": "aguardando",
+                            "mensagem": f"Aguardando operações: {protecao['razao']}",
+                            "tempo_espera": protecao.get("tempo_espera", 30),
+                        }
+                    )
+
+            # Para o robô
+            robo_ativo = False
+            status_operacao = "parado"
+
+            # Para o motor também
+            if motor:
+                motor.parar()
+            return jsonify(
+                {"status": "parado", "mensagem": "Robô parado com segurança"}
+            )
+        else:
+            # Verifica se a API está conectada
+            if not deriv_api or not deriv_api.conectado:
+                return (
+                    jsonify(
+                        {
+                            "status": "erro",
+                            "mensagem": "API não conectada. Verifique sua conexão.",
+                        }
+                    ),
+                    400,
+                )
+
+            # Configura o modo no motor diretamente
+            if motor is not None:
+                motor.modo_operacao = modo
+                motor.meta_diaria = meta
+                logger.info(f"Modo configurado: {modo} - Meta: ${meta:.2f}")
+            else:
+                logger.error("Motor não inicializado")
+
+            # Inicia o robô
+            robo_ativo = True
+            modo_operacao = modo
+            meta_diaria = meta
+            status_operacao = "analisando"
+
+            # Inicia o sistema inteligente no motor
+            if motor is not None:
+                motor.iniciar_sistema_inteligente()
+                logger.info("Sistema inteligente iniciado no motor")
+            else:
+                logger.error("Motor não inicializado para iniciar sistema inteligente")
+
+            return jsonify(
+                {
+                    "status": "iniciado",
+                    "modo": modo,
+                    "meta": meta,
+                    "mensagem": f"Robô iniciado no modo {modo.upper()} com sistema inteligente",
+                    "configuracao": {
+                        "max_operacoes_simultaneas": {
+                            "iniciante": 1,
+                            "conservador": 3,
+                            "agressivo": 5,
+                        }.get(modo, 1),
+                        "valor_entrada_percent": "2%",  # Sempre 2% da meta
+                        "meta_maxima": {
+                            "iniciante": 20,
+                            "conservador": 50,
+                            "agressivo": None,
+                        }.get(modo, 20),
+                        "valor_entrada_calculado": f"${meta * 0.02:.2f}",
+                    },
+                }
+            )
+    except Exception as e:
+        logger.error(f"Erro ao alternar robô: {e}")
+        return jsonify({"status": "erro", "mensagem": str(e)}), 500
 
 
 @app.route("/status_robo")
 def status_robo():
-    status = trading_app.status()
-    return jsonify(
-        {
-            "ativo": trading_app.rodando,
-            "operacoes": status["operacoes_realizadas"],
-            "lucro": status["lucro_sessao"],
-            "saldo": status["saldo_atual"],
-            "tempo": status["tempo_execucao"],
+    """Rota para obter status do robô com informações inteligentes"""
+    if "token" not in session:
+        return jsonify({"status": "erro", "mensagem": "Não autenticado"}), 401
+
+    try:
+        # Informações básicas
+        status_info = {
+            "ativo": robo_ativo,
+            "modo": modo_operacao,
+            "meta": meta_diaria,
+            "lucro": lucro_atual,
+            "saldo": saldo_atual,
+            "operacoes": contador_operacoes,
+            "status_operacao": status_operacao,
+            "mensagem_log": ultima_mensagem,
         }
-    )
+
+        # Adiciona informações inteligentes se o robô estiver ativo
+        if robo_ativo and motor:
+            operacoes_ativas = (
+                len(motor.operacoes_abertas)
+                if hasattr(motor, "operacoes_abertas")
+                else 0
+            )
+
+            # Configurações do modo atual (sincronizado com catalogador.py)
+            config_modo = {
+                "iniciante": {"max_ops": 1, "confianca_min": 0.85, "meta_maxima": 20.0},
+                "conservador": {
+                    "max_ops": 3,
+                    "confianca_min": 0.80,
+                    "meta_maxima": 50.0,
+                },
+                "agressivo": {"max_ops": 5, "confianca_min": 0.75, "meta_maxima": None},
+            }.get(
+                modo_operacao,
+                {"max_ops": 1, "confianca_min": 0.85, "meta_maxima": 20.0},
+            )
+
+            status_info.update(
+                {
+                    "sistema_inteligente": {
+                        "operacoes_ativas": operacoes_ativas,
+                        "max_operacoes_simultaneas": config_modo["max_ops"],
+                        "confianca_minima": config_modo["confianca_min"],
+                        "valor_entrada_percent": "2%",  # Sempre 2% da meta
+                        "progresso_meta": (
+                            (lucro_atual / meta_diaria * 100) if meta_diaria > 0 else 0
+                        ),
+                        "pode_operar": operacoes_ativas < config_modo["max_ops"]
+                        and lucro_atual < meta_diaria,
+                        "meta_maxima": config_modo["meta_maxima"],
+                    },
+                    "api_status": {
+                        "conectado": motor.conectado if motor else False,
+                        "par_atual": (
+                            motor.par_atual
+                            if motor and hasattr(motor, "par_atual")
+                            else "N/A"
+                        ),
+                        "ultima_cotacao": (
+                            motor.ultima_cotacao
+                            if motor and hasattr(motor, "ultima_cotacao")
+                            else 0
+                        ),
+                    },
+                }
+            )
+
+        return jsonify(status_info)
+    except Exception as e:
+        logger.error(f"Erro ao obter status do robô: {e}")
+        return jsonify({"status": "erro", "mensagem": str(e)}), 500
 
 
-@app.route("/status_detalhado")
-def status_detalhado():
-    """Endpoint para retornar status detalhado com logs personalizados e estado da operação."""
-    status = trading_app.status()
-    return jsonify(
-        {
-            "ativo": status["rodando"],
-            "operacoes": status["operacoes_realizadas"],
-            "operacoes_ativas": status["operacoes_ativas"],
-            "lucro": status["lucro_sessao"],
-            "saldo": status["saldo_atual"],
-            "meta": status["meta_diaria"],
-            "meta_progresso": status["meta_progresso"],
-            "modo": status["modo"],
-            "status_operacao": status["status_operacao"],
-            "mensagem_log": status["ultimo_log"],
-        }
-    )
+@app.route("/selecionar_conta", methods=["POST"])
+def selecionar_conta():
+    """Rota para trocar entre conta demo/real"""
+    global saldo_atual, lucro_atual
+
+    if "token" not in session:
+        return jsonify({"status": "erro", "mensagem": "Não autenticado"}), 401
+
+    try:
+        data = request.get_json()
+        tipo = data.get("tipo")
+
+        if tipo not in ["demo", "real"]:
+            return (
+                jsonify({"status": "erro", "mensagem": "Tipo de conta inválido"}),
+                400,
+            )
+
+        # Carrega a licença atual para obter os tokens
+        licencas = carregar_licencas()
+        licenca_atual = None
+        codigo_licenca = session.get("codigo_licenca")
+
+        if codigo_licenca:
+            for l in licencas.values():
+                if l.get("codigo_licenca") == codigo_licenca:
+                    licenca_atual = l
+                    break
+
+        if not licenca_atual:
+            return (
+                jsonify({"status": "erro", "mensagem": "Licença não encontrada"}),
+                400,
+            )
+
+        if tipo == "demo" and licenca_atual.get("token_deriv_demo"):
+            # Troca para conta demo
+            token = licenca_atual["token_deriv_demo"]
+            valido, resultado = verificar_token(token)
+
+            if valido:
+                session["token"] = token
+                session["tipo_conta"] = "demo"
+
+                # Usa o ID da conta demo da licença se disponível
+                if licenca_atual.get("deriv_demo"):
+                    session["deriv_account"] = licenca_atual["deriv_demo"]
+                else:
+                    session["deriv_account"] = resultado.get("conta_id", "")
+
+                # Reinicializa a API
+                inicializar_api(token)
+
+                # Aguarda um pouco para a conexão estabelecer
+                import time
+
+                time.sleep(1)
+
+                # Obtém saldo real da API
+                if deriv_api and deriv_api.conectado and hasattr(deriv_api, "saldo"):
+                    saldo_atual = deriv_api.saldo
+                else:
+                    saldo_atual = resultado.get("saldo", 0)
+
+                session["saldo"] = saldo_atual
+                lucro_atual = 0.0  # Reset do lucro ao trocar conta
+
+                return jsonify(
+                    {
+                        "status": "ok",
+                        "mensagem": "Trocado para conta demo",
+                        "saldo": saldo_atual,
+                        "tipo_conta": "demo",
+                        "conta_id": resultado.get("conta_id", ""),
+                    }
+                )
+            else:
+                return (
+                    jsonify({"status": "erro", "mensagem": "Token demo inválido"}),
+                    400,
+                )
+
+        elif tipo == "real" and licenca_atual.get("token_deriv_real"):
+            # Troca para conta real
+            token = licenca_atual["token_deriv_real"]
+            valido, resultado = verificar_token(token)
+
+            if valido:
+                session["token"] = token
+                session["tipo_conta"] = "real"
+
+                # Usa o ID da conta real da licença se disponível
+                if licenca_atual.get("deriv_real"):
+                    session["deriv_account"] = licenca_atual["deriv_real"]
+                else:
+                    session["deriv_account"] = resultado.get("conta_id", "")
+
+                # Reinicializa a API
+                inicializar_api(token)
+
+                # Aguarda um pouco para a conexão estabelecer
+                time.sleep(1)
+
+                # Obtém saldo real da API
+                if deriv_api and deriv_api.conectado and hasattr(deriv_api, "saldo"):
+                    saldo_atual = deriv_api.saldo
+                else:
+                    saldo_atual = resultado.get("saldo", 0)
+
+                session["saldo"] = saldo_atual
+                lucro_atual = 0.0  # Reset do lucro ao trocar conta
+
+                return jsonify(
+                    {
+                        "status": "ok",
+                        "mensagem": "Trocado para conta real",
+                        "saldo": saldo_atual,
+                        "tipo_conta": "real",
+                        "conta_id": resultado.get("conta_id", ""),
+                    }
+                )
+            else:
+                return (
+                    jsonify({"status": "erro", "mensagem": "Token real inválido"}),
+                    400,
+                )
+        else:
+            return (
+                jsonify({"status": "erro", "mensagem": f"Token {tipo} não disponível"}),
+                400,
+            )
+
+    except Exception as e:
+        logger.error(f"Erro ao trocar conta: {e}")
+        return jsonify({"status": "erro", "mensagem": str(e)}), 500
 
 
 @app.route("/status_deriv")
 def status_deriv():
-    """
-    Retorna o status da conexão com a Deriv, incluindo dados da conta quando conectado.
-    """
+    """Rota para verificar status da conexão com Deriv"""
+    if "token" not in session:
+        return jsonify({"status": "erro", "mensagem": "Não autenticado"}), 401
+
     try:
-        status_flag = "ok" if trading_app.motor.conectado else "erro"
-        resposta = {"status": status_flag}
-
-        if status_flag == "ok":
-            # Adiciona informações detalhadas sobre a conta conectada
-            resposta["mensagem"] = "Conectado com sucesso"
-            resposta["saldo"] = trading_app.motor.obter_saldo()
-
-            # Se tivermos informações da conta, incluímos
-            if (
-                hasattr(trading_app.motor, "info_conta")
-                and trading_app.motor.info_conta
-            ):
-                resposta["conta_nome"] = trading_app.motor.info_conta.get(
-                    "nome", "Conta Deriv"
-                )
-                resposta["conta_tipo"] = trading_app.motor.info_conta.get(
-                    "tipo", "Demo"
-                )
-                resposta["conta_moeda"] = trading_app.motor.info_conta.get(
-                    "moeda", "USD"
-                )
-
-            # Se não tivermos informações completas da conta, usamos valores padrão
-            if "conta_nome" not in resposta:
-                if session.get("account_type") == "demo":
-                    resposta["conta_nome"] = "Conta Demo"
-                    resposta["conta_tipo"] = "Demo"
-                else:
-                    resposta["conta_nome"] = "Conta Real"
-                    resposta["conta_tipo"] = "Real"
-                resposta["conta_moeda"] = "USD"
+        if deriv_api:
+            resultado = deriv_api.verificar_conexao()
+            return jsonify(resultado)
         else:
-            resposta["mensagem"] = (
-                trading_app.motor.ultimo_erro or "Falha na conexão com a Deriv"
-            )
-
-        return jsonify(resposta)
+            return jsonify({"status": "erro", "mensagem": "API não inicializada"})
     except Exception as e:
-        app.logger.error(f"Erro ao verificar status Deriv: {str(e)}")
-        return jsonify({"status": "erro", "mensagem": f"Erro interno: {str(e)}"})
+        logger.error(f"Erro ao verificar status Deriv: {e}")
+        return jsonify({"status": "erro", "mensagem": str(e)}), 500
 
 
 @app.route("/saldo_atual")
 def saldo_atual():
-    """
-    Retorna o saldo atual da conta.
-    Força uma verificação direta do saldo na API da Deriv para garantir precisão.
-    """
+    """Rota para obter saldo atual"""
+    global saldo_atual
+
+    if "token" not in session:
+        return jsonify({"status": "erro", "mensagem": "Não autenticado"}), 401
+
     try:
-        # Força a atualização do saldo no motor
-        saldo = trading_app.motor.obter_saldo()
+        # SEMPRE tenta obter saldo real da API primeiro
+        if deriv_api and deriv_api.conectado:
+            # Usa o saldo já capturado na autorização
+            if hasattr(deriv_api, "saldo") and deriv_api.saldo > 0:
+                saldo_atual = deriv_api.saldo
+                session["saldo"] = saldo_atual
+                return {"status": "ok", "saldo": saldo_atual}
 
-        # Registra o saldo para debug
-        app.logger.info(f"Saldo atual obtido: ${saldo:.2f}")
+            # Se não tem saldo, tenta obter via requisição
+            resultado = deriv_api.obter_saldo()
+            if resultado["status"] == "ok":
+                saldo_atual = resultado["saldo"]
+                session["saldo"] = saldo_atual
+                return resultado
 
-        return jsonify({"status": "ok", "saldo": saldo})
-    except Exception as e:
-        app.logger.error(f"Erro ao obter saldo: {str(e)}")
-        return jsonify({"status": "erro", "mensagem": str(e)})
+        # Se não há API conectada, tenta reconectar
+        if session.get("token"):
+            token_atual = session["token"]
+            if not deriv_api or not deriv_api.conectado:
+                inicializar_api(token_atual)
 
+            # Tenta novamente após reconexão
+            if deriv_api and deriv_api.conectado and hasattr(deriv_api, "saldo"):
+                saldo_atual = deriv_api.saldo
+                session["saldo"] = saldo_atual
+                return {"status": "ok", "saldo": saldo_atual}
 
-@app.route("/lucro_meta")
-def lucro_meta():
-    """
-    Endpoint para obter o lucro atual e meta do robô.
-    Se o robô não estiver ativo, retorna o último valor de lucro conhecido.
-    """
-    try:
-        # Verifica se o robô está ativo
-        robo_ativo = trading_app.rodando
-
-        # Força atualização do saldo para precisão
-        saldo_atual = trading_app.motor.obter_saldo()
-
-        # Verifica se temos saldo inicial registrado
-        if not hasattr(trading_app, "saldo_inicial") or trading_app.saldo_inicial <= 0:
-            trading_app.saldo_inicial = saldo_atual
-            app.logger.info(f"Saldo inicial definido: ${trading_app.saldo_inicial:.2f}")
-
-        # Se o robô estiver ativo, calcula o lucro real
-        if robo_ativo:
-            # Calcula o lucro real (saldo atual - saldo inicial)
-            lucro_real = saldo_atual - trading_app.saldo_inicial
-            # Armazena o lucro para uso quando o robô estiver inativo
-            trading_app.ultimo_lucro_conhecido = lucro_real
-            app.logger.info(f"Lucro calculado (ativo): ${lucro_real:.2f}")
+        # Como último recurso, usa verificação de token
+        valido, dados_token = verificar_token(session["token"])
+        if valido and "saldo" in dados_token:
+            saldo_atual = dados_token["saldo"]
+            session["saldo"] = saldo_atual
+            return {"status": "ok", "saldo": saldo_atual}
         else:
-            # Se o robô não estiver ativo, usa o último valor conhecido
-            lucro_real = getattr(trading_app, "ultimo_lucro_conhecido", 0.0)
-            app.logger.info(f"Lucro recuperado (inativo): ${lucro_real:.2f}")
+            # Se tudo falhar, retorna saldo 0
+            return {"status": "ok", "saldo": 0.0}
 
-        # Log detalhado para depuração
-        app.logger.info(
-            f"Meta: ${meta_diaria:.2f} | Saldo atual: ${saldo_atual:.2f} | Saldo inicial: ${trading_app.saldo_inicial:.2f}"
-        )
+    except Exception as e:
+        logger.error(f"Erro ao obter saldo: {e}")
+        return jsonify({"status": "erro", "mensagem": str(e)}), 500
+
+
+@app.route("/adicionar_token", methods=["POST"])
+def adicionar_token():
+    """Rota para adicionar um novo token (demo ou real)"""
+    if "token" not in session:
+        return jsonify({"status": "erro", "mensagem": "Não autenticado"}), 401
+
+    try:
+        data = request.get_json()
+        tipo = data.get("tipo")
+        token = data.get("token")
+
+        if tipo not in ["demo", "real"]:
+            return (
+                jsonify({"status": "erro", "mensagem": "Tipo de token inválido"}),
+                400,
+            )
+
+        if not token or len(token.strip()) < 5:
+            return jsonify({"status": "erro", "mensagem": "Token inválido"}), 400
+
+        # Verifica se o token é válido
+        valido, _ = verificar_token(token.strip())
+        if not valido:
+            return (
+                jsonify(
+                    {"status": "erro", "mensagem": "Token inválido ou não funcional"}
+                ),
+                400,
+            )
+
+        # Atualiza a licença
+        if "codigo_licenca" not in session:
+            return jsonify({"status": "erro", "mensagem": "Sessão inválida"}), 400
+
+        licencas = carregar_licencas()
+        licenca_atualizada = False
+
+        for key, licenca in licencas.items():
+            if licenca.get("codigo_licenca") == session["codigo_licenca"]:
+                if tipo == "demo":
+                    licenca["token_deriv_demo"] = token.strip()
+                    session["token_demo"] = token.strip()
+                else:
+                    licenca["token_deriv_real"] = token.strip()
+                    session["token_real"] = token.strip()
+                licencas[key] = licenca
+                licenca_atualizada = True
+                break
+
+        if not licenca_atualizada:
+            return (
+                jsonify({"status": "erro", "mensagem": "Licença não encontrada"}),
+                400,
+            )
+
+        salvar_licencas(licencas)
 
         return jsonify(
-            {
-                "status": "ok",
-                "lucro": lucro_real,
-                "meta": meta_diaria,
-                "robo_ativo": robo_ativo,
-                "saldo_atual": saldo_atual,
-                "saldo_inicial": trading_app.saldo_inicial,
-            }
+            {"status": "ok", "mensagem": f"Token {tipo} adicionado com sucesso"}
         )
+
     except Exception as e:
-        app.logger.error(f"Erro ao calcular lucro/meta: {str(e)}")
-        return jsonify({"status": "erro", "mensagem": str(e)})
+        logger.error(f"Erro ao adicionar token: {e}")
+        return jsonify({"status": "erro", "mensagem": str(e)}), 500
 
 
-@app.route("/ultima_analise")
-def ultima_analise():
-    """
-    Endpoint para obter a última análise da IA, mesmo quando o robô não está ativo.
-    Permite ver recomendações de entrada, pontos de suporte/resistência, etc.
-    """
-    analise = trading_app.obter_ultima_analise()
+@app.route("/historico")
+def historico():
+    """Rota para obter histórico de operações"""
+    if "token" not in session:
+        return jsonify({"status": "erro", "mensagem": "Não autenticado"}), 401
 
-    return jsonify(
-        {
-            "status": "ok",
-            "timestamp": analise["timestamp"],
-            "preco": analise["preco"],
-            "suportes": analise["suportes"],
-            "resistencias": analise["resistencias"],
-            "em_suporte": analise["em_suporte"],
-            "em_resistencia": analise["em_resistencia"],
-            "sinal": analise["sinal"],
-            "confianca": analise["confianca"],
-            "razao": analise["razao"],
-        }
-    )
-
-
-@app.route("/estatisticas")
-def estatisticas():
-    """
-    Endpoint para obter estatísticas do sistema, incluindo uso de memória,
-    dados armazenados e outros indicadores de performance.
-    """
     try:
-        # Estatísticas do catalogador
-        cat_stats = trading_app.catalogador.estatisticas()
-
-        # Estatísticas gerais do sistema
-        stats = {
-            "status": "ok",
-            "catalogador": cat_stats,
-            "memoria": {
-                "uso_estimado_kb": cat_stats["memoria_estimada_kb"],
-                "periodo_dados": f"{cat_stats['periodo_segundos'] / 3600:.1f} horas",
-            },
-            "sistema": {
-                "uptime": (
-                    time.time() - app.start_time if hasattr(app, "start_time") else 0
-                ),
-                "conectado_deriv": trading_app.motor.conectado,
-                "operacoes_abertas": len(trading_app.motor.operacoes_abertas),
-                "operacoes_historico": len(trading_app.motor.historico_operacoes),
-            },
-        }
-        return jsonify(stats)
+        return jsonify({"status": "ok", "historico": historico_operacoes})
     except Exception as e:
-        logging.error(f"Erro ao obter estatísticas: {str(e)}", exc_info=True)
-        return jsonify({"status": "erro", "mensagem": str(e)})
-
-
-@app.route("/historico_resultados")
-def historico_resultados():
-    resultado = []
-    for op in trading_app.motor.historico_operacoes:
-        resultado.append(
-            {
-                "data": op.get("timestamp_abertura", "--").split(" ")[0],
-                "hora": op.get("timestamp_abertura", "--").split(" ")[-1],
-                "tipo": op.get("tipo", "--"),
-                "valor": op.get("preco_entrada", 0),
-                "resultado_real": op.get("lucro", 0),
-            }
-        )
-    return jsonify(resultado)
+        logger.error(f"Erro ao obter histórico: {e}")
+        return jsonify({"status": "erro", "mensagem": str(e)}), 500
 
 
 @app.route("/limpar_historico", methods=["POST"])
 def limpar_historico():
-    trading_app.motor.historico_operacoes = []
-    return jsonify({"status": "ok"})
+    """Rota para limpar histórico de operações"""
+    if "token" not in session:
+        return jsonify({"status": "erro", "mensagem": "Não autenticado"}), 401
 
-
-@app.route("/trocar_conta", methods=["POST"])
-def trocar_conta():
     try:
-        # Para o robô se estiver rodando
-        if trading_app.rodando:
-            trading_app.parar()
+        global historico_operacoes, contador_operacoes, lucro_atual
+        historico_operacoes = []
+        contador_operacoes = 0
+        lucro_atual = 0.0
+        salvar_historico()
 
-        # Limpa a sessão
-        session.clear()
-
-        # Redireciona para a página de login
-        return redirect(url_for("login"))
+        return jsonify({"status": "ok", "mensagem": "Histórico limpo com sucesso"})
     except Exception as e:
-        print(f"[ERROR] Erro ao trocar conta: {str(e)}")
-        return jsonify({"status": "erro", "mensagem": "Erro ao trocar conta"})
+        logger.error(f"Erro ao limpar histórico: {e}")
+        return jsonify({"status": "erro", "mensagem": str(e)}), 500
 
 
-@app.route("/logout", methods=["POST"])
-def logout():
-    trading_app.parar()
-    session.clear()
-    return jsonify({"status": "desconectado"})
+@app.route("/status_detalhado")
+def status_detalhado():
+    """Rota para obter status detalhado do robô"""
+    if "token" not in session:
+        return jsonify({"status": "erro", "mensagem": "Não autenticado"}), 401
+
+    try:
+        return jsonify(
+            {
+                "ativo": robo_ativo,
+                "modo": modo_operacao,
+                "meta": meta_diaria,
+                "lucro": lucro_atual,
+                "saldo": saldo_atual,
+                "operacoes": contador_operacoes,
+                "status_operacao": status_operacao,
+                "mensagem_log": ultima_mensagem,
+                "historico_recente": (
+                    historico_operacoes[-5:] if historico_operacoes else []
+                ),
+            }
+        )
+    except Exception as e:
+        logger.error(f"Erro ao obter status detalhado: {e}")
+        return jsonify({"status": "erro", "mensagem": str(e)}), 500
 
 
-def carregar_licencas():
-    path = "data/licencas.json"
-    if not os.path.exists("data"):
-        os.makedirs("data")
-    if not os.path.exists(path):
-        with open(path, "w", encoding="utf-8") as f:
-            f.write("{}")
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+@app.route("/api/grafico/dados")
+def api_grafico_dados():
+    """Rota para obter dados do gráfico"""
+    if "token" not in session:
+        return jsonify({"status": "erro", "mensagem": "Não autenticado"}), 401
+
+    try:
+        # Simula dados de gráfico
+        return jsonify(
+            {
+                "status": "ok",
+                "dados": {
+                    "labels": ["00:00", "01:00", "02:00", "03:00", "04:00"],
+                    "valores": [100, 105, 98, 110, 115],
+                },
+            }
+        )
+    except Exception as e:
+        logger.error(f"Erro ao obter dados do gráfico: {e}")
+        return jsonify({"status": "erro", "mensagem": str(e)}), 500
 
 
-def get_hwid():
-    # Exemplo simples, pode ser aprimorado
-    return hex(uuid.getnode())
+@app.route("/api/historico/estatisticas")
+def api_historico_estatisticas():
+    """Rota para obter estatísticas do histórico"""
+    if "token" not in session:
+        return jsonify({"status": "erro", "mensagem": "Não autenticado"}), 401
 
-
-def buscar_licenca_por_ip_ou_hwid(ip, hwid):
-    licencas = carregar_licencas()
-    for lic in licencas.values():
-        if ip in lic.get("ips", []) or hwid in lic.get("hwids", []):
-            return lic
-    # Se não encontrar, verifica se é o admin pelo .env
-    if ip == "127.0.0.1" or hwid in ["0x22334d051b1a"]:
-        return {
-            "email": ADMIN_EMAIL,
-            "token": ADMIN_TOKEN,
-            "token_demo": ADMIN_TOKEN_DEMO,
-            "token_real": ADMIN_TOKEN_REAL,
-            "deriv_demo": ADMIN_DERIV_DEMO,
-            "deriv_real": ADMIN_DERIV_REAL,
-            "tipo_conta": "admin",
-        }
-    return None
-
-
-@app.route("/ativacao", methods=["GET", "POST"])
-def ativacao():
-    erro = None
-    if request.method == "POST":
-        try:
-            codigo_licenca = request.form.get("codigo_licenca", "").strip()
-            token_demo = request.form.get("token_deriv_demo", "").strip()
-            token_real = request.form.get("token_deriv_real", "").strip()
-            aceite = request.form.get("aceite")
-
-            print(f"[DEBUG] Código: {codigo_licenca}")
-            print(f"[DEBUG] Token Demo: {token_demo}")
-            print(f"[DEBUG] Token Real: {token_real}")
-            print(f"[DEBUG] Aceite: {aceite}")
-
-            if not codigo_licenca:
-                erro = "❌ Código de licença não informado."
-                return render_template("login.html", erro=erro)
-
-            if not aceite:
-                erro = "❌ Você precisa aceitar os termos para continuar."
-                return render_template("login.html", erro=erro)
-
-            if not token_demo and not token_real:
-                erro = "❌ Você precisa fornecer pelo menos um token da Deriv (demo ou real)."
-                return render_template("login.html", erro=erro)
-
-            ip = request.remote_addr
-            hwid = get_hwid()
-            licencas = carregar_licencas()
-
-            print(f"[DEBUG] IP: {ip}")
-            print(f"[DEBUG] HWID: {hwid}")
-            print(f"[DEBUG] Licenças: {licencas}")
-
-            licenca_encontrada = False
-            for key, lic in licencas.items():
-                if lic.get("codigo_licenca") == codigo_licenca:
-                    licenca_encontrada = True
-                    print(f"[DEBUG] Licença encontrada: {key}")
-
-                    # Salva IP/HWID
-                    if ip not in lic.get("ips", []):
-                        lic.setdefault("ips", []).append(ip)
-                    if hwid not in lic.get("hwids", []):
-                        lic.setdefault("hwids", []).append(hwid)
-
-                    # Salva tokens se enviados
-                    if token_demo:
-                        lic["token_deriv_demo"] = token_demo
-                    if token_real:
-                        lic["token_deriv_real"] = token_real
-
-                    # Atualiza status para 'ativa' se estava como 'gerada'
-                    if lic.get("status") == "gerada":
-                        lic["status"] = "ativa"
-                        lic["ativado_em"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-
-                    # Salva alterações
-                    with open("data/licencas.json", "w", encoding="utf-8") as f:
-                        json.dump(licencas, f, indent=2, ensure_ascii=False)
-
-                    # Configura sessão
-                    session["codigo_licenca"] = codigo_licenca
-                    session["licenca_id"] = key
-                    session["plano"] = lic.get("plano", "free")
-                    session["validade"] = lic.get("validade", "N/A")
-
-                    # Verifica tokens
-                    token_demo_final = lic.get("token_deriv_demo")
-                    token_real_final = lic.get("token_deriv_real")
-
-                    print(f"[DEBUG] Token Demo Final: {token_demo_final}")
-                    print(f"[DEBUG] Token Real Final: {token_real_final}")
-
-                    if token_real_final or token_demo_final:
-                        if token_real_final:
-                            session["token"] = token_real_final
-                            session["tipo_conta"] = "real"
-                        else:
-                            session["token"] = token_demo_final
-                            session["tipo_conta"] = "demo"
-
-                        session["token_deriv_demo"] = token_demo_final
-                        session["token_deriv_real"] = token_real_final
-                        session["email"] = lic.get("email", "")
-
-                        print("[DEBUG] Redirecionando para o painel...")
-                        return redirect(url_for("painel"))
-                    else:
-                        erro = "❌ Você precisa cadastrar pelo menos um token da Deriv para continuar."
-                        return render_template("login.html", erro=erro)
-
-            if not licenca_encontrada:
-                erro = "❌ Licença inválida ou não encontrada."
-                return render_template("login.html", erro=erro)
-
-        except Exception as e:
-            print(f"[ERROR] Erro na ativação: {str(e)}")
-            erro = f"❌ Erro ao processar ativação: {str(e)}"
-            return render_template("login.html", erro=erro)
-
-    # Se chegou aqui, é GET ou erro não tratado
-    return render_template("login.html", erro=erro)
-
-
-@app.route("/cadastrar_token", methods=["GET", "POST"])
-def cadastrar_token():
-    erro = request.args.get("erro")
-    if "licenca_id" not in session:
-        return redirect("/ativacao")
-    if request.method == "POST":
-        token_demo = request.form.get("token_deriv_demo")
-        token_real = request.form.get("token_deriv_real")
-        licencas = carregar_licencas()
-        lic = licencas[session["licenca_id"]]
-        if token_demo:
-            lic["token_deriv_demo"] = token_demo
-        if token_real:
-            lic["token_deriv_real"] = token_real
-        with open("data/licencas.json", "w", encoding="utf-8") as f:
-            json.dump(licencas, f, indent=2, ensure_ascii=False)
-        # Decide tipo de conta automaticamente
-        if token_real:
-            session["token"] = token_real
-            session["tipo_conta"] = "real"
-        elif token_demo:
-            session["token"] = token_demo
-            session["tipo_conta"] = "demo"
-        else:
-            return render_template(
-                "cadastrar_token.html",
-                erro="Você precisa cadastrar pelo menos um token da Deriv para continuar.",
-            )
-        session["token_deriv_demo"] = token_demo
-        session["token_deriv_real"] = token_real
-        session["email"] = lic.get("email", "")
-        return redirect("/")
-    return render_template("cadastrar_token.html", erro=erro)
-
-
-@app.route("/conectar_demo", methods=["POST"])
-def conectar_demo():
-    token_demo = session.get("token_deriv_demo")
-    if token_demo:
-        session["token"] = token_demo
-        session["tipo_conta"] = "demo"
-
-        # Busca a licença atual para obter o ID da conta demo
-        licencas = carregar_licencas()
-        licenca_id = session.get("licenca_id")
-
-        conta_id = None
-        if licenca_id and licenca_id in licencas:
-            licenca = licencas[licenca_id]
-            conta_id = licenca.get("deriv_demo")
-            # Atualiza a sessão com o ID da conta
-            session["deriv_account"] = conta_id
-
-        return jsonify({"status": "ok", "conta_id": conta_id})
-    return jsonify({"status": "erro", "mensagem": "Token demo não cadastrado."})
-
-
-# Adicionar rota para debug
-@app.route("/debug_licencas")
-def debug_licencas():
-    if request.remote_addr == "127.0.0.1":
-        licencas = carregar_licencas()
-        return jsonify(licencas)
-    return "Acesso negado", 403
-
-
-# ---------------- CONECTAR REAL -----------------
-
-
-@app.route("/conectar_real", methods=["POST"])
-def conectar_real():
-    token_real = session.get("token_deriv_real")
-    if token_real:
-        session["token"] = token_real
-        session["tipo_conta"] = "real"
-
-        # Busca a licença atual para obter o ID da conta real
-        licencas = carregar_licencas()
-        licenca_id = session.get("licenca_id")
-
-        conta_id = None
-        if licenca_id and licenca_id in licencas:
-            licenca = licencas[licenca_id]
-            conta_id = licenca.get("deriv_real")
-            # Atualiza a sessão com o ID da conta
-            session["deriv_account"] = conta_id
-
-        return jsonify({"status": "ok", "conta_id": conta_id})
-    return jsonify({"status": "erro", "mensagem": "Token real não cadastrado."})
-
-
-# ----------------------- Login automático -----------------------
-
-
-@app.before_request
-def login_automatico():
-    """Se a sessão estiver vazia, tenta autenticar por IP ou HWID automaticamente."""
-    # Ignora rotas de recursos estáticos
-    if request.endpoint and request.endpoint.startswith("static"):
-        return
-
-    if "email" not in session:
-        ip = request.remote_addr
-        hwid = get_hwid()
-        licenca = buscar_licenca_por_ip_ou_hwid(ip, hwid)
-        if licenca:
-            # Salva ID da licença para uso posterior nas rotas de troca de conta
-            for key, value in carregar_licencas().items():
-                if value == licenca:
-                    session["licenca_id"] = key
-                    break
-
-            # Salva código da licença na sessão
-            if licenca.get("codigo_licenca"):
-                session["codigo_licenca"] = licenca.get("codigo_licenca")
-
-            # Verifica status da licença
-            status = licenca.get("status", "ativa")
-
-            # Se a licença estiver no status 'gerada', redireciona para ativação
-            if status == "gerada":
-                session["erro_licenca"] = (
-                    "Sua licença foi gerada, mas precisa ser ativada. Por favor, informe seus tokens da Deriv para ativar."
-                )
-                return redirect(url_for("ativacao"))
-
-            if status != "ativa":
-                # Redireciona para página de licença expirada/revogada
-                session["erro_licenca"] = (
-                    f"Sua licença está {status}. Entre em contato com o suporte."
-                )
-                return redirect(url_for("login"))
-
-            # Salva informações da licença na sessão
-            session["email"] = licenca["email"]
-            session["plano"] = licenca.get("plano", "free")
-            session["validade"] = licenca.get("validade", "N/A")
-
-            # Seleciona token real se MODO_REAL verdadeiro, senão demo
-            token_real = licenca.get("token_deriv_real")
-            token_demo = licenca.get("token_deriv_demo")
-            session["token"] = (
-                token_real
-                if licenca.get("tipo_conta") == "real"
-                else token_demo or token_real
-            )
-            session["tipo_conta"] = licenca.get("tipo_conta", "demo")
-            session["token_deriv_demo"] = token_demo
-            session["token_deriv_real"] = token_real
-            session["deriv_account"] = licenca.get("deriv_real") or licenca.get(
-                "deriv_demo"
+    try:
+        if not historico_operacoes:
+            return jsonify(
+                {
+                    "status": "ok",
+                    "estatisticas": {
+                        "total_operacoes": 0,
+                        "operacoes_ganho": 0,
+                        "operacoes_perda": 0,
+                        "assertividade": 0,
+                        "lucro_total": 0,
+                        "media_lucro": 0,
+                    },
+                }
             )
 
-            # Se a rota solicitada era /login, redireciona direto para painel
-            if request.endpoint == "login":
-                return redirect(url_for("painel"))
+        total_operacoes = len(historico_operacoes)
+        operacoes_ganho = sum(
+            1 for op in historico_operacoes if op.get("resultado_real", 0) > 0
+        )
+        operacoes_perda = sum(
+            1 for op in historico_operacoes if op.get("resultado_real", 0) < 0
+        )
+        lucro_total = sum(op.get("resultado_real", 0) for op in historico_operacoes)
+        assertividade = (
+            (operacoes_ganho / total_operacoes * 100) if total_operacoes > 0 else 0
+        )
+        media_lucro = lucro_total / total_operacoes if total_operacoes > 0 else 0
+
+        return jsonify(
+            {
+                "status": "ok",
+                "estatisticas": {
+                    "total_operacoes": total_operacoes,
+                    "operacoes_ganho": operacoes_ganho,
+                    "operacoes_perda": operacoes_perda,
+                    "assertividade": assertividade,
+                    "lucro_total": lucro_total,
+                    "media_lucro": media_lucro,
+                },
+            }
+        )
+    except Exception as e:
+        logger.error(f"Erro ao obter estatísticas: {e}")
+        return jsonify({"status": "erro", "mensagem": str(e)}), 500
 
 
+# Sistema de operações movido para motor.py e catalogador.py
+
+
+# Função para restaurar sessão automaticamente
+def restaurar_sessao():
+    """Tenta restaurar a sessão automaticamente usando licenças"""
+    try:
+        # Verifica se há uma licença válida para autenticação automática
+        licenca_auto = verificar_autenticacao_automatica()
+        if licenca_auto:
+            token_real, token_demo = obter_tokens_da_licenca(licenca_auto)
+            token_principal = token_real if token_real else token_demo
+
+            if token_principal:
+                valido, _ = verificar_token(token_principal)
+                if valido:
+                    inicializar_api(token_principal)
+                    logger.info(
+                        f"Sessão restaurada automaticamente para licença {licenca_auto.get('codigo_licenca')}"
+                    )
+                    return True
+
+        logger.info("Nenhuma sessão válida encontrada para restauração automática")
+        return False
+
+    except Exception as e:
+        logger.error(f"Erro ao restaurar sessão: {e}")
+        return False
+
+
+# Tenta restaurar a sessão ao iniciar
+restaurar_sessao()
+
+
+# Função para inicializar o servidor
+def iniciar_servidor():
+    """Inicializa o servidor Flask"""
+    # Carrega o histórico
+    carregar_historico()
+
+    # Inicia o servidor Flask
+    app.run(host="0.0.0.0", port=5000, debug=False)
+
+
+# Execução principal
 if __name__ == "__main__":
-    # Inicializa o módulo de administração
-    admin.init_app(app)
-
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    iniciar_servidor()

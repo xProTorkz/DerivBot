@@ -8,7 +8,7 @@ if defined _OLD_CODEPAGE (
     "%SystemRoot%\System32\chcp.com" 65001 > nul
 )
 
-set VIRTUAL_ENV=C:\BOT DE OPERAÇÕES\DerivBot\venv
+set VIRTUAL_ENV=C:\Users\Lucas Vinicius\Downloads\DerivBot_Enxuto_Login_Original\venv
 
 if not defined PROMPT set PROMPT=$P$G
 
