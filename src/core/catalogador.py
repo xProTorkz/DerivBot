@@ -13,6 +13,14 @@ import asyncio
 import importlib
 
 from src import config
+from .estrategia_turbo import (
+    ESTRATEGIA_TURBO,
+    ATIVOS_TURBO,
+    ANALISE_TECNICA,
+    obter_ativo_prioritario,
+    validar_entrada,
+    calcular_volume_entrada,
+)
 
 # Configuração de memória local
 MEMORIA_DIR = "memoria"
@@ -650,7 +658,215 @@ class VerificadorDados:
 
 
 class DecisaoTrading:
-    """Classe para tomada de decisões de trading"""
+    """Classe para tomada de decisões de trading com estratégia turbo fixa"""
+
+    @staticmethod
+    def analisar_entrada_turbo(
+        velas: List[Dict],
+        lucro_total: float,
+        entradas_recentes: List[str],
+        cliente_id: str = "default",
+    ) -> Tuple[str, float]:
+        """
+        ESTRATÉGIA TURBO FIXA - 15 SEGUNDOS
+        Análise baseada em EMA(8), EMA(21), RSI(14) e Bollinger(20,2)
+        """
+        try:
+            if len(velas) < 25:  # Precisa de pelo menos 25 velas para análise
+                return DecisaoTipo.AGUARDAR.value, 0.0
+
+            # Calcula indicadores da estratégia turbo
+            indicadores = DecisaoTrading._calcular_indicadores_turbo(velas)
+
+            # Verifica condições de entrada CALL
+            sinal_call, confianca_call = DecisaoTrading._verificar_sinal_call(
+                indicadores, velas
+            )
+
+            # Verifica condições de entrada PUT
+            sinal_put, confianca_put = DecisaoTrading._verificar_sinal_put(
+                indicadores, velas
+            )
+
+            # Escolhe o sinal com maior confiança
+            if (
+                sinal_call
+                and confianca_call >= ESTRATEGIA_TURBO["entrada"]["min_confianca"]
+            ):
+                if not sinal_put or confianca_call > confianca_put:
+                    return DecisaoTipo.CALL.value, confianca_call
+
+            if (
+                sinal_put
+                and confianca_put >= ESTRATEGIA_TURBO["entrada"]["min_confianca"]
+            ):
+                return DecisaoTipo.PUT.value, confianca_put
+
+            return DecisaoTipo.AGUARDAR.value, max(confianca_call, confianca_put)
+
+        except Exception as e:
+            logger.error(f"Erro análise turbo: {str(e)}")
+            return DecisaoTipo.AGUARDAR.value, 0.0
+
+    @staticmethod
+    def _calcular_indicadores_turbo(velas: List[Dict]) -> Dict:
+        """Calcula todos os indicadores necessários para a estratégia turbo"""
+        try:
+            closes = [float(v["close"]) for v in velas]
+            highs = [float(v["high"]) for v in velas]
+            lows = [float(v["low"]) for v in velas]
+
+            # EMA 8 e EMA 21
+            ema8 = DecisaoTrading._calcular_ema(closes, 8)
+            ema21 = DecisaoTrading._calcular_ema(closes, 21)
+
+            # RSI 14
+            rsi = AnalisadorTecnico.calcular_rsi(velas, 14)
+
+            # Bollinger Bands (20, 2)
+            bb_superior, bb_inferior, bb_media = DecisaoTrading._calcular_bollinger(
+                closes, 20, 2
+            )
+
+            return {
+                "ema8": ema8,
+                "ema21": ema21,
+                "rsi": rsi,
+                "bb_superior": bb_superior,
+                "bb_inferior": bb_inferior,
+                "bb_media": bb_media,
+                "preco_atual": closes[-1],
+                "preco_anterior": closes[-2] if len(closes) > 1 else closes[-1],
+            }
+        except Exception as e:
+            logger.error(f"Erro cálculo indicadores turbo: {str(e)}")
+            return {}
+
+    @staticmethod
+    def _verificar_sinal_call(
+        indicadores: Dict, velas: List[Dict]
+    ) -> Tuple[bool, float]:
+        """Verifica condições para sinal de CALL"""
+        try:
+            if not indicadores:
+                return False, 0.0
+
+            confianca = 0.0
+            sinais_positivos = 0
+            total_sinais = 3
+
+            # 1. Cruzamento EMA: EMA8 > EMA21 (40% do peso)
+            if indicadores["ema8"] > indicadores["ema21"]:
+                confianca += 0.4
+                sinais_positivos += 1
+
+            # 2. RSI não sobrecomprado (30% do peso)
+            if indicadores["rsi"] < ESTRATEGIA_TURBO["indicadores"]["rsi_sobrecompra"]:
+                confianca += 0.3
+                sinais_positivos += 1
+
+            # 3. Preço próximo ou tocando banda inferior Bollinger (30% do peso)
+            distancia_bb_inf = abs(
+                indicadores["preco_atual"] - indicadores["bb_inferior"]
+            )
+            range_bb = indicadores["bb_superior"] - indicadores["bb_inferior"]
+            if distancia_bb_inf <= (range_bb * 0.1):  # Dentro de 10% da banda inferior
+                confianca += 0.3
+                sinais_positivos += 1
+
+            # Sinal válido se pelo menos 2 dos 3 sinais estão presentes
+            sinal_valido = sinais_positivos >= 2
+
+            return sinal_valido, confianca
+
+        except Exception as e:
+            logger.error(f"Erro verificação sinal CALL: {str(e)}")
+            return False, 0.0
+
+    @staticmethod
+    def _verificar_sinal_put(
+        indicadores: Dict, velas: List[Dict]
+    ) -> Tuple[bool, float]:
+        """Verifica condições para sinal de PUT"""
+        try:
+            if not indicadores:
+                return False, 0.0
+
+            confianca = 0.0
+            sinais_positivos = 0
+            total_sinais = 3
+
+            # 1. Cruzamento EMA: EMA8 < EMA21 (40% do peso)
+            if indicadores["ema8"] < indicadores["ema21"]:
+                confianca += 0.4
+                sinais_positivos += 1
+
+            # 2. RSI não sobrevendido (30% do peso)
+            if indicadores["rsi"] > ESTRATEGIA_TURBO["indicadores"]["rsi_sobrevenda"]:
+                confianca += 0.3
+                sinais_positivos += 1
+
+            # 3. Preço próximo ou tocando banda superior Bollinger (30% do peso)
+            distancia_bb_sup = abs(
+                indicadores["preco_atual"] - indicadores["bb_superior"]
+            )
+            range_bb = indicadores["bb_superior"] - indicadores["bb_inferior"]
+            if distancia_bb_sup <= (range_bb * 0.1):  # Dentro de 10% da banda superior
+                confianca += 0.3
+                sinais_positivos += 1
+
+            # Sinal válido se pelo menos 2 dos 3 sinais estão presentes
+            sinal_valido = sinais_positivos >= 2
+
+            return sinal_valido, confianca
+
+        except Exception as e:
+            logger.error(f"Erro verificação sinal PUT: {str(e)}")
+            return False, 0.0
+
+    @staticmethod
+    def _calcular_ema(precos: List[float], periodo: int) -> float:
+        """Calcula EMA (Exponential Moving Average)"""
+        try:
+            if len(precos) < periodo:
+                return sum(precos) / len(precos)  # SMA se dados insuficientes
+
+            multiplier = 2 / (periodo + 1)
+            ema = sum(precos[:periodo]) / periodo  # Primeira EMA é SMA
+
+            for preco in precos[periodo:]:
+                ema = (preco * multiplier) + (ema * (1 - multiplier))
+
+            return ema
+        except Exception as e:
+            logger.error(f"Erro cálculo EMA: {str(e)}")
+            return 0.0
+
+    @staticmethod
+    def _calcular_bollinger(
+        precos: List[float], periodo: int, desvio: float
+    ) -> Tuple[float, float, float]:
+        """Calcula Bandas de Bollinger"""
+        try:
+            if len(precos) < periodo:
+                media = sum(precos) / len(precos)
+                return media, media, media
+
+            # Média móvel simples
+            sma = sum(precos[-periodo:]) / periodo
+
+            # Desvio padrão
+            variancia = sum((p - sma) ** 2 for p in precos[-periodo:]) / periodo
+            std_dev = variancia**0.5
+
+            # Bandas
+            bb_superior = sma + (desvio * std_dev)
+            bb_inferior = sma - (desvio * std_dev)
+
+            return bb_superior, bb_inferior, sma
+        except Exception as e:
+            logger.error(f"Erro cálculo Bollinger: {str(e)}")
+            return 0.0, 0.0, 0.0
 
     @staticmethod
     def analisar_entrada(
@@ -660,139 +876,43 @@ class DecisaoTrading:
         cliente_id: str = "default",
     ) -> str:
         """
-        Toma decisão de entrada usando análise técnica e IA
-        Args:
-            velas: Lista de velas OHLCV
-            lucro_total: Resultado acumulado da sessão
-            entradas_recentes: Histórico de operações
-            cliente_id: Identificador do cliente
-        Returns:
-            Decisão: CALL, PUT ou AGUARDAR
+        ESTRATÉGIA TURBO ATIVADA - Análise fixa de 15 segundos
+        Usa EMA(8), EMA(21), RSI(14) e Bollinger(20,2) para decisões rápidas
         """
-        start_time = time.time()
-        logger.info(f"Analisando oportunidades de entrada...")
-
-        # Validar dados
-        if (
-            not VerificadorDados.validar_velas(velas)
-            or len(velas) < CONFIG["analise"]["limites"]["min_velas"]
-        ):
-            logger.warning("Dados insuficientes ou inválidos para análise")
-            return DecisaoTipo.AGUARDAR.value
-
         try:
-            analise = AnalisadorTecnico()
-
-            # Criar contexto estruturado
-            contexto = Contexto(
-                preco_atual=velas[-1]["close"],
-                fibonacci=analise.identificar_fibonacci(velas),
-                rsi=analise.calcular_rsi(velas),
-                mhi=analise.padrao_mhi(velas),
-                tendencia=analise.tendencia_velas(velas),
-                volume=analise.tendencia_volume(velas),
-                volatilidade=np.mean([v["high"] - v["low"] for v in velas[-5:]]),
-                lucro_total=lucro_total,
-                historico=entradas_recentes[-5:],
+            # Usa a estratégia turbo fixa
+            decisao, confianca = DecisaoTrading.analisar_entrada_turbo(
+                velas, lucro_total, entradas_recentes, cliente_id
             )
 
-            relatorio = contexto.gerar_relatorio()
-            logger.debug(f"Relatório de análise:\n{relatorio}")
+            # Log da decisão com indicadores
+            if len(velas) >= 25:
+                indicadores = DecisaoTrading._calcular_indicadores_turbo(velas)
+                try:
+                    import main
 
-            # Tentar decisão baseada em IA
-            api = DeepseekAPI.get_instance()
-            resposta, confianca = api.chamar_api(
-                [
-                    {"role": "system", "content": "Decisão rápida: CALL/PUT/AGUARDAR"},
-                    {"role": "user", "content": relatorio},
-                ]
-            )
+                    if decisao == DecisaoTipo.CALL.value:
+                        main.adicionar_log_tempo_real(
+                            f"🟢 SINAL CALL - EMA8:{indicadores['ema8']:.2f} > EMA21:{indicadores['ema21']:.2f}, RSI:{indicadores['rsi']:.1f}, BB:{indicadores['preco_atual']:.2f}, Conf:{confianca:.1%}",
+                            "success",
+                        )
+                    elif decisao == DecisaoTipo.PUT.value:
+                        main.adicionar_log_tempo_real(
+                            f"🔴 SINAL PUT - EMA8:{indicadores['ema8']:.2f} < EMA21:{indicadores['ema21']:.2f}, RSI:{indicadores['rsi']:.1f}, BB:{indicadores['preco_atual']:.2f}, Conf:{confianca:.1%}",
+                            "success",
+                        )
+                    elif decisao == DecisaoTipo.AGUARDAR.value and confianca > 0.5:
+                        main.adicionar_log_tempo_real(
+                            f"⏳ AGUARDANDO - EMA8:{indicadores['ema8']:.2f}, EMA21:{indicadores['ema21']:.2f}, RSI:{indicadores['rsi']:.1f}, Conf:{confianca:.1%} (< 85%)",
+                            "warning",
+                        )
+                except:
+                    pass
 
-            # Verifica a confiança mínima configurada - MAIS AGRESSIVO
-            min_confianca = config.IA_CONFIG.get(
-                "min_confianca", 0.4
-            )  # Reduzido para 40%
-            if confianca < min_confianca:
-                logger.info(
-                    f"Confiança baixa ({confianca:.2f} < {min_confianca:.2f}), decidindo AGUARDAR"
-                )
-                decisao = DecisaoTipo.AGUARDAR.value
-            # Interpretar resposta
-            elif DecisaoTipo.CALL.value in resposta:
-                decisao = DecisaoTipo.CALL.value
-                logger.info(f"Decisão IA: CALL com confiança {confianca:.2f}")
-            elif DecisaoTipo.PUT.value in resposta:
-                decisao = DecisaoTipo.PUT.value
-                logger.info(f"Decisão IA: PUT com confiança {confianca:.2f}")
-            else:
-                decisao = DecisaoTipo.AGUARDAR.value
-                logger.info(f"Decisão IA: AGUARDAR com confiança {confianca:.2f}")
-
-            # SISTEMA ULTRA AGRESSIVO - Entra em qualquer sinal
-            if decisao == DecisaoTipo.AGUARDAR.value:
-                limites = CONFIG["analise"]["limites"]
-
-                # SCALPING ULTRA RÁPIDO - Condições mais flexíveis
-                if contexto.rsi < limites["rsi_sobrevenda"]:  # RSI baixo = CALL
-                    decisao = DecisaoTipo.CALL.value
-                    confianca = 0.85
-                    logger.info(
-                        f"SCALPING RÁPIDO: CALL - RSI baixo ({contexto.rsi:.1f})"
-                    )
-
-                elif contexto.rsi > limites["rsi_sobrecompra"]:  # RSI alto = PUT
-                    decisao = DecisaoTipo.PUT.value
-                    confianca = 0.85
-                    logger.info(f"SCALPING RÁPIDO: PUT - RSI alto ({contexto.rsi:.1f})")
-
-                # Se ainda aguardando, força entrada baseada em movimento
-                elif contexto.tendencia == "ALTA" and contexto.volume == "CRESCENTE":
-                    decisao = DecisaoTipo.CALL.value
-                    confianca = 0.70
-                    logger.info("SCALPING RÁPIDO: CALL - Tendência alta + volume")
-
-                elif contexto.tendencia == "BAIXA" and contexto.volume == "CRESCENTE":
-                    decisao = DecisaoTipo.PUT.value
-                    confianca = 0.70
-                    logger.info("SCALPING RÁPIDO: PUT - Tendência baixa + volume")
-
-                # ÚLTIMO RECURSO - Entra baseado só no preço atual vs média
-                elif len(velas) >= 3:
-                    preco_atual = velas[-1].get("close", 0)
-                    preco_anterior = velas[-2].get("close", 0)
-
-                    if preco_atual > preco_anterior:  # Subindo = CALL
-                        decisao = DecisaoTipo.CALL.value
-                        confianca = 0.60
-                        logger.info("SCALPING RÁPIDO: CALL - Preço subindo")
-                    else:  # Descendo = PUT
-                        decisao = DecisaoTipo.PUT.value
-                        confianca = 0.60
-                        logger.info("SCALPING RÁPIDO: PUT - Preço descendo")
-
-            # Verificar latência
-            latencia = time.time() - start_time
-            if latencia > CONFIG["analise"]["limites"]["max_latencia"]:
-                logger.warning(f"Latência alta: {latencia:.3f}s, decidindo AGUARDAR")
-                decisao = DecisaoTipo.AGUARDAR.value
-
-            # Log de performance
-            salvar_memoria(
-                cliente_id,
-                {
-                    "timestamp": time.time(),
-                    "decisao": decisao,
-                    "confianca": confianca,
-                    "latencia": latencia,
-                    "contexto": contexto.to_dict(),
-                },
-            )
-
-            logger.info(f"Decisão final: {decisao} (latência: {latencia:.3f}s)")
             return decisao
 
         except Exception as e:
-            logger.error(f"Erro análise entrada: {str(e)}", exc_info=True)
+            logger.error(f"Erro análise entrada: {str(e)}")
             return DecisaoTipo.AGUARDAR.value
 
     @staticmethod
@@ -863,6 +983,15 @@ class DecisaoTrading:
                 logger.info(
                     f"SCALPING: Saída rápida - {contexto.lucro:.2f}% em {contexto.duracao}s"
                 )
+                try:
+                    import main
+
+                    main.adicionar_log_tempo_real(
+                        f"Saída rápida - {contexto.lucro:.2f}% em {contexto.duracao}s",
+                        "success",
+                    )
+                except:
+                    pass
                 decisao = DecisaoTipo.SAIR.value
 
             # Stop loss agressivo - sai rápido para evitar perdas
@@ -1275,9 +1404,13 @@ class Catalogador:
                     "valor_entrada": 0.0,
                 }
 
+            # Obtém configurações específicas do ativo atual
+            ativo_config = self._obter_config_ativo_scalping()
+            min_stake_ativo = ativo_config.get("min_stake", 0.35)
+
             # Calcula valor da entrada e lucro esperado
             valor_entrada = max(
-                0.35, min(10.0, meta * config_atual["valor_entrada_percent"])
+                min_stake_ativo, min(10.0, meta * config_atual["valor_entrada_percent"])
             )
             lucro_esperado = max(
                 config_atual["lucro_min_esperado"], analise_micro["lucro_estimado"]
@@ -1425,6 +1558,35 @@ class Catalogador:
                 "boost_confianca": 0.0,
                 "lucro_estimado": 0.0,
                 "razao_principal": "erro na análise",
+            }
+
+    def _obter_config_ativo_scalping(self) -> dict:
+        """Obtém a configuração específica do ativo atual para scalping"""
+        try:
+            from src.core.config import ATIVOS_SCALPING
+
+            # Usa o ativo atual do motor se disponível
+            ativo_atual = getattr(self, "ativo_atual", "R_10")  # Default para R_10
+            return ATIVOS_SCALPING.get(
+                ativo_atual,
+                {
+                    "min_stake": 0.35,
+                    "multipliers": [1, 2, 3, 4, 5, 10],
+                    "contract_types": ["MULTUP", "MULTDOWN"],
+                    "basis": "stake",
+                    "duracao_padrao": 1,
+                    "tipo_contrato": "multiplier",
+                },
+            )
+        except Exception as e:
+            self.logger.error(f"Erro ao obter config do ativo: {e}")
+            return {
+                "min_stake": 0.35,
+                "multipliers": [1, 2, 3, 4, 5, 10],
+                "contract_types": ["MULTUP", "MULTDOWN"],
+                "basis": "stake",
+                "duracao_padrao": 1,
+                "tipo_contrato": "multiplier",
             }
 
     def verificar_protecao_operacoes(

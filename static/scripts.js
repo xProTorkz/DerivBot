@@ -982,11 +982,13 @@ document.addEventListener("DOMContentLoaded", function () {
     document.getElementById("resumo-diario").style.display = "none";
     document.getElementById("grafico-diario").style.display = "none";
     document.getElementById("historico-completo").style.display = "none";
+    document.getElementById("logs-tempo-real").style.display = "none";
 
     // Remove a classe ativa de todos os botões
     document.getElementById("btn-historico-atual").classList.remove("ativo");
     document.getElementById("btn-historico-completo").classList.remove("ativo");
     document.getElementById("btn-graficos").classList.remove("ativo");
+    document.getElementById("btn-logs").classList.remove("ativo");
     document.getElementById("btn-limpar").classList.remove("ativo");
 
     // Mostra a aba selecionada e ativa o botão correspondente
@@ -1005,6 +1007,11 @@ document.addEventListener("DOMContentLoaded", function () {
         document.getElementById("grafico-diario").style.display = "block";
         document.getElementById("btn-graficos").classList.add("ativo");
         carregarGrafico();
+        break;
+      case "logs":
+        document.getElementById("logs-tempo-real").style.display = "block";
+        document.getElementById("btn-logs").classList.add("ativo");
+        carregarLogsTempoReal();
         break;
       case "historico-completo":
         document.getElementById("historico-completo").style.display = "block";
@@ -1044,6 +1051,75 @@ document.addEventListener("DOMContentLoaded", function () {
           <p style="color: #ff444f;">Erro ao carregar gráfico: ${err.message}</p>
         `;
       });
+  }
+
+  function carregarLogsTempoReal() {
+    // Implementação para carregar logs em tempo real
+    fetch("/logs_tempo_real")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.status === "ok" && data.logs) {
+          const listaLogs = document.getElementById("lista-logs");
+          listaLogs.innerHTML = "";
+
+          if (data.logs.length === 0) {
+            listaLogs.innerHTML =
+              '<p style="color: #888; text-align: center;">Nenhum log disponível</p>';
+            return;
+          }
+
+          // Mostra os logs mais recentes primeiro
+          data.logs.reverse().forEach((log) => {
+            const logElement = document.createElement("div");
+            logElement.style.cssText = `
+              padding: 8px 12px;
+              margin-bottom: 5px;
+              border-radius: 4px;
+              border-left: 3px solid ${getLogColor(log.tipo)};
+              background: rgba(255,255,255,0.05);
+              font-family: monospace;
+              font-size: 13px;
+            `;
+
+            logElement.innerHTML = `
+              <span style="color: #888; font-size: 11px;">[${
+                log.timestamp
+              }]</span>
+              <span style="color: ${getLogColor(
+                log.tipo
+              )}; margin-left: 8px;">${log.mensagem}</span>
+            `;
+
+            listaLogs.appendChild(logElement);
+          });
+
+          // Auto-scroll para o topo (logs mais recentes)
+          const container = document.getElementById("container-logs");
+          container.scrollTop = 0;
+        } else {
+          document.getElementById("lista-logs").innerHTML = `
+            <p style="color: #ff444f; text-align: center;">Erro ao carregar logs: ${
+              data.mensagem || "Erro desconhecido"
+            }</p>
+          `;
+        }
+      })
+      .catch((err) => {
+        document.getElementById("lista-logs").innerHTML = `
+          <p style="color: #ff444f; text-align: center;">Erro ao carregar logs: ${err.message}</p>
+        `;
+      });
+  }
+
+  function getLogColor(tipo) {
+    const cores = {
+      info: "#4a9eff",
+      success: "#4caf50",
+      warning: "#ff9800",
+      error: "#f44336",
+      debug: "#9e9e9e",
+    };
+    return cores[tipo] || "#ffffff";
   }
 
   function carregarHistoricoCompleto() {
@@ -1263,6 +1339,97 @@ document.addEventListener("DOMContentLoaded", function () {
       });
   };
 
+  // Função para atualizar logs da estratégia turbo
+  function atualizarLogsTempoReal() {
+    fetch("/logs_tempo_real")
+      .then((response) => response.json())
+      .then((data) => {
+        const listaLogs = document.getElementById("lista-logs");
+        if (data.logs && data.logs.length > 0) {
+          listaLogs.innerHTML = "";
+          data.logs.slice(-20).forEach((log) => {
+            const logElement = document.createElement("div");
+            logElement.style.cssText = `
+              margin: 5px 0;
+              padding: 8px;
+              border-radius: 4px;
+              font-size: 12px;
+              line-height: 1.4;
+              border-left: 3px solid ${getLogColor(log.tipo)};
+              background: ${getLogBackground(log.tipo)};
+              color: ${getLogTextColor(log.tipo)};
+            `;
+
+            const timestamp = new Date(log.timestamp).toLocaleTimeString(
+              "pt-BR"
+            );
+            logElement.innerHTML = `
+              <span style="color: #888; font-size: 10px;">[${timestamp}]</span>
+              <span style="font-weight: bold;">${log.tipo.toUpperCase()}:</span>
+              ${log.mensagem}
+            `;
+            listaLogs.appendChild(logElement);
+          });
+
+          // Auto-scroll para o final
+          const containerLogs = document.getElementById("container-logs");
+          containerLogs.scrollTop = containerLogs.scrollHeight;
+        }
+      })
+      .catch((error) => {
+        console.error("Erro ao buscar logs:", error);
+      });
+  }
+
+  function getLogColor(tipo) {
+    switch (tipo) {
+      case "success":
+        return "#4CAF50";
+      case "error":
+        return "#f44336";
+      case "warning":
+        return "#ff9800";
+      case "info":
+        return "#2196F3";
+      default:
+        return "#888";
+    }
+  }
+
+  function getLogBackground(tipo) {
+    switch (tipo) {
+      case "success":
+        return "rgba(76, 175, 80, 0.1)";
+      case "error":
+        return "rgba(244, 67, 54, 0.1)";
+      case "warning":
+        return "rgba(255, 152, 0, 0.1)";
+      case "info":
+        return "rgba(33, 150, 243, 0.1)";
+      default:
+        return "rgba(136, 136, 136, 0.1)";
+    }
+  }
+
+  function getLogTextColor(tipo) {
+    switch (tipo) {
+      case "success":
+        return "#4CAF50";
+      case "error":
+        return "#f44336";
+      case "warning":
+        return "#ff9800";
+      case "info":
+        return "#2196F3";
+      default:
+        return "#ccc";
+    }
+  }
+
   // Inicia tudo
   inicializar();
+
+  // Atualiza logs da estratégia turbo a cada 2 segundos
+  setInterval(atualizarLogsTempoReal, 2000);
+  atualizarLogsTempoReal(); // Primeira execução imediata
 });

@@ -90,3 +90,12 @@ planejamento.txt
 *.tar
 *.gz
 *.bz2
+*.json.bak
+*.json.bak.bak
+*.json.bak.bak.bak
+*.json.bak.bak.bak.bak
+*.json.bak.bak.bak.bak.bak
+*.json.bak.bak.bak.bak.bak.bak
+*.json.bak.bak.bak.bak.bak.bak.bak
+*.json.bak.bak.bak.bak.bak.bak.bak.bak
+*.json

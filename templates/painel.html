@@ -334,6 +334,15 @@
             </button>
             <button
               class="icone-historico"
+              id="btn-logs"
+              onclick="trocarAba('logs')"
+              title="Logs em tempo real"
+              aria-label="Ver logs em tempo real"
+            >
+              📋
+            </button>
+            <button
+              class="icone-historico"
               id="btn-limpar"
               onclick="trocarAba('limpar')"
               title="Limpar Histórico"
@@ -357,6 +366,29 @@
 
         <div id="grafico-diario" style="display: none; text-align: center">
           <p style="color: gray">📈 Gráficos e detalhes em tempo real...</p>
+        </div>
+
+        <!-- Logs da Estratégia Turbo -->
+        <div id="logs-tempo-real" style="display: block; margin-top: 20px">
+          <h3>🎯 Estratégia Turbo - Logs em Tempo Real</h3>
+          <div
+            id="container-logs"
+            style="
+              background: #1e1e1e;
+              border-radius: 8px;
+              padding: 15px;
+              max-height: 400px;
+              overflow-y: auto;
+              border: 1px solid #333;
+              font-family: monospace;
+            "
+          >
+            <div id="lista-logs">
+              <p style="color: #4a9eff; text-align: center">
+                🚀 Aguardando logs da estratégia turbo...
+              </p>
+            </div>
+          </div>
         </div>
 
         <div id="historico-completo" style="display: none; text-align: center">

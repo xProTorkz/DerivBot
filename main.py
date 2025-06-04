@@ -81,6 +81,30 @@ ultima_mensagem = "Robô pronto para iniciar."
 contador_operacoes = 0
 status_operacao = "parado"
 
+# Sistema de logs em tempo real
+logs_tempo_real = []
+max_logs = 100  # Máximo de logs a manter
+
+
+def adicionar_log_tempo_real(mensagem, tipo="info"):
+    """Adiciona um log ao sistema de tempo real"""
+    global logs_tempo_real
+    from datetime import datetime
+
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    log_entry = {"timestamp": timestamp, "mensagem": mensagem, "tipo": tipo}
+
+    logs_tempo_real.append(log_entry)
+
+    # Mantém apenas os últimos logs
+    if len(logs_tempo_real) > max_logs:
+        logs_tempo_real = logs_tempo_real[-max_logs:]
+
+    # Atualiza a última mensagem global
+    global ultima_mensagem
+    ultima_mensagem = mensagem
+
+
 # Sistema de autenticação baseado apenas em licencas.json
 # Não criamos mais tokens.json - tudo é gerenciado via licenças
 
@@ -162,10 +186,12 @@ def inicializar_api(token):
         logger.warning(f"Erro ao inicializar API simples: {e}")
 
     # SEMPRE cria o motor, mesmo se der erro
+    motor = None
     try:
         motor = Motor()
-        motor.conectar(token)
-        logger.info("Motor inicializado com sucesso")
+        if token:
+            motor.conectar(token)
+        logger.info("MOTOR TURBO INICIALIZADO COM SUCESSO")
     except Exception as motor_error:
         logger.warning(f"Erro ao inicializar motor: {motor_error}")
         # Cria motor básico mesmo com erro
@@ -300,7 +326,7 @@ def carregar_historico():
 
 def adicionar_operacao(tipo, valor, resultado):
     """Adiciona uma operação ao histórico"""
-    global historico_operacoes, contador_operacoes
+    global historico_operacoes, contador_operacoes, lucro_atual, saldo_atual
 
     agora = datetime.now()
     operacao = {
@@ -314,6 +340,24 @@ def adicionar_operacao(tipo, valor, resultado):
 
     historico_operacoes.append(operacao)
     contador_operacoes += 1
+
+    # Atualiza lucro atual
+    lucro_atual += resultado
+
+    # Atualiza saldo se motor estiver disponível
+    if motor and hasattr(motor, "obter_saldo"):
+        try:
+            saldo_atual = motor.obter_saldo()
+        except:
+            pass
+
+    # Adiciona log para a UI
+    resultado_texto = "GANHO" if resultado >= 0 else "PERDA"
+    adicionar_log_tempo_real(
+        f"💰 {tipo} finalizada: {resultado_texto} ${resultado:.2f}",
+        "success" if resultado >= 0 else "warning",
+    )
+
     salvar_historico()
 
 
@@ -620,7 +664,7 @@ def toggle_bot():
 
         meta = meta_solicitada
 
-        global robo_ativo, modo_operacao, meta_diaria, status_operacao
+        global robo_ativo, modo_operacao, meta_diaria, status_operacao, motor
 
         if robo_ativo:
             # Verifica proteção antes de parar
@@ -647,13 +691,13 @@ def toggle_bot():
                 {"status": "parado", "mensagem": "Robô parado com segurança"}
             )
         else:
-            # Verifica se a API está conectada
-            if not deriv_api or not deriv_api.conectado:
+            # Verifica se o motor está conectado (não a deriv_api)
+            if not motor or not getattr(motor, "conectado", False):
                 return (
                     jsonify(
                         {
                             "status": "erro",
-                            "mensagem": "API não conectada. Verifique sua conexão.",
+                            "mensagem": "Motor não conectado. Verifique sua conexão.",
                         }
                     ),
                     400,
@@ -673,12 +717,59 @@ def toggle_bot():
             meta_diaria = meta
             status_operacao = "analisando"
 
-            # Inicia o sistema inteligente no motor
-            if motor is not None:
+            # Logs de inicialização da estratégia turbo
+            adicionar_log_tempo_real("🎯 Iniciando Estratégia Turbo...", "info")
+            adicionar_log_tempo_real(
+                f"📊 Modo: {modo.upper()}, Meta: ${meta:.0f}", "info"
+            )
+            adicionar_log_tempo_real("🔧 Ativo: VIX75 (1HZ75V) - Contratos 15s", "info")
+            adicionar_log_tempo_real(
+                "📈 Indicadores: EMA(8,21) + RSI(14) + Bollinger(20,2)", "info"
+            )
+            adicionar_log_tempo_real(
+                "💰 Gestão: Stop 2% | Take 4-6% | Martingale 2x", "info"
+            )
+
+            # Inicia o sistema inteligente no motor - FORÇADO
+            adicionar_log_tempo_real("⚙️ Configurando motor...", "info")
+            try:
+                # SEMPRE cria novo motor para garantir funcionamento
+                from src.core.motor import Motor
+
+                motor = Motor()
+
+                # Conecta com o token da sessão
+                token_atual = session.get("token")
+                if token_atual:
+                    motor.conectar(token_atual)
+
+                # Configura modo e meta
+                motor.modo_operacao = modo
+                motor.meta_diaria = meta
+
+                # FORÇA início do sistema inteligente
                 motor.iniciar_sistema_inteligente()
-                logger.info("Sistema inteligente iniciado no motor")
-            else:
-                logger.error("Motor não inicializado para iniciar sistema inteligente")
+
+                logger.info("SISTEMA INTELIGENTE FORÇADO A INICIAR")
+                adicionar_log_tempo_real("🚀 Motor Turbo FORÇADO a iniciar!", "success")
+                adicionar_log_tempo_real("⚡ Sistema inteligente ATIVO!", "info")
+
+                # Atualiza variável global
+                globals()["motor"] = motor
+
+            except Exception as e:
+                logger.error(f"ERRO CRÍTICO ao iniciar sistema: {e}")
+                adicionar_log_tempo_real(f"❌ ERRO CRÍTICO: {str(e)}", "error")
+
+                # Tenta fallback
+                try:
+                    if "motor" in globals() and motor:
+                        motor.iniciar_sistema_inteligente()
+                        adicionar_log_tempo_real(
+                            "🔄 Fallback: Sistema iniciado!", "success"
+                        )
+                except Exception as e2:
+                    adicionar_log_tempo_real(f"❌ Fallback falhou: {str(e2)}", "error")
 
             return jsonify(
                 {
@@ -738,36 +829,34 @@ def status_robo():
     try:
         global robo_ativo, modo_operacao, meta_diaria, status_operacao, ultima_mensagem
 
-        # Informações do ativo atual - SEMPRE do catalogador (prioridade)
-        ativo_info = {"ativo": "R_100", "nome": "Volatility 100 Index"}
-        if (
-            motor
-            and hasattr(motor, "catalogador")
-            and hasattr(motor.catalogador, "obter_ativo_recomendado")
-        ):
-            try:
-                ativo_info = motor.catalogador.obter_ativo_recomendado()
-            except Exception as e:
-                logger.debug(f"Erro ao obter ativo do catalogador: {e}")
-                pass
+        # Informações do ativo atual - ESTRATÉGIA TURBO FIXA
+        ativo_info = {
+            "ativo": "1HZ75V",
+            "nome": "Volatility 75 Index (VIX75)",
+            "razao": "Estratégia Turbo - Contratos 15s",
+            "prioridade": 1,
+        }
 
-        # Status do motor
+        # Status do motor - CORRIGIDO PARA EVITAR ERRO JSON
         motor_status = {"conectado": False, "operacoes_ativas": 0}
         if motor:
             try:
-                if hasattr(motor, "get_status"):
-                    motor_status = motor.get_status()
-                else:
-                    motor_status = {
-                        "conectado": (
-                            motor.conectado if hasattr(motor, "conectado") else False
-                        ),
-                        "operacoes_ativas": (
-                            len(motor.operacoes_abertas)
-                            if hasattr(motor, "operacoes_abertas")
-                            else 0
-                        ),
-                    }
+                # Obtém apenas valores simples para evitar erro de serialização
+                conectado = getattr(motor, "conectado", False)
+                operacoes_abertas = getattr(motor, "operacoes_abertas", {})
+                par_atual = getattr(motor, "par_atual", "1HZ75V")
+                saldo = getattr(motor, "saldo", 0.0)
+
+                motor_status = {
+                    "conectado": bool(conectado) if conectado is not None else False,
+                    "operacoes_ativas": (
+                        len(operacoes_abertas)
+                        if isinstance(operacoes_abertas, dict)
+                        else 0
+                    ),
+                    "par_atual": str(par_atual) if par_atual else "1HZ75V",
+                    "saldo": float(saldo) if isinstance(saldo, (int, float)) else 0.0,
+                }
             except Exception as e:
                 logger.error(f"Erro ao obter status do motor: {e}")
                 motor_status = {"conectado": False, "operacoes_ativas": 0}
@@ -777,48 +866,50 @@ def status_robo():
         if robo_ativo:
             if motor and hasattr(motor, "sistema_ativo") and motor.sistema_ativo:
                 status_detalhado = (
-                    f"🤖 Analisando {ativo_info.get('ativo', 'ativo')} - Scanner ativo"
+                    f"Analisando {ativo_info.get('ativo', 'ativo')} - Scanner ativo"
                 )
             else:
-                status_detalhado = "🔄 Iniciando sistema inteligente..."
+                status_detalhado = "Iniciando sistema inteligente..."
 
         # Mensagem clara para o usuário
         mensagem_usuario = ultima_mensagem or "Sistema pronto"
         if robo_ativo:
             if "timeout" in str(ultima_mensagem).lower():
-                mensagem_usuario = "⚠️ API de IA com latência alta - aguardando..."
+                mensagem_usuario = "API de IA com latência alta - aguardando..."
             elif "aguardar" in str(ultima_mensagem).lower():
-                mensagem_usuario = f"⏳ Aguardando melhor oportunidade no {ativo_info.get('ativo', 'ativo')}"
+                mensagem_usuario = f"Aguardando melhor oportunidade no {ativo_info.get('ativo', 'ativo')}"
             elif "analise" in str(ultima_mensagem).lower():
                 mensagem_usuario = (
-                    f"🔍 Analisando padrões no {ativo_info.get('ativo', 'ativo')}"
+                    f"Analisando padrões no {ativo_info.get('ativo', 'ativo')}"
                 )
 
-        return jsonify(
-            {
-                "ativo": robo_ativo,
-                "modo": modo_operacao or "iniciante",
-                "meta": meta_diaria or 20.0,
-                "lucro": lucro_atual,
-                "saldo": saldo_atual,
-                "operacoes": contador_operacoes,
-                "status_operacao": status_operacao or "parado",
-                "status_detalhado": status_detalhado,
-                "mensagem_log": ultima_mensagem or "Sistema pronto",
-                "mensagem_usuario": mensagem_usuario,
-                "ativo_atual": ativo_info,
-                "motor_status": motor_status,
-                "historico_recente": (
-                    historico_operacoes[-3:] if historico_operacoes else []
-                ),
-                "scanner_info": {
-                    "total_ativos": 15,
-                    "ativo_selecionado": ativo_info.get("ativo", "R_100"),
-                    "razao_selecao": ativo_info.get("razao", "Ativo padrão"),
-                    "prioridade": ativo_info.get("prioridade", 5),
-                },
-            }
-        )
+        # Prepara dados seguros para JSON
+        response_data = {
+            "ativo": bool(robo_ativo),
+            "modo": str(modo_operacao or "iniciante"),
+            "meta": float(meta_diaria or 20.0),
+            "lucro": float(lucro_atual),
+            "saldo": float(saldo_atual),
+            "operacoes": int(contador_operacoes),
+            "status_operacao": str(status_operacao or "parado"),
+            "status_detalhado": str(status_detalhado),
+            "mensagem_log": str(ultima_mensagem or "Sistema pronto"),
+            "mensagem_usuario": str(mensagem_usuario),
+            "ativo_atual": dict(ativo_info),
+            "motor_status": dict(motor_status),
+            "logs_tempo_real": list(logs_tempo_real[-20:] if logs_tempo_real else []),
+            "historico_recente": list(
+                historico_operacoes[-3:] if historico_operacoes else []
+            ),
+            "scanner_info": {
+                "total_ativos": 15,
+                "ativo_selecionado": str(ativo_info.get("ativo", "R_100")),
+                "razao_selecao": str(ativo_info.get("razao", "Ativo padrão")),
+                "prioridade": int(ativo_info.get("prioridade", 5)),
+            },
+        }
+
+        return jsonify(response_data)
     except Exception as e:
         logger.error(f"Erro ao obter status do robô: {e}")
         return jsonify({"status": "erro", "mensagem": str(e)}), 500
@@ -1144,6 +1235,9 @@ def status_detalhado():
                 "operacoes": contador_operacoes,
                 "status_operacao": status_operacao,
                 "mensagem_log": ultima_mensagem,
+                "logs_tempo_real": (
+                    logs_tempo_real[-20:] if logs_tempo_real else []
+                ),  # Últimos 20 logs
                 "historico_recente": (
                     historico_operacoes[-5:] if historico_operacoes else []
                 ),
@@ -1151,6 +1245,26 @@ def status_detalhado():
         )
     except Exception as e:
         logger.error(f"Erro ao obter status detalhado: {e}")
+        return jsonify({"status": "erro", "mensagem": str(e)}), 500
+
+
+@app.route("/logs_tempo_real")
+def get_logs_tempo_real():
+    """Rota para obter logs em tempo real"""
+    if "token" not in session:
+        return jsonify({"status": "erro", "mensagem": "Não autenticado"}), 401
+
+    try:
+        return jsonify(
+            {
+                "status": "ok",
+                "logs": (
+                    logs_tempo_real[-50:] if logs_tempo_real else []
+                ),  # Últimos 50 logs
+            }
+        )
+    except Exception as e:
+        logger.error(f"Erro ao obter logs: {e}")
         return jsonify({"status": "erro", "mensagem": str(e)}), 500
 
 
@@ -1252,6 +1366,38 @@ def teste_ai_demo():
             )
     except Exception as e:
         return jsonify({"status": "erro", "mensagem": f"Erro no teste AI: {e}"})
+
+
+@app.route("/forcar_operacao_teste", methods=["POST"])
+def forcar_operacao_teste():
+    """Força uma operação de teste para verificar se o sistema está funcionando"""
+    if "token" not in session:
+        return jsonify({"status": "erro", "mensagem": "Não autenticado"}), 401
+
+    try:
+        # Adiciona logs de teste
+        adicionar_log_tempo_real("🧪 TESTE: Forçando operação de teste...", "info")
+        adicionar_log_tempo_real("📊 TESTE: Analisando JD10...", "info")
+        adicionar_log_tempo_real("📈 TESTE: CALL - Entrada forçada", "success")
+
+        # Simula uma operação no histórico
+        adicionar_operacao("CALL", 0.70, 1.25)
+
+        adicionar_log_tempo_real(
+            "💰 TESTE: Operação finalizada com sucesso!", "success"
+        )
+
+        return jsonify(
+            {
+                "status": "ok",
+                "mensagem": "Operação de teste executada com sucesso",
+                "logs_adicionados": 4,
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Erro no teste de operação: {e}")
+        return jsonify({"status": "erro", "mensagem": str(e)}), 500
 
 
 # Sistema de operações movido para motor.py e catalogador.py
