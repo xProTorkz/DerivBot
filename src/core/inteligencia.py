@@ -1,39 +1,39 @@
 import json
 import os
 import numpy as np
-import pandas as pd
+import pandas as pd  # Keep pandas for Inteligencia class
 from typing import Dict, Any, List, Tuple, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta  # Keep datetime
 import logging
-from src import config
+from cachetools import TTLCache
+
+# Importa as configurações centralizadas
+from src import (
+    config as global_config,
+)  # Use an alias to avoid conflict with local 'config' variables
 
 # Diretório para armazenar os dados de memória
-MEMORIA_DIR = "memoria"
+MEMORIA_DIR = "memoria_inteligencia"  # Renamed to avoid conflict if catalogador also uses "memoria"
+
+# Setup logger for this module
+logger_intel = logging.getLogger("inteligencia")  # Use a specific logger
 
 
 def _criar_diretorio_memoria():
-    """Cria o diretório de memória se não existir"""
     if not os.path.exists(MEMORIA_DIR):
         os.makedirs(MEMORIA_DIR)
 
 
 def _obter_arquivo_memoria(cliente_id: str) -> str:
-    """Retorna o caminho do arquivo de memória para um cliente"""
-    return os.path.join(MEMORIA_DIR, f"{cliente_id}.json")
+    return os.path.join(
+        MEMORIA_DIR, f"{cliente_id}_intel_data.json"
+    )  # Changed filename
 
 
 def carregar_memoria(cliente_id: str) -> Dict[str, Any]:
-    """
-    Carrega os dados de memória de um cliente
-    Args:
-        cliente_id: Identificador do cliente
-    Returns:
-        Dicionário com os dados de memória
-    """
     try:
         _criar_diretorio_memoria()
         arquivo = _obter_arquivo_memoria(cliente_id)
-
         if not os.path.exists(arquivo):
             return {
                 "historico": [],
@@ -44,12 +44,10 @@ def carregar_memoria(cliente_id: str) -> Dict[str, Any]:
                     "assertividade": 0.0,
                 },
             }
-
         with open(arquivo, "r", encoding="utf-8") as f:
             return json.load(f)
-
     except Exception as e:
-        print(f"Erro ao carregar memória: {e}")
+        logger_intel.error(f"Erro ao carregar memória IA para {cliente_id}: {e}")
         return {
             "historico": [],
             "ultima_atualizacao": datetime.now().isoformat(),
@@ -61,222 +59,191 @@ def carregar_memoria(cliente_id: str) -> Dict[str, Any]:
         }
 
 
-def salvar_memoria(cliente_id: str, dados: Dict[str, Any]) -> bool:
-    """
-    Salva os dados de memória de um cliente
-    Args:
-        cliente_id: Identificador do cliente
-        dados: Dicionário com os dados a serem salvos
-    Returns:
-        True se salvou com sucesso, False caso contrário
-    """
+def salvar_memoria(
+    cliente_id: str, dados_nova_operacao: Dict[str, Any]
+) -> bool:  # Changed 'dados' to 'dados_nova_operacao'
     try:
         _criar_diretorio_memoria()
         arquivo = _obter_arquivo_memoria(cliente_id)
-
-        # Carrega dados existentes
         dados_existentes = carregar_memoria(cliente_id)
 
-        # Atualiza dados
-        dados_existentes["historico"].append(dados)
+        # Adiciona a nova operação ao histórico
+        dados_existentes["historico"].append(
+            dados_nova_operacao
+        )  # Append the new operation data
         dados_existentes["ultima_atualizacao"] = datetime.now().isoformat()
 
-        # Atualiza estatísticas
         historico = dados_existentes["historico"]
         total_ops = len(historico)
-        lucro_total = sum(op.get("lucro", 0) for op in historico)
-        ops_lucro = sum(1 for op in historico if op.get("lucro", 0) > 0)
+        lucro_total = sum(
+            float(op.get("lucro", 0.0)) for op in historico
+        )  # Ensure float
+        ops_lucro = sum(1 for op in historico if float(op.get("lucro", 0.0)) > 0)
 
         dados_existentes["estatisticas"] = {
             "total_operacoes": total_ops,
             "lucro_total": lucro_total,
-            "assertividade": (ops_lucro / total_ops * 100) if total_ops > 0 else 0,
+            "assertividade": (
+                (ops_lucro / total_ops * 100) if total_ops > 0 else 0.0
+            ),  # Ensure float
         }
-
-        # Salva dados atualizados
         with open(arquivo, "w", encoding="utf-8") as f:
             json.dump(dados_existentes, f, indent=4, ensure_ascii=False)
-
         return True
-
     except Exception as e:
-        print(f"Erro ao salvar memória: {e}")
+        logger_intel.error(f"Erro ao salvar memória IA para {cliente_id}: {e}")
         return False
 
 
 def limpar_memoria(cliente_id: str) -> bool:
-    """
-    Limpa os dados de memória de um cliente
-    Args:
-        cliente_id: Identificador do cliente
-    Returns:
-        True se limpou com sucesso, False caso contrário
-    """
     try:
         arquivo = _obter_arquivo_memoria(cliente_id)
         if os.path.exists(arquivo):
             os.remove(arquivo)
+        logger_intel.info(f"Memória IA para cliente {cliente_id} limpa.")
         return True
     except Exception as e:
-        print(f"Erro ao limpar memória: {e}")
+        logger_intel.error(f"Erro ao limpar memória IA para {cliente_id}: {e}")
         return False
 
 
-# =================== NOVAS FUNÇÕES PARA SUPORTE E RESISTÊNCIA ===================
-
-
+# =================== FUNÇÕES PARA SUPORTE E RESISTÊNCIA ===================
 def detectar_suporte_resistencia(
-    velas: List[Dict], janela: int = 5
+    velas: List[Dict],
+    janela: int = global_config.CONFIG_MICRO_SCALPING_ANALISE[
+        "suporte_resistencia_janela_velas"
+    ],
 ) -> Tuple[List[float], List[float]]:
-    """
-    Detecta níveis de suporte e resistência usando método de máximos e mínimos locais
-
-    Args:
-        velas: Lista de velas OHLCV
-        janela: Tamanho da janela para detectar máximos e mínimos locais
-
-    Returns:
-        Tuple contendo (suportes, resistências)
-    """
     try:
-        # Verifica se há dados suficientes
-        if len(velas) < janela * 2:
-            return [], []
+        if len(velas) < janela * 2 + 1:
+            return [], []  # Need enough data points
 
-        # Extrai preços de fechamento
-        closes = [v["close"] for v in velas]
-        highs = [v["high"] for v in velas]
-        lows = [v["low"] for v in velas]
+        # Using 'low' for support and 'high' for resistance detection more accurately
+        lows = pd.Series([v["low"] for v in velas])
+        highs = pd.Series([v["high"] for v in velas])
 
-        # Lista para armazenar suportes e resistências
-        suportes = []
-        resistencias = []
+        # Find local minima (support) and maxima (resistance) using rolling windows
+        # A point is a local min if it's the minimum in a window around it
+        suportes_indices = lows[
+            (lows.rolling(window=2 * janela + 1, center=True).min() == lows)
+        ].index
+        resistencias_indices = highs[
+            (highs.rolling(window=2 * janela + 1, center=True).max() == highs)
+        ].index
 
-        # Detecta suportes (mínimos locais)
-        for i in range(janela, len(lows) - janela):
-            # Verifica se é um mínimo local
-            if all(lows[i] <= lows[i - j] for j in range(1, janela + 1)) and all(
-                lows[i] <= lows[i + j] for j in range(1, janela + 1)
-            ):
-                suportes.append(lows[i])
+        suportes = [
+            lows[i] for i in suportes_indices if i < len(lows)
+        ]  # Ensure index is valid
+        resistencias = [
+            highs[i] for i in resistencias_indices if i < len(highs)
+        ]  # Ensure index is valid
 
-        # Detecta resistências (máximos locais)
-        for i in range(janela, len(highs) - janela):
-            # Verifica se é um máximo local
-            if all(highs[i] >= highs[i - j] for j in range(1, janela + 1)) and all(
-                highs[i] >= highs[i + j] for j in range(1, janela + 1)
-            ):
-                resistencias.append(highs[i])
-
-        # Filtra níveis próximos (agrupa níveis semelhantes)
         if suportes:
-            suportes = agrupar_niveis_proximos(suportes)
+            suportes = agrupar_niveis_proximos(
+                suportes,
+                global_config.CONFIG_MICRO_SCALPING_ANALISE[
+                    "suporte_resistencia_margem_percent"
+                ],
+            )
         if resistencias:
-            resistencias = agrupar_niveis_proximos(resistencias)
+            resistencias = agrupar_niveis_proximos(
+                resistencias,
+                global_config.CONFIG_MICRO_SCALPING_ANALISE[
+                    "suporte_resistencia_margem_percent"
+                ],
+            )
 
-        return suportes, resistencias
-
+        return sorted(list(set(suportes))), sorted(list(set(resistencias)))
     except Exception as e:
-        print(f"Erro ao detectar suporte/resistência: {e}")
+        logger_intel.error(f"Erro ao detectar S/R: {e}", exc_info=True)
         return [], []
 
 
 def agrupar_niveis_proximos(
-    niveis: List[float], threshold_percent: float = 0.05
+    niveis: List[float], threshold_percent: float  # No default, use from global_config
 ) -> List[float]:
-    """
-    Agrupa níveis que estão muito próximos um do outro
-
-    Args:
-        niveis: Lista de níveis de preço
-        threshold_percent: Porcentagem de proximidade para considerar como mesmo nível
-
-    Returns:
-        Lista de níveis filtrados
-    """
     if not niveis:
         return []
+    niveis_ordenados = sorted(list(set(niveis)))  # Remove duplicates before grouping
+    if not niveis_ordenados:
+        return []
 
-    # Ordena os níveis
-    niveis_ordenados = sorted(niveis)
-
-    # Lista para armazenar os níveis agrupados
     niveis_agrupados = []
-
-    # Grupo atual
     grupo_atual = [niveis_ordenados[0]]
 
-    # Para cada nível, verifica se está próximo ao grupo atual
     for i in range(1, len(niveis_ordenados)):
         nivel_atual = niveis_ordenados[i]
-        nivel_referencia = grupo_atual[0]
+        media_grupo = sum(grupo_atual) / len(
+            grupo_atual
+        )  # Compare with current group's average
 
-        # Calcula a diferença percentual
-        diff_percent = abs(nivel_atual - nivel_referencia) / nivel_referencia
+        # Check if nivel_atual is close to media_grupo
+        if media_grupo == 0 and nivel_atual == 0:  # Both zero
+            diff_percent = 0.0
+        elif (
+            media_grupo == 0
+        ):  # Avoid division by zero if media_grupo is zero but nivel_atual is not
+            diff_percent = float("inf")  # Consider them not part of the same group
+        else:
+            diff_percent = abs(nivel_atual - media_grupo) / media_grupo
 
-        # Se estiver dentro do threshold, adiciona ao grupo atual
         if diff_percent <= threshold_percent:
             grupo_atual.append(nivel_atual)
         else:
-            # Adiciona a média do grupo atual e começa um novo grupo
             niveis_agrupados.append(sum(grupo_atual) / len(grupo_atual))
             grupo_atual = [nivel_atual]
-
-    # Adiciona o último grupo
     if grupo_atual:
         niveis_agrupados.append(sum(grupo_atual) / len(grupo_atual))
+    return sorted(list(set(niveis_agrupados)))
 
-    return niveis_agrupados
 
-
-def esta_em_suporte(
-    preco_atual: float, suportes: List[float], margem_percent: float = 0.1
+def esta_em_suporte_ou_resistencia(  # Combined function for efficiency
+    preco_atual: float, niveis: List[float], margem_percent: float  # No default
 ) -> bool:
-    """
-    Verifica se o preço atual está em uma zona de suporte
-
-    Args:
-        preco_atual: Preço atual
-        suportes: Lista de níveis de suporte
-        margem_percent: Margem percentual para considerar que está no suporte
-
-    Returns:
-        True se estiver próximo a um suporte, False caso contrário
-    """
-    if not suportes:
+    if not niveis:
         return False
+    for nivel in niveis:
+        if nivel == 0 and preco_atual == 0:
+            margem = 0  # handle both zero case
+        elif nivel == 0:
+            margem = (
+                preco_atual * margem_percent
+            )  # if nivel is 0, use preco_atual for margem
+        else:
+            margem = nivel * margem_percent
 
-    for suporte in suportes:
-        margem = suporte * margem_percent
-        if abs(preco_atual - suporte) <= margem:
+        if abs(preco_atual - nivel) <= margem:
             return True
-
     return False
 
 
-def esta_em_resistencia(
-    preco_atual: float, resistencias: List[float], margem_percent: float = 0.1
-) -> bool:
-    """
-    Verifica se o preço atual está em uma zona de resistência
+def calcular_rsi_local(
+    precos: List[float], periodo: int = global_config.RSI_PERIODO_PADRAO
+) -> float:
+    """Calcula o Índice de Força Relativa (RSI) localmente, usando config."""
+    # This is a simplified RSI calculation, can be replaced by a more robust one from catalogador.AnalisadorTecnico
+    # if circular dependencies are managed or if AnalisadorTecnico is moved to a shared utils module.
+    if len(precos) < periodo + 1:
+        return 50.0
+    deltas = np.diff(precos)
+    seed = deltas[:periodo]  # Use only first 'periodo' deltas for initial SMMA
 
-    Args:
-        preco_atual: Preço atual
-        resistencias: Lista de níveis de resistência
-        margem_percent: Margem percentual para considerar que está na resistência
+    gains = np.maximum(seed, 0)
+    losses = np.maximum(-seed, 0)
 
-    Returns:
-        True se estiver próximo a uma resistência, False caso contrário
-    """
-    if not resistencias:
-        return False
+    avg_gain = np.mean(gains)
+    avg_loss = np.mean(losses)
 
-    for resistencia in resistencias:
-        margem = resistencia * margem_percent
-        if abs(preco_atual - resistencia) <= margem:
-            return True
+    # SMMA for subsequent values
+    for i in range(periodo, len(deltas)):
+        delta = deltas[i]
+        avg_gain = (avg_gain * (periodo - 1) + max(delta, 0)) / periodo
+        avg_loss = (avg_loss * (periodo - 1) + max(-delta, 0)) / periodo
 
-    return False
+    if avg_loss == 0:
+        return 100.0 if avg_gain > 0 else 50.0
+    rs = avg_gain / avg_loss
+    return 100.0 - (100.0 / (1.0 + rs))
 
 
 def analisar_micro_scalping(
@@ -285,397 +252,375 @@ def analisar_micro_scalping(
     lucro_atual: float,
     modo: str,
     operacoes_ativas: int = 0,
-    max_operacoes: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """
-    Analisa oportunidades de micro scalping com foco em suporte e resistência
-    para ativos de 1 segundo.
-
-    Args:
-        velas: Lista de velas OHLCV
-        meta: Meta de lucro para a sessão
-        lucro_atual: Lucro atual da sessão
-        modo: Modo de operação ('iniciante', 'conservador', 'agressivo')
-        operacoes_ativas: Número de operações ativas
-        max_operacoes: Número máximo de operações simultâneas permitidas
-
-    Returns:
-        Dicionário com decisão e análise
-    """
     try:
-        # Verificações iniciais
-        if len(velas) < 20:
-            return {"sinal": None, "confianca": 0.0, "razao": "Dados insuficientes"}
-
-        # Define máximo de operações por modo
-        if max_operacoes is None:
-            if modo == "iniciante":
-                max_operacoes = 1
-            elif modo == "conservador":
-                max_operacoes = 3
-            else:  # agressivo
-                max_operacoes = 5
-
-        # Se já atingiu o máximo de operações para o modo, aguarda
-        if operacoes_ativas >= max_operacoes:
+        if (
+            len(velas)
+            < global_config.CONFIG_ANALISE_CATALOGADOR["limites"]["min_velas_analise"]
+        ):  # Use min_velas from config
             return {
                 "sinal": None,
                 "confianca": 0.0,
-                "razao": f"Máximo de operações atingido ({operacoes_ativas}/{max_operacoes})",
+                "razao": "Dados de velas insuficientes",
             }
 
-        # Verifica proximidade da meta
-        meta_atingida_percent = (lucro_atual / meta) * 100
-        if meta_atingida_percent > 75:
-            # Reduzir número máximo de operações quando próximo da meta
-            new_max_ops = max(1, int(max_operacoes * (1 - meta_atingida_percent / 100)))
-            if operacoes_ativas >= new_max_ops:
+        modo_config = global_config.MODOS_OPERACAO_SCALPING.get(
+            modo, global_config.MODOS_OPERACAO_SCALPING["iniciante"]
+        )
+        max_operacoes_simultaneas = modo_config["max_operacoes_simultaneas"]
+
+        if operacoes_ativas >= max_operacoes_simultaneas:
+            return {
+                "sinal": None,
+                "confianca": 0.0,
+                "razao": f"Máximo de operações ({operacoes_ativas}/{max_operacoes_simultaneas})",
+            }
+
+        # Meta progress check (original logic)
+        meta_atingida_percent = (lucro_atual / meta * 100) if meta > 0 else 0
+        if (
+            meta_atingida_percent
+            > global_config.CONFIG_MICRO_SCALPING_ANALISE[
+                "meta_progresso_reducao_ops_percent"
+            ]
+        ):
+            reducao_fator = (100.0 - meta_atingida_percent) / (
+                100.0
+                - global_config.CONFIG_MICRO_SCALPING_ANALISE[
+                    "meta_progresso_reducao_ops_percent"
+                ]
+            )
+            max_ops_reduzido = max(1, int(max_operacoes_simultaneas * reducao_fator))
+            if operacoes_ativas >= max_ops_reduzido:
                 return {
                     "sinal": None,
                     "confianca": 0.0,
-                    "razao": f"Próximo da meta ({meta_atingida_percent:.1f}%). Limitando operações a {new_max_ops}",
+                    "razao": f"Próximo da meta ({meta_atingida_percent:.1f}%). Ops limitadas a {max_ops_reduzido}",
                 }
 
-        # Analisa RSI para confirmar sobrecompra/sobrevenda
         closes = [v["close"] for v in velas]
-        rsi = calcular_rsi(closes)
+        # RSI from local calculation or preferably from a shared AnalisadorTecnico
+        rsi_period = global_config.CONFIG_ESTRATEGIA_TURBO["indicadores"]["rsi_periodo"]
+        rsi = calcular_rsi_local(closes, periodo=rsi_period)
 
-        # Detecta suportes e resistências
         suportes, resistencias = detectar_suporte_resistencia(velas)
-
-        # Preço atual e direção recente (tendência de curtíssimo prazo)
         preco_atual = velas[-1]["close"]
-        direcao_curta = "ALTA" if velas[-1]["close"] > velas[-3]["close"] else "BAIXA"
 
-        # Análise de força da tendência
-        forca_tendencia = (
-            abs(velas[-1]["close"] - velas[-5]["close"]) / velas[-5]["close"] * 100
-        )
+        # Simplified direction: last 3 candles
+        if len(velas) >= 3:
+            direcao_curta = (
+                "ALTA"
+                if velas[-1]["close"] > velas[-3]["close"]
+                else ("BAIXA" if velas[-1]["close"] < velas[-3]["close"] else "NEUTRA")
+            )
+        else:
+            direcao_curta = "NEUTRA"
 
-        # Volatilidade recente
-        volatilidade = np.std([v["close"] for v in velas[-10:]])
+        # Volatility: Standard deviation of last 10 closes
+        volatilidade = np.std(closes[-10:]) if len(closes) >= 10 else 0.0
 
-        # Lógica de decisão para scalping
+        # Força da tendência: (preco_atual - preco_5_velas_atras) / preco_5_velas_atras
+        if len(closes) >= 5 and closes[-5] != 0:
+            forca_tendencia = abs(closes[-1] - closes[-5]) / closes[-5] * 100
+        else:
+            forca_tendencia = 0.0
+
         decisao = None
         confianca = 0.0
-        razao = ""
+        razao = "Aguardando"
 
-        # --- Otimização Modo Iniciante: Requerer confiança altíssima e condições mais estritas ---
-        confianca_minima_iniciante = 0.95  # Exigência de confiança muito alta
-        rsi_sobrecompra_iniciante = 75
-        rsi_sobrevenda_iniciante = 25
-        margem_sr_iniciante = 0.02  # Margem mais estreita para S/R
+        conf_min_modo = modo_config["confianca_min_sinal"]
+        rsi_sobrecompra_lim = global_config.CONFIG_MICRO_SCALPING_ANALISE[
+            "rsi_sobrecompra_limiar"
+        ]
+        rsi_sobrevenda_lim = global_config.CONFIG_MICRO_SCALPING_ANALISE[
+            "rsi_sobrevenda_limiar"
+        ]
+        margem_sr = global_config.CONFIG_MICRO_SCALPING_ANALISE[
+            "suporte_resistencia_margem_percent"
+        ]
 
-        # Verifica se está em suporte ou resistência (com critérios mais rígidos para iniciante)
-        if modo == "iniciante":
+        # Lógica de Decisão (simplificada para exemplo, pode ser mais complexa)
+        if (
+            esta_em_suporte_ou_resistencia(preco_atual, resistencias, margem_sr)
+            and rsi > rsi_sobrecompra_lim
+        ):
+            decisao = "venda"
+            confianca = 0.70 + (rsi - rsi_sobrecompra_lim) / 100.0  # Base + rsi factor
+            razao = f"Resistência ({preco_atual:.5f}) + RSI Sobrecomprado ({rsi:.1f})"
+        elif (
+            esta_em_suporte_ou_resistencia(preco_atual, suportes, margem_sr)
+            and rsi < rsi_sobrevenda_lim
+        ):
+            decisao = "compra"
+            confianca = 0.70 + (rsi_sobrevenda_lim - rsi) / 100.0
+            razao = f"Suporte ({preco_atual:.5f}) + RSI Sobrevendido ({rsi:.1f})"
+
+        # Adicionar lógica de tendência se não houver sinal de S/R forte
+        elif decisao is None:
             if (
-                esta_em_resistencia(preco_atual, resistencias, margem_sr_iniciante)
-                and rsi > rsi_sobrecompra_iniciante
-            ):
-                decisao = "venda"
-                confianca = min(
-                    0.9 + (rsi - rsi_sobrecompra_iniciante) / 50, 0.99
-                )  # Confiança alta, mas limitada
-                razao = f"[INICIANTE] Resistência ({preco_atual:.5f}) + RSI extremo ({rsi:.1f})"
-            elif (
-                esta_em_suporte(preco_atual, suportes, margem_sr_iniciante)
-                and rsi < rsi_sobrevenda_iniciante
-            ):
-                decisao = "compra"
-                confianca = min(
-                    0.9 + (rsi_sobrevenda_iniciante - rsi) / 50, 0.99
-                )  # Confiança alta, mas limitada
-                razao = (
-                    f"[INICIANTE] Suporte ({preco_atual:.5f}) + RSI extremo ({rsi:.1f})"
-                )
-
-            # Se for iniciante e a confiança não atingir o mínimo, não opera
-            if decisao and confianca < confianca_minima_iniciante:
-                razao += f" (Confiança {confianca:.2f} < {confianca_minima_iniciante} - Aguardando)"
-                decisao = None
-                confianca = 0.0
-
-        # --- Lógica para outros modos (Conservador/Agressivo) ---
-        elif modo != "iniciante":  # Aplica a lógica original para outros modos
-            if esta_em_resistencia(preco_atual, resistencias, 0.03) and rsi > 70:
-                decisao = "venda"
-                confianca = min(0.8 + (rsi - 70) / 100, 0.98)
-                razao = f"Resistência encontrada em {preco_atual:.5f} com RSI alto ({rsi:.1f})"
-
-            elif esta_em_suporte(preco_atual, suportes, 0.03) and rsi < 30:
-                decisao = "compra"
-                confianca = min(0.8 + (30 - rsi) / 100, 0.98)
-                razao = (
-                    f"Suporte encontrado em {preco_atual:.5f} com RSI baixo ({rsi:.1f})"
-                )
-
-            # Adiciona novas condições para tendências claras
-            # Tendência de alta forte com confirmação
-            elif (
                 direcao_curta == "ALTA"
-                and forca_tendencia > 0.15
-                and rsi > 40
-                and rsi < 65
-            ):
-                # Verifica se temos 3 velas consecutivas de alta
-                if (
-                    velas[-1]["close"] > velas[-1]["open"]
-                    and velas[-2]["close"] > velas[-2]["open"]
-                    and velas[-3]["close"] > velas[-3]["open"]
-                ):
-                    decisao = "compra"
-                    confianca = 0.65 + min(forca_tendencia / 100, 0.25)
-                    razao = f"Tendência de alta confirmada com força {forca_tendencia:.2f}%, RSI={rsi:.1f}"
-
-            # Tendência de baixa forte com confirmação
+                and forca_tendencia > 0.05
+                and rsi > 50
+                and rsi < rsi_sobrecompra_lim - 5
+            ):  # Ex: 0.05% de força, RSI não extremo
+                decisao = "compra"
+                confianca = 0.60 + forca_tendencia * 10  # Confiança baseada na força
+                razao = f"Tendência de Alta ({direcao_curta}), Força: {forca_tendencia:.3f}%, RSI: {rsi:.1f}"
             elif (
                 direcao_curta == "BAIXA"
-                and forca_tendencia > 0.15
-                and rsi < 60
-                and rsi > 35
+                and forca_tendencia > 0.05
+                and rsi < 50
+                and rsi > rsi_sobrevenda_lim + 5
             ):
-                # Verifica se temos 3 velas consecutivas de baixa
-                if (
-                    velas[-1]["close"] < velas[-1]["open"]
-                    and velas[-2]["close"] < velas[-2]["open"]
-                    and velas[-3]["close"] < velas[-3]["open"]
-                ):
-                    decisao = "venda"
-                    confianca = 0.65 + min(forca_tendencia / 100, 0.25)
-                    razao = f"Tendência de baixa confirmada com força {forca_tendencia:.2f}%, RSI={rsi:.1f}"
+                decisao = "venda"
+                confianca = 0.60 + forca_tendencia * 10
+                razao = f"Tendência de Baixa ({direcao_curta}), Força: {forca_tendencia:.3f}%, RSI: {rsi:.1f}"
 
-            # Reversão de tendência em zona neutra
-            elif abs(rsi - 50) < 10 and volatilidade > 0:
-                # Detecta uma reversão recente
-                if (
-                    velas[-1]["close"] > velas[-1]["open"]
-                    and velas[-2]["close"] < velas[-2]["open"]
-                    and velas[-3]["close"] < velas[-3]["open"]
-                ):
-                    decisao = "compra"
-                    confianca = 0.62
-                    razao = (
-                        f"Possível reversão de baixa para alta detectada, RSI={rsi:.1f}"
-                    )
-                elif (
-                    velas[-1]["close"] < velas[-1]["open"]
-                    and velas[-2]["close"] > velas[-2]["open"]
-                    and velas[-3]["close"] > velas[-3]["open"]
-                ):
-                    decisao = "venda"
-                    confianca = 0.62
-                    razao = (
-                        f"Possível reversão de alta para baixa detectada, RSI={rsi:.1f}"
-                    )
+        if decisao and confianca < conf_min_modo:
+            razao += f" (Conf {confianca:.2f} < Min {conf_min_modo} - Aguardando)"
+            decisao = None
+            confianca = 0.0
 
-        # Resultado final
-        resultado = {
+        confianca = min(confianca, 0.99)  # Cap confidence
+
+        return {
             "sinal": decisao,
-            "confianca": confianca,
+            "confianca": round(confianca, 2),
             "razao": razao,
             "analise": {
                 "preco": preco_atual,
-                "rsi": rsi,
+                "rsi": round(rsi, 1),
                 "direcao": direcao_curta,
-                "forca_tendencia": forca_tendencia,
-                "volatilidade": volatilidade,
-                "suportes": suportes[-3:] if suportes else [],
-                "resistencias": resistencias[-3:] if resistencias else [],
-                "meta_progresso": meta_atingida_percent,
+                "forca_tendencia": round(forca_tendencia, 3),
+                "volatilidade": round(volatilidade, 5),
+                "suportes": suportes[-3:],
+                "resistencias": resistencias[-3:],
+                "meta_progresso_percent": round(meta_atingida_percent, 1),
             },
         }
-
-        return resultado
-
     except Exception as e:
-        print(f"Erro na análise de micro scalping: {e}")
+        logger_intel.error(f"Erro na análise de micro scalping: {e}", exc_info=True)
         return {"sinal": None, "confianca": 0.0, "razao": f"Erro: {str(e)}"}
 
 
-def calcular_rsi(precos: List[float], periodo: int = 14) -> float:
-    """
-    Calcula o Índice de Força Relativa (RSI)
-
-    Args:
-        precos: Lista de preços de fechamento
-        periodo: Período para cálculo do RSI
-
-    Returns:
-        Valor do RSI (0-100)
-    """
-    if len(precos) < periodo + 1:
-        return 50.0  # valor neutro para dados insuficientes
-
-    # Calcula as diferenças entre preços consecutivos
-    deltas = np.diff(precos)
-
-    # Separa ganhos e perdas
-    seed = deltas[: periodo + 1]
-    ganhos = seed.copy()
-    perdas = seed.copy()
-    ganhos[seed < 0] = 0
-    perdas[seed > 0] = 0
-    perdas = abs(perdas)
-
-    # Calcula médias de ganhos e perdas
-    avg_ganho = np.mean(ganhos[:periodo])
-    avg_perda = np.mean(perdas[:periodo])
-
-    if avg_perda == 0:
-        return 100.0
-
-    rs = avg_ganho / avg_perda
-    rsi = 100 - (100 / (1 + rs))
-
-    return rsi
-
-
+# Classe Inteligencia (mais geral, baseada em pandas)
 class Inteligencia:
     def __init__(self):
-        self.logger = logging.getLogger("Inteligencia")
-        self.cache = {}
-        self.ultima_analise = None
+        self.logger = logging.getLogger("InteligenciaClasse")  # Different logger name
+        self.cache: Dict[str, Any] = {}  # Initialize cache
+        self.ultima_analise: Optional[Dict] = None  # Initialize ultima_analise
 
-    def analisar_mercado(self, dados: List[Dict]) -> Dict:
-        """Analisa dados de mercado e retorna previsão"""
+    def analisar_mercado(self, dados_velas: List[Dict]) -> Dict:
         try:
-            # Converte dados para DataFrame
-            df = pd.DataFrame(dados)
+            if (
+                not dados_velas
+                or len(dados_velas) < global_config.BOLLINGER_PERIODO_PADRAO
+            ):  # Need enough for longest indicator
+                return {
+                    "direcao": "neutro",
+                    "confianca": 0.0,
+                    "indicadores": {},
+                    "razao": "Dados insuficientes",
+                }
+            df = pd.DataFrame(dados_velas)
+            if not all(col in df.columns for col in ["open", "high", "low", "close"]):
+                return {
+                    "direcao": "neutro",
+                    "confianca": 0.0,
+                    "indicadores": {},
+                    "razao": "Colunas OHLC ausentes",
+                }
 
-            # Calcula indicadores técnicos
             indicadores = self._calcular_indicadores(df)
+            previsao = self._gerar_previsao(
+                df["close"].iloc[-1], indicadores
+            )  # Pass current price for BB check
 
-            # Gera previsão
-            previsao = self._gerar_previsao(indicadores)
-
-            # Atualiza cache
-            self.cache["ultima_analise"] = {
+            self.ultima_analise = {
                 "timestamp": datetime.now().isoformat(),
                 "indicadores": indicadores,
                 "previsao": previsao,
             }
-
+            self.cache["ultima_analise"] = (
+                self.ultima_analise
+            )  # Store in instance cache
             return previsao
-
         except Exception as e:
-            self.logger.error(f"Erro na análise: {str(e)}")
-            return {"direcao": "neutro", "confianca": 0.0, "indicadores": {}}
+            self.logger.error(
+                f"Erro na análise de mercado (Inteligencia): {str(e)}", exc_info=True
+            )
+            return {
+                "direcao": "neutro",
+                "confianca": 0.0,
+                "indicadores": {},
+                "razao": f"Erro: {str(e)}",
+            }
 
     def _calcular_indicadores(self, df: pd.DataFrame) -> Dict:
-        """Calcula indicadores técnicos"""
         indicadores = {}
+        closes = df["close"]  # Use Series for direct indicator calculation
 
         # RSI
-        delta = df["close"].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-        rs = gain / loss
-        indicadores["rsi"] = 100 - (100 / (1 + rs))
+        rsi_period = global_config.RSI_PERIODO_PADRAO
+        delta = closes.diff()
+        gain = delta.where(delta > 0, 0.0)
+        loss = -delta.where(delta < 0, 0.0)
+        avg_gain = gain.rolling(
+            window=rsi_period, min_periods=1
+        ).mean()  # Use rolling for pandas Series
+        avg_loss = loss.rolling(window=rsi_period, min_periods=1).mean()
+        rs = avg_gain / avg_loss
+        indicadores["rsi"] = (100.0 - (100.0 / (1.0 + rs))).fillna(
+            50.0
+        )  # Handle NaN with 50
 
         # MACD
-        exp1 = df["close"].ewm(span=12, adjust=False).mean()
-        exp2 = df["close"].ewm(span=26, adjust=False).mean()
-        macd = exp1 - exp2
-        signal = macd.ewm(span=9, adjust=False).mean()
-        indicadores["macd"] = macd
-        indicadores["macd_signal"] = signal
+        exp1 = closes.ewm(span=12, adjust=False).mean()
+        exp2 = closes.ewm(span=26, adjust=False).mean()
+        indicadores["macd"] = exp1 - exp2
+        indicadores["macd_signal"] = (
+            indicadores["macd"].ewm(span=9, adjust=False).mean()
+        )
 
         # Bollinger Bands
-        sma = df["close"].rolling(window=20).mean()
-        std = df["close"].rolling(window=20).std()
-        indicadores["bb_upper"] = sma + (std * 2)
-        indicadores["bb_lower"] = sma - (std * 2)
+        bollinger_period = global_config.BOLLINGER_PERIODO_PADRAO
+        bollinger_dev = global_config.BOLLINGER_DESVIO_PADRAO
+        sma_bb = closes.rolling(window=bollinger_period).mean()
+        std_bb = closes.rolling(window=bollinger_period).std()
+        indicadores["bb_media"] = sma_bb  # Added BB media
+        indicadores["bb_upper"] = sma_bb + (std_bb * bollinger_dev)
+        indicadores["bb_lower"] = sma_bb - (std_bb * bollinger_dev)
 
-        # Moving Averages
-        indicadores["sma_20"] = df["close"].rolling(window=20).mean()
-        indicadores["sma_50"] = df["close"].rolling(window=50).mean()
-        indicadores["sma_200"] = df["close"].rolling(window=200).mean()
+        # Moving Averages from config
+        indicadores[f"sma_{global_config.EMA_RAPIDA_PADRAO}"] = closes.rolling(
+            window=global_config.EMA_RAPIDA_PADRAO
+        ).mean()
+        indicadores[f"sma_{global_config.EMA_LENTA_PADRAO}"] = closes.rolling(
+            window=global_config.EMA_LENTA_PADRAO
+        ).mean()
+        # indicadores["sma_200"] = closes.rolling(window=200).mean() # if 200 is needed
 
-        return indicadores
+        # Return last value of each indicator
+        # Ensure all indicators have a value (e.g., by using .iloc[-1] and handling potential NaNs)
+        final_indicadores = {}
+        for key, series in indicadores.items():
+            if not series.empty:
+                final_indicadores[key] = (
+                    series.iloc[-1] if pd.notna(series.iloc[-1]) else None
+                )
+            else:
+                final_indicadores[key] = None
+        return final_indicadores
 
-    def _gerar_previsao(self, indicadores: Dict) -> Dict:
-        """Gera previsão baseada nos indicadores"""
-        # Inicializa contadores
+    def _gerar_previsao(self, preco_atual: float, indicadores: Dict) -> Dict:
         sinais_compra = 0
         sinais_venda = 0
-        total_sinais = 0
+        total_sinais_validos = 0
 
-        # Analisa RSI
-        rsi = indicadores["rsi"].iloc[-1]
-        if rsi < 30:
-            sinais_compra += 1
-        elif rsi > 70:
-            sinais_venda += 1
-        total_sinais += 1
+        # RSI
+        rsi = indicadores.get("rsi")
+        if rsi is not None:
+            total_sinais_validos += 1
+            if rsi < global_config.RSI_SOBREVENDIDO_PADRAO:
+                sinais_compra += 1
+            elif rsi > global_config.RSI_SOBRECOMPRADO_PADRAO:
+                sinais_venda += 1
 
-        # Analisa MACD
-        macd = indicadores["macd"].iloc[-1]
-        signal = indicadores["macd_signal"].iloc[-1]
-        if macd > signal:
-            sinais_compra += 1
-        elif macd < signal:
-            sinais_venda += 1
-        total_sinais += 1
+        # MACD
+        macd = indicadores.get("macd")
+        signal = indicadores.get("macd_signal")
+        if macd is not None and signal is not None:
+            total_sinais_validos += 1
+            if macd > signal:
+                sinais_compra += 1
+            elif macd < signal:
+                sinais_venda += 1
 
-        # Analisa Bollinger Bands
-        preco = indicadores["sma_20"].iloc[-1]
-        bb_upper = indicadores["bb_upper"].iloc[-1]
-        bb_lower = indicadores["bb_lower"].iloc[-1]
-        if preco < bb_lower:
-            sinais_compra += 1
-        elif preco > bb_upper:
-            sinais_venda += 1
-        total_sinais += 1
+        # Bollinger Bands
+        bb_upper = indicadores.get("bb_upper")
+        bb_lower = indicadores.get("bb_lower")
+        if bb_upper is not None and bb_lower is not None and preco_atual is not None:
+            total_sinais_validos += 1
+            if preco_atual < bb_lower:
+                sinais_compra += 1
+            elif preco_atual > bb_upper:
+                sinais_venda += 1
 
-        # Analisa Moving Averages
-        sma_20 = indicadores["sma_20"].iloc[-1]
-        sma_50 = indicadores["sma_50"].iloc[-1]
-        sma_200 = indicadores["sma_200"].iloc[-1]
+        # Moving Averages (EMA_RAPIDA_PADRAO as short, EMA_LENTA_PADRAO as long)
+        sma_curta_key = f"sma_{global_config.EMA_RAPIDA_PADRAO}"
+        sma_longa_key = f"sma_{global_config.EMA_LENTA_PADRAO}"
+        sma_curta = indicadores.get(sma_curta_key)
+        sma_longa = indicadores.get(sma_longa_key)
 
-        if sma_20 > sma_50 and sma_50 > sma_200:
-            sinais_compra += 1
-        elif sma_20 < sma_50 and sma_50 < sma_200:
-            sinais_venda += 1
-        total_sinais += 1
+        if sma_curta is not None and sma_longa is not None:
+            total_sinais_validos += 1
+            if sma_curta > sma_longa:
+                sinais_compra += 1
+            elif sma_curta < sma_longa:
+                sinais_venda += 1
 
-        # Calcula confiança
-        confianca_compra = sinais_compra / total_sinais
-        confianca_venda = sinais_venda / total_sinais
+        direcao = "neutro"
+        confianca = 0.0
+        if total_sinais_validos > 0:
+            if sinais_compra > sinais_venda:
+                direcao = "compra"
+                confianca = sinais_compra / total_sinais_validos
+            elif sinais_venda > sinais_compra:
+                direcao = "venda"
+                confianca = sinais_venda / total_sinais_validos
+            else:  # sinais_compra == sinais_venda
+                confianca = 0.5  # Neutral confidence if signals are balanced
 
-        # Define direção e confiança
-        if confianca_compra > confianca_venda:
-            direcao = "compra"
-            confianca = confianca_compra
-        elif confianca_venda > confianca_compra:
-            direcao = "venda"
-            confianca = confianca_venda
-        else:
-            direcao = "neutro"
-            confianca = 0.5
+        # Clean up indicators dict for JSON (remove NaN)
+        final_indicadores_dict = {
+            k: (
+                round(v, 5)
+                if isinstance(v, (float, np.floating)) and pd.notna(v)
+                else None
+            )
+            for k, v in indicadores.items()
+        }
 
         return {
             "direcao": direcao,
-            "confianca": confianca,
-            "indicadores": {
-                "rsi": float(rsi),
-                "macd": float(macd),
-                "bb_upper": float(bb_upper),
-                "bb_lower": float(bb_lower),
-                "sma_20": float(sma_20),
-                "sma_50": float(sma_50),
-                "sma_200": float(sma_200),
-            },
+            "confianca": round(confianca, 2),
+            "indicadores": final_indicadores_dict,
         }
 
     def get_ultima_analise(self) -> Optional[Dict]:
-        """Retorna última análise realizada"""
         return self.cache.get("ultima_analise")
 
     def limpar_cache(self):
-        """Limpa cache de análises"""
         self.cache = {}
         self.ultima_analise = None
 
 
-# Instância global da inteligência
-inteligencia = Inteligencia()
+# Instância global (opcional, pode ser gerenciada externamente)
+# inteligencia_global = Inteligencia()
+
+
+class AnaliseTecnica:
+    def __init__(self):
+        self.indicadores_cache = TTLCache(maxsize=100, ttl=1)
+
+    def decidir_modo_operacao(self, dados: dict) -> str:
+        """Decisão de modo com critérios melhorados"""
+        try:
+            volatilidade = self.calcular_volatilidade(dados)
+            tendencia = self.calcular_tendencia(dados)
+            volume = self.calcular_volume(dados)
+
+            # Critérios para Multiplier
+            if volatilidade > 0.4 and volume > 1000 and self.spread_adequado(dados):
+                return "multiplier"
+
+            # Critérios para Turbo
+            if tendencia > 0.7 and dados["payout"] >= 85 and volatilidade <= 0.3:
+                return "turbo"
+
+            return "aguardar"
+
+        except Exception as e:
+            self.logger.error(f"Erro na decisão: {e}")
+            return "aguardar"

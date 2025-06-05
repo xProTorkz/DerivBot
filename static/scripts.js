@@ -2,7 +2,12 @@
 // Carrega mobile.js para funcionalidades específicas para dispositivos móveis
 // O mobile.js é responsável por detectar e ajustar a interface para dispositivos móveis
 
+// TESTE CRÍTICO - Se você não vir este alerta, o JavaScript não está carregando
+alert("🔥 TESTE: JavaScript carregado! Se você vê este alerta, o JS funciona.");
+console.log("🔥 TESTE: JavaScript carregado e executando!");
+
 document.addEventListener("DOMContentLoaded", function () {
+  console.log("🔥 TESTE: DOMContentLoaded disparado!");
   // Código para garantir que a barra de progresso termine nas bolinhas
   (function fixProgressBar() {
     // Adicionar um estilo específico que force os limites da barra
@@ -94,6 +99,11 @@ document.addEventListener("DOMContentLoaded", function () {
       // Salva a nova meta no localStorage
       localStorage.setItem("meta_diaria", config.meta);
 
+      // Atualiza gestão de riscos se disponível
+      if (window.logsAvancados && window.logsAvancados.gestaoRiscos) {
+        window.logsAvancados.gestaoRiscos.definirModo(modo);
+      }
+
       atualizarLog(
         `Modo selecionado: ${modo.toUpperCase()} - Meta: $${
           config.meta
@@ -135,10 +145,24 @@ document.addEventListener("DOMContentLoaded", function () {
     if (metaHeaderEl) metaHeaderEl.textContent = "/" + novaMetaValor;
   });
 
+  // Debug: Verificar se o botão foi encontrado
+  console.log("Botão controle encontrado:", botaoControle);
+  console.log("Modo select encontrado:", modoSelect);
+  console.log("Meta input encontrado:", metaInput);
+
+  if (!botaoControle) {
+    console.error("ERRO: Botão de controle não encontrado!");
+    return;
+  }
+
   botaoControle.addEventListener("click", async () => {
+    console.log("🔥 BOTÃO CLICADO! Iniciando processo...");
+
     const modo = modoSelect.value;
     const meta = parseFloat(metaInput.value);
     const configAtual = modosConfig[modo];
+
+    console.log("Dados:", { modo, meta, configAtual });
 
     // Validação de meta antes de iniciar
     if (
@@ -178,6 +202,9 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     try {
+      console.log("🚀 Enviando requisição para /toggle_bot...");
+      console.log("Dados enviados:", { modo, meta });
+
       const resposta = await fetch("/toggle_bot", {
         method: "POST",
         headers: {
@@ -186,7 +213,25 @@ document.addEventListener("DOMContentLoaded", function () {
         body: JSON.stringify({ modo, meta }),
       });
 
+      console.log(
+        "📡 Resposta recebida:",
+        resposta.status,
+        resposta.statusText
+      );
+
+      if (!resposta.ok) {
+        console.error(
+          "❌ Erro na resposta:",
+          resposta.status,
+          resposta.statusText
+        );
+        const textoErro = await resposta.text();
+        console.error("Texto do erro:", textoErro);
+        return;
+      }
+
       const dados = await resposta.json();
+      console.log("📦 Dados da resposta:", dados);
 
       // Alterna o estado do botão
       roboAtivo = dados.status === "iniciado";
@@ -1433,3 +1478,37 @@ document.addEventListener("DOMContentLoaded", function () {
   setInterval(atualizarLogsTempoReal, 2000);
   atualizarLogsTempoReal(); // Primeira execução imediata
 });
+
+function atualizarLogs(log) {
+  const listaLogs = document.getElementById("lista-logs");
+  const logEntry = document.createElement("div");
+  logEntry.className = `log-entry ${log.tipo}`;
+
+  logEntry.innerHTML = `
+      <span class="timestamp">${log.timestamp}</span>
+      <span class="message">${log.emoji} ${log.mensagem}</span>
+  `;
+
+  listaLogs.appendChild(logEntry);
+  listaLogs.scrollTop = listaLogs.scrollHeight;
+
+  // Atualiza a barra de progresso se houver etapa
+  if (log.etapa) {
+    atualizarProgresso(log.etapa);
+  }
+}
+
+function atualizarProgresso(etapa) {
+  const steps = document.querySelectorAll(".progress-step");
+  let etapaAtual = 0;
+
+  const etapas = ["analise", "modo", "operacao"];
+  const index = etapas.indexOf(etapa);
+
+  steps.forEach((step, i) => {
+    step.classList.remove("active");
+    if (i <= index) {
+      step.classList.add("active");
+    }
+  });
+}

@@ -4,19 +4,589 @@ import time
 import json
 import websocket
 import threading
-import os
+import asyncio
 from datetime import datetime
-from typing import Dict, List, Optional, Union, Callable, Any
+from typing import Dict, List, Any, Callable
 import logging
 
+# Importação com fallback para TTLCache
+try:
+    from cachetools import TTLCache
+except ImportError:
+    # Fallback simples se cachetools não estiver disponível
+    class TTLCache:
+        def __init__(self, maxsize=100, ttl=60):  # ttl ignorado no fallback
+            self.data = {}
+            self.maxsize = maxsize
+
+        def __setitem__(self, key, value):
+            if len(self.data) >= self.maxsize:
+                # Remove o primeiro item se atingir o limite
+                first_key = next(iter(self.data))
+                del self.data[first_key]
+            self.data[key] = value
+
+        def __getitem__(self, key):
+            return self.data[key]
+
+        def get(self, key, default=None):
+            return self.data.get(key, default)
+
+        def __contains__(self, key):
+            return key in self.data
+
+
 from src import config
-from src.core.catalogador import Catalogador
-from src.core.estrategia_turbo import (
-    ESTRATEGIA_TURBO,
-    ATIVOS_TURBO,
-    obter_ativo_prioritario,
-    calcular_volume_entrada,
-)
+from src.core.catalogador import Catalogador, ATIVOS_TURBO_INTEGRADOS
+
+
+class SistemaStops:
+    """Sistema avançado de stops (stop loss e take profit)"""
+
+    def __init__(self):
+        self.stops_ativos = {}  # {operacao_id: {tipo, valor, ativo}}
+        self.configuracoes = {
+            "stop_loss_percent": 2.0,  # 2% de perda máxima por operação
+            "take_profit_percent": 4.0,  # 4% de ganho alvo por operação
+            "stop_loss_global_percent": 10.0,  # 10% de perda máxima do saldo
+            "take_profit_global_percent": 20.0,  # 20% de ganho alvo do saldo
+            "trailing_stop_enabled": True,  # Stop móvel ativado
+            "trailing_stop_distance": 1.0,  # 1% de distância do trailing stop
+        }
+        self.saldo_inicial = 0.0
+        self.melhor_resultado = 0.0  # Para trailing stop
+
+        # Sistema de alertas preventivos
+        self.alertas_preventivos = True
+        self.percentual_alerta = 80  # Alerta aos 80% do stop
+        self.alertas_enviados = set()  # Para evitar spam de alertas
+
+        # Logger específico para stops
+        try:
+            from src.utils.logger_unificado import log_stops, log_erro_critico
+
+            self.log_stops = log_stops
+            self.log_erro_critico = log_erro_critico
+        except ImportError:
+            self.log_stops = lambda msg, nivel="warning": print(f"STOPS: {msg}")
+            self.log_erro_critico = lambda msg, erro=None: print(f"ERRO: {msg}")
+
+    def configurar_stops_por_modo(self, modo: str):
+        """Configura stops baseado no modo de operação"""
+        configs_modo = {
+            "iniciante": {
+                "stop_loss_percent": 1.5,
+                "take_profit_percent": 3.0,
+                "stop_loss_global_percent": 5.0,
+                "take_profit_global_percent": 10.0,
+                "trailing_stop_enabled": False,
+            },
+            "conservador": {
+                "stop_loss_percent": 2.0,
+                "take_profit_percent": 4.0,
+                "stop_loss_global_percent": 8.0,
+                "take_profit_global_percent": 15.0,
+                "trailing_stop_enabled": True,
+            },
+            "agressivo": {
+                "stop_loss_percent": 3.0,
+                "take_profit_percent": 6.0,
+                "stop_loss_global_percent": 15.0,
+                "take_profit_global_percent": 25.0,
+                "trailing_stop_enabled": True,
+            },
+        }
+
+        if modo in configs_modo:
+            self.configuracoes.update(configs_modo[modo])
+
+    def adicionar_stop_operacao(
+        self, operacao_id: str, valor_entrada: float, tipo_operacao: str, ativo: str
+    ):
+        """Adiciona stops para uma operação específica"""
+        stop_loss_valor = valor_entrada * (
+            self.configuracoes["stop_loss_percent"] / 100
+        )
+        take_profit_valor = valor_entrada * (
+            self.configuracoes["take_profit_percent"] / 100
+        )
+
+        self.stops_ativos[operacao_id] = {
+            "valor_entrada": valor_entrada,
+            "stop_loss": stop_loss_valor,
+            "take_profit": take_profit_valor,
+            "tipo_operacao": tipo_operacao,
+            "ativo": ativo,
+            "timestamp": datetime.now(),
+            "trailing_stop_ativo": self.configuracoes["trailing_stop_enabled"],
+            "melhor_resultado_operacao": 0.0,
+        }
+
+    def verificar_stops_operacao(
+        self, operacao_id: str, resultado_atual: float
+    ) -> dict:
+        """Verifica se algum stop foi atingido para uma operação com alertas preventivos"""
+        try:
+            if operacao_id not in self.stops_ativos:
+                return {"acao": "continuar", "razao": "Sem stops configurados"}
+
+            stop_info = self.stops_ativos[operacao_id]
+
+            # Verifica alertas preventivos (antes dos stops serem atingidos)
+            if self.alertas_preventivos:
+                self._verificar_alertas_preventivos(
+                    operacao_id, resultado_atual, stop_info
+                )
+
+            # Verifica stop loss
+            if resultado_atual <= -stop_info["stop_loss"]:
+                self.log_stops(
+                    f"Stop Loss ATIVADO para {operacao_id}: -{stop_info['stop_loss']:.2f} (Resultado: {resultado_atual:.2f})",
+                    "error",
+                )
+                # Remove da lista de alertas enviados
+                self.alertas_enviados.discard(f"{operacao_id}_stop_loss")
+                return {
+                    "acao": "fechar",
+                    "tipo": "stop_loss",
+                    "razao": f"Stop Loss atingido: -{stop_info['stop_loss']:.2f}",
+                    "resultado": resultado_atual,
+                }
+
+            # Verifica take profit
+            if resultado_atual >= stop_info["take_profit"]:
+                self.log_stops(
+                    f"Take Profit ATIVADO para {operacao_id}: +{stop_info['take_profit']:.2f} (Resultado: {resultado_atual:.2f})",
+                    "info",
+                )
+                # Remove da lista de alertas enviados
+                self.alertas_enviados.discard(f"{operacao_id}_take_profit")
+                return {
+                    "acao": "fechar",
+                    "tipo": "take_profit",
+                    "razao": f"Take Profit atingido: +{stop_info['take_profit']:.2f}",
+                    "resultado": resultado_atual,
+                }
+        except Exception as e:
+            self.log_erro_critico(f"Erro na verificação de stops para {operacao_id}", e)
+            return {"acao": "continuar", "razao": f"Erro na verificação: {str(e)}"}
+
+        # Verifica trailing stop
+        if (
+            stop_info["trailing_stop_ativo"]
+            and resultado_atual > stop_info["melhor_resultado_operacao"]
+        ):
+            stop_info["melhor_resultado_operacao"] = resultado_atual
+            # Atualiza trailing stop
+            trailing_distance = stop_info["valor_entrada"] * (
+                self.configuracoes["trailing_stop_distance"] / 100
+            )
+            novo_stop = resultado_atual - trailing_distance
+            if novo_stop > -stop_info["stop_loss"]:
+                stop_info["stop_loss"] = -novo_stop
+
+        return {"acao": "continuar", "razao": "Dentro dos limites"}
+
+    def verificar_stops_globais(self, saldo_atual: float) -> dict:
+        """Verifica stops globais baseados no saldo total"""
+        if self.saldo_inicial == 0:
+            self.saldo_inicial = saldo_atual
+
+        resultado_total = saldo_atual - self.saldo_inicial
+        resultado_percent = (resultado_total / self.saldo_inicial) * 100
+
+        # Stop loss global
+        if resultado_percent <= -self.configuracoes["stop_loss_global_percent"]:
+            return {
+                "acao": "parar_sistema",
+                "tipo": "stop_loss_global",
+                "razao": f"Stop Loss Global atingido: {resultado_percent:.1f}%",
+                "resultado": resultado_total,
+            }
+
+        # Take profit global
+        if resultado_percent >= self.configuracoes["take_profit_global_percent"]:
+            return {
+                "acao": "parar_sistema",
+                "tipo": "take_profit_global",
+                "razao": f"Take Profit Global atingido: {resultado_percent:.1f}%",
+                "resultado": resultado_total,
+            }
+
+        # Atualiza trailing stop global
+        if (
+            self.configuracoes["trailing_stop_enabled"]
+            and resultado_total > self.melhor_resultado
+        ):
+            self.melhor_resultado = resultado_total
+
+        return {"acao": "continuar", "razao": "Dentro dos limites globais"}
+
+    def _verificar_alertas_preventivos(
+        self, operacao_id: str, resultado_atual: float, stop_info: dict
+    ):
+        """Verifica e envia alertas preventivos antes dos stops serem atingidos"""
+        try:
+            # Calcula percentuais de proximidade dos stops
+            stop_loss_threshold = -stop_info["stop_loss"] * (
+                self.percentual_alerta / 100
+            )
+            take_profit_threshold = stop_info["take_profit"] * (
+                self.percentual_alerta / 100
+            )
+
+            # Alerta de proximidade do stop loss
+            if (
+                resultado_atual <= stop_loss_threshold
+                and f"{operacao_id}_stop_loss" not in self.alertas_enviados
+            ):
+
+                percentual_atual = abs(resultado_atual / stop_info["stop_loss"]) * 100
+                self.log_stops(
+                    f"⚠️ ALERTA: Operação {operacao_id} próxima do Stop Loss ({percentual_atual:.1f}% do limite)",
+                    "warning",
+                )
+                self.alertas_enviados.add(f"{operacao_id}_stop_loss")
+
+            # Alerta de proximidade do take profit
+            if (
+                resultado_atual >= take_profit_threshold
+                and f"{operacao_id}_take_profit" not in self.alertas_enviados
+            ):
+
+                percentual_atual = (resultado_atual / stop_info["take_profit"]) * 100
+                self.log_stops(
+                    f"🎯 ALERTA: Operação {operacao_id} próxima do Take Profit ({percentual_atual:.1f}% do objetivo)",
+                    "info",
+                )
+                self.alertas_enviados.add(f"{operacao_id}_take_profit")
+
+        except Exception as e:
+            self.log_erro_critico(f"Erro nos alertas preventivos para {operacao_id}", e)
+
+    def remover_stop_operacao(self, operacao_id: str):
+        """Remove stops de uma operação finalizada"""
+        if operacao_id in self.stops_ativos:
+            del self.stops_ativos[operacao_id]
+
+    def obter_status_stops(self) -> dict:
+        """Retorna status atual de todos os stops"""
+        return {
+            "stops_ativos": len(self.stops_ativos),
+            "configuracoes": self.configuracoes,
+            "melhor_resultado": self.melhor_resultado,
+            "saldo_inicial": self.saldo_inicial,
+            "operacoes_com_stops": list(self.stops_ativos.keys()),
+        }
+
+
+class GestaoRiscos:
+    """Sistema avançado de gestão de riscos integrado com monitoramento em tempo real"""
+
+    def __init__(self):
+        self.historico_operacoes = []
+        self.sistema_stops = SistemaStops()  # Integra sistema de stops
+        self.metricas_tempo_real = {
+            "drawdown_atual": 0.0,
+            "drawdown_maximo": 0.0,
+            "sequencia_perdas": 0,
+            "sequencia_ganhos": 0,
+            "maior_sequencia_perdas": 0,
+            "valor_total_risco": 0.0,
+            "operacoes_simultaneas": 0,
+            "win_rate_sessao": 0.0,
+            "profit_factor": 0.0,
+            "risco_por_operacao": 2.0,  # % do saldo
+            "risco_maximo_diario": 10.0,  # % do saldo
+            "stop_loss_ativo": False,
+            "take_profit_ativo": False,
+        }
+        self.limites_por_modo = {
+            "iniciante": {
+                "max_operacoes_simultaneas": 3,
+                "max_valor_operacao": 20.0,
+                "max_risco_diario": 5.0,
+                "max_drawdown": 3.0,
+                "max_sequencia_perdas": 3,
+                "intervalo_min_operacoes": 5.0,
+            },
+            "conservador": {
+                "max_operacoes_simultaneas": 5,
+                "max_valor_operacao": 50.0,
+                "max_risco_diario": 8.0,
+                "max_drawdown": 5.0,
+                "max_sequencia_perdas": 4,
+                "intervalo_min_operacoes": 3.0,
+            },
+            "agressivo": {
+                "max_operacoes_simultaneas": 10,
+                "max_valor_operacao": 100.0,
+                "max_risco_diario": 15.0,
+                "max_drawdown": 10.0,
+                "max_sequencia_perdas": 6,
+                "intervalo_min_operacoes": 1.0,
+            },
+        }
+        self.alertas_ativos = []
+        self.ultima_operacao_timestamp = 0
+
+    def validar_operacao(self, valor: float, modo: str, saldo_atual: float) -> dict:
+        """Valida se uma operação pode ser executada baseada nos critérios de risco"""
+        try:
+            limites = self.limites_por_modo.get(
+                modo, self.limites_por_modo["conservador"]
+            )
+
+            # 1. Valor máximo por operação
+            if valor > limites["max_valor_operacao"]:
+                return {
+                    "permitido": False,
+                    "razao": f"Valor ${valor:.2f} excede limite do modo {modo} (máx: ${limites['max_valor_operacao']:.2f})",
+                    "codigo": "VALOR_EXCEDIDO",
+                }
+
+            # 2. Operações simultâneas
+            if (
+                self.metricas_tempo_real["operacoes_simultaneas"]
+                >= limites["max_operacoes_simultaneas"]
+            ):
+                return {
+                    "permitido": False,
+                    "razao": f"Limite de operações simultâneas atingido ({limites['max_operacoes_simultaneas']})",
+                    "codigo": "LIMITE_SIMULTANEAS",
+                }
+
+            # 3. Drawdown máximo
+            if self.metricas_tempo_real["drawdown_atual"] >= limites["max_drawdown"]:
+                return {
+                    "permitido": False,
+                    "razao": f"Drawdown atual {self.metricas_tempo_real['drawdown_atual']:.1f}% excede limite {limites['max_drawdown']:.1f}%",
+                    "codigo": "DRAWDOWN_EXCEDIDO",
+                }
+
+            # 4. Sequência de perdas
+            if (
+                self.metricas_tempo_real["sequencia_perdas"]
+                >= limites["max_sequencia_perdas"]
+            ):
+                return {
+                    "permitido": False,
+                    "razao": f"Sequência de {self.metricas_tempo_real['sequencia_perdas']} perdas consecutivas atingida",
+                    "codigo": "SEQUENCIA_PERDAS",
+                }
+
+            # 5. Risco diário
+            risco_atual = (
+                self.metricas_tempo_real["valor_total_risco"] / saldo_atual
+            ) * 100
+            if risco_atual >= limites["max_risco_diario"]:
+                return {
+                    "permitido": False,
+                    "razao": f"Risco diário {risco_atual:.1f}% excede limite {limites['max_risco_diario']:.1f}%",
+                    "codigo": "RISCO_DIARIO_EXCEDIDO",
+                }
+
+            # 6. Intervalo entre operações
+            tempo_atual = time.time()
+            if (
+                tempo_atual - self.ultima_operacao_timestamp
+                < limites["intervalo_min_operacoes"]
+            ):
+                return {
+                    "permitido": False,
+                    "razao": f"Aguarde {limites['intervalo_min_operacoes']}s entre operações",
+                    "codigo": "INTERVALO_MINIMO",
+                }
+
+            # Operação aprovada
+            return {
+                "permitido": True,
+                "razao": "Operação aprovada pelos critérios de risco",
+                "codigo": "APROVADO",
+                "risco_calculado": (valor / saldo_atual) * 100,
+                "valor_aprovado": valor,
+            }
+
+        except Exception as e:
+            return {
+                "permitido": False,
+                "razao": f"Erro na validação de risco: {str(e)}",
+                "codigo": "ERRO_VALIDACAO",
+            }
+
+    def registrar_operacao(self, operacao: dict) -> None:
+        """Registra uma operação e atualiza métricas de risco"""
+        try:
+            self.historico_operacoes.append(operacao)
+            self.ultima_operacao_timestamp = time.time()
+
+            # Atualiza operações simultâneas
+            if operacao.get("status") == "aberta":
+                self.metricas_tempo_real["operacoes_simultaneas"] += 1
+                self.metricas_tempo_real["valor_total_risco"] += operacao.get(
+                    "valor", 0
+                )
+
+            elif operacao.get("status") == "fechada":
+                self.metricas_tempo_real["operacoes_simultaneas"] = max(
+                    0, self.metricas_tempo_real["operacoes_simultaneas"] - 1
+                )
+
+                resultado = operacao.get("resultado", 0)
+                self.metricas_tempo_real["valor_total_risco"] = max(
+                    0,
+                    self.metricas_tempo_real["valor_total_risco"]
+                    - operacao.get("valor", 0),
+                )
+
+                # Atualiza sequências
+                if resultado > 0:
+                    self.metricas_tempo_real["sequencia_ganhos"] += 1
+                    self.metricas_tempo_real["sequencia_perdas"] = 0
+                else:
+                    self.metricas_tempo_real["sequencia_perdas"] += 1
+                    self.metricas_tempo_real["sequencia_ganhos"] = 0
+
+                    # Atualiza maior sequência de perdas
+                    if (
+                        self.metricas_tempo_real["sequencia_perdas"]
+                        > self.metricas_tempo_real["maior_sequencia_perdas"]
+                    ):
+                        self.metricas_tempo_real["maior_sequencia_perdas"] = (
+                            self.metricas_tempo_real["sequencia_perdas"]
+                        )
+
+            # Recalcula métricas
+            self._recalcular_metricas()
+
+        except Exception as e:
+            print(f"Erro ao registrar operação: {e}")
+
+    def _recalcular_metricas(self) -> None:
+        """Recalcula todas as métricas de risco"""
+        try:
+            operacoes_fechadas = [
+                op for op in self.historico_operacoes if op.get("status") == "fechada"
+            ]
+
+            if not operacoes_fechadas:
+                return
+
+            # Win Rate
+            wins = len([op for op in operacoes_fechadas if op.get("resultado", 0) > 0])
+            total = len(operacoes_fechadas)
+            self.metricas_tempo_real["win_rate_sessao"] = (
+                (wins / total * 100) if total > 0 else 0
+            )
+
+            # Profit Factor
+            lucros = sum(
+                [
+                    op.get("resultado", 0)
+                    for op in operacoes_fechadas
+                    if op.get("resultado", 0) > 0
+                ]
+            )
+            perdas = abs(
+                sum(
+                    [
+                        op.get("resultado", 0)
+                        for op in operacoes_fechadas
+                        if op.get("resultado", 0) < 0
+                    ]
+                )
+            )
+            self.metricas_tempo_real["profit_factor"] = (
+                (lucros / perdas) if perdas > 0 else 0
+            )
+
+            # Drawdown
+            saldo_inicial = (
+                operacoes_fechadas[0].get("saldo_antes", 100)
+                if operacoes_fechadas
+                else 100
+            )
+            pico_saldo = saldo_inicial
+            drawdown_atual = 0
+            drawdown_maximo = 0
+
+            for op in operacoes_fechadas:
+                saldo_atual = op.get("saldo_depois", saldo_inicial)
+                if saldo_atual > pico_saldo:
+                    pico_saldo = saldo_atual
+
+                drawdown_atual = ((pico_saldo - saldo_atual) / pico_saldo) * 100
+                if drawdown_atual > drawdown_maximo:
+                    drawdown_maximo = drawdown_atual
+
+            self.metricas_tempo_real["drawdown_atual"] = drawdown_atual
+            self.metricas_tempo_real["drawdown_maximo"] = drawdown_maximo
+
+        except Exception as e:
+            print(f"Erro ao recalcular métricas: {e}")
+
+    def obter_metricas_tempo_real(self) -> dict:
+        """Obtém métricas de risco em tempo real"""
+        return {
+            **self.metricas_tempo_real,
+            "total_operacoes": len(self.historico_operacoes),
+            "alertas_ativos": len(self.alertas_ativos),
+            "timestamp": datetime.now().isoformat(),
+        }
+
+    def verificar_alertas(self, modo: str) -> list:
+        """Verifica e retorna alertas de risco ativos"""
+        alertas = []
+        limites = self.limites_por_modo.get(modo, self.limites_por_modo["conservador"])
+
+        # Alerta de drawdown
+        if self.metricas_tempo_real["drawdown_atual"] >= limites["max_drawdown"] * 0.8:
+            alertas.append(
+                {
+                    "tipo": "drawdown",
+                    "nivel": (
+                        "warning"
+                        if self.metricas_tempo_real["drawdown_atual"]
+                        < limites["max_drawdown"]
+                        else "critical"
+                    ),
+                    "mensagem": f"Drawdown atual: {self.metricas_tempo_real['drawdown_atual']:.1f}%",
+                }
+            )
+
+        # Alerta de sequência de perdas
+        if (
+            self.metricas_tempo_real["sequencia_perdas"]
+            >= limites["max_sequencia_perdas"] * 0.7
+        ):
+            alertas.append(
+                {
+                    "tipo": "sequencia_perdas",
+                    "nivel": (
+                        "warning"
+                        if self.metricas_tempo_real["sequencia_perdas"]
+                        < limites["max_sequencia_perdas"]
+                        else "critical"
+                    ),
+                    "mensagem": f"Sequência de {self.metricas_tempo_real['sequencia_perdas']} perdas consecutivas",
+                }
+            )
+
+        # Alerta de win rate baixo
+        if (
+            self.metricas_tempo_real["win_rate_sessao"] < 50
+            and len(self.historico_operacoes) >= 10
+        ):
+            alertas.append(
+                {
+                    "tipo": "win_rate",
+                    "nivel": "warning",
+                    "mensagem": f"Win rate baixo: {self.metricas_tempo_real['win_rate_sessao']:.1f}%",
+                }
+            )
+
+        self.alertas_ativos = alertas
+        return alertas
 
 
 class Motor:
@@ -24,6 +594,18 @@ class Motor:
         """Inicializa o motor de operações."""
         # Logger específico - DEVE SER PRIMEIRO
         self.logger = logging.getLogger("DerivBot.Motor")
+
+        # Sistema de logs unificado
+        try:
+            import sys
+            import os
+
+            sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+            from main import LoggerUnificado
+
+            self.logger_unificado = LoggerUnificado
+        except ImportError:
+            self.logger_unificado = None
 
         self.ws = None
         self.conectado = False
@@ -43,8 +625,8 @@ class Motor:
             "R_50",
         ]  # Múltiplos ativos
         self.par_atual = "1HZ75V"  # Ativo principal
-        self.ativo_fixo_turbo = False  # Permite mudança de ativo
-        self.rotacao_ativos = True  # Ativa rotação entre ativos
+        self.ativo_fixo_turbo = True  # FIXA NO VIX75 PARA FOCAR EM ENTRADAS
+        self.rotacao_ativos = False  # DESABILITA rotação para focar em executar
         self.ultimo_ativo_usado = 0  # Índice do último ativo usado
         self.logger.info(
             f"ESTRATEGIA TURBO MULTI-ATIVO ATIVADA - Ativos: {self.ativos_ativos}"
@@ -55,6 +637,27 @@ class Motor:
         self.catalogador = Catalogador()  # Inicializa catalogador
         # Define o ativo atual no catalogador
         self.catalogador.ativo_atual = self.par_atual
+
+        # Sistema de gestão de riscos integrado
+        self.gestao_riscos = GestaoRiscos()
+
+        # Sistema de stops dedicado
+        self.sistema_stops = SistemaStops()
+
+        # Log de inicialização
+        self.log_unificado("Motor inicializado com sucesso", "success", "sistema")
+        self.log_unificado("Sistema de gestão de riscos ativado", "success", "sistema")
+        self.log_unificado("Sistema de stops ativado", "success", "sistema")
+
+    def log_unificado(self, mensagem, tipo="info", categoria="motor"):
+        """Log usando sistema unificado se disponível"""
+        if self.logger_unificado:
+            self.logger_unificado.adicionar_log(
+                mensagem, tipo, categoria, incluir_painel=True, incluir_tempo_real=True
+            )
+        else:
+            # Fallback para logger padrão
+            self.logger.info(f"[{categoria.upper()}] {mensagem}")
         # Define timeframe para micro scalping se disponível
         if hasattr(self.catalogador, "timeframe"):
             self.catalogador.timeframe = 1
@@ -68,6 +671,10 @@ class Motor:
         self.meta_diaria = 20.0
         self.operacoes_ativas_count = 0
         self.protecao_ativa = False
+
+        # Configura stops baseado no modo inicial
+        self.sistema_stops.configurar_stops_por_modo(self.modo_operacao)
+        self.sistema_stops.saldo_inicial = self.saldo
 
         # Carrega configurações de conexão
         conexao_config = getattr(config, "CONEXAO", {})
@@ -109,6 +716,16 @@ class Motor:
             format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
             handlers=[logging.FileHandler("trading.log"), logging.StreamHandler()],
         )
+
+        self.etapa_atual = ""
+        self.progresso = 0
+        self.logs = []
+
+        # Sistema de reconexão unificado e otimizado
+        self.max_tentativas_reconexao = 5  # Aumentado para mais robustez
+        self.tempo_entre_tentativas = 3  # Reduzido para reconexão mais rápida
+        self.ultima_tentativa = 0
+        self.cache_operacoes = TTLCache(maxsize=100, ttl=60)
 
     def conectar(self, token=None):
         """Conecta com a API da Deriv usando o token fornecido ou o token já configurado."""
@@ -182,7 +799,7 @@ class Motor:
         except Exception as e:
             self.logger.error(f"Erro no callback on_open: {str(e)}", exc_info=True)
 
-    def _on_message(self, ws, message):
+    def _on_message(self, _, message):
         """Callback para processar mensagens recebidas do WebSocket."""
         try:
             # Atualiza o timestamp da última mensagem recebida
@@ -276,6 +893,17 @@ class Motor:
                     f"Operação {contract_id} aberta com sucesso. Modo: micro scalping (1s)"
                 )
 
+                # Adiciona stops para a operação
+                valor_entrada = data["buy"]["buy_price"]
+                tipo_operacao = (
+                    data.get("echo_req", {})
+                    .get("parameters", {})
+                    .get("contract_type", "")
+                )
+                self.sistema_stops.adicionar_stop_operacao(
+                    contract_id, valor_entrada, tipo_operacao, self.par_atual
+                )
+
                 # Para contratos multipliers, vamos configurar um timer para fechamento automático após 1 segundo
                 if "MULT" in str(self.operacoes_abertas[contract_id]["tipo"]).upper():
                     self.logger.info(
@@ -287,6 +915,19 @@ class Motor:
             if "proposal_open_contract" in data and data["proposal_open_contract"]:
                 contract = data["proposal_open_contract"]
                 contract_id = contract["contract_id"]
+
+                # Verifica stops se a operação ainda está aberta
+                if contract["is_sold"] == 0 and contract_id in self.operacoes_abertas:
+                    resultado_atual = contract.get("profit", 0)
+                    verificacao_stop = self.sistema_stops.verificar_stops_operacao(
+                        contract_id, resultado_atual
+                    )
+
+                    if verificacao_stop["acao"] == "fechar":
+                        self.logger.info(
+                            f"🛑 {verificacao_stop['razao']} - Fechando operação {contract_id}"
+                        )
+                        self._fechar_operacao_por_stop(contract_id, verificacao_stop)
 
                 if contract["is_sold"] == 1 and contract_id in self.operacoes_abertas:
                     lucro = contract["profit"]
@@ -341,6 +982,9 @@ class Motor:
                         # Remove das operações abertas
                         del self.operacoes_abertas[contract_id]
 
+                        # Remove stops da operação finalizada
+                        self.sistema_stops.remover_stop_operacao(contract_id)
+
                     # Emite mensagem mais detalhada com resultado da operação
                     resultado_texto = "GANHO" if lucro >= 0 else "PERDA"
                     self.logger.info(
@@ -374,7 +1018,7 @@ class Motor:
         except Exception as e:
             self.logger.error(f"Erro ao processar mensagem: {str(e)}", exc_info=True)
 
-    def _on_error(self, ws, error):
+    def _on_error(self, _, error):
         """Callback para tratar erros do WebSocket."""
         # SILENCIA ERROS COMUNS PARA EVITAR SPAM
         error_str = str(error).lower()
@@ -394,7 +1038,7 @@ class Motor:
         self.ultimo_erro = f"Erro de conexão: {str(error)}"
         self.conectado = False
 
-    def _on_close(self, ws, close_status_code, close_msg):
+    def _on_close(self, _, close_status_code, close_msg):
         """Callback para quando a conexão é fechada."""
         self.conectado = False
         self.logger.warning(
@@ -470,24 +1114,10 @@ class Motor:
         """
         import random
 
-        # ROTAÇÃO INTELIGENTE DE ATIVOS - Muda ativo a cada análise para mais oportunidades
-        if hasattr(self, "rotacao_ativos") and self.rotacao_ativos:
-            # Rotaciona para o próximo ativo da lista
-            self.ultimo_ativo_usado = (self.ultimo_ativo_usado + 1) % len(
-                self.ativos_ativos
-            )
-            ativo = self.ativos_ativos[self.ultimo_ativo_usado]
-
-            # Atualiza o ativo atual se mudou
-            if ativo != self.par_atual:
-                self.par_atual = ativo
-                self.logger.info(
-                    f"ROTAÇÃO: Mudando para {ativo} para buscar mais oportunidades"
-                )
-        else:
-            # Força uso do VIX75 se rotação desabilitada
-            if ativo != "1HZ75V":
-                ativo = "1HZ75V"
+        # FORÇA ATIVO FIXO NO VIX75 PARA FOCAR EM ENTRADAS
+        ativo = "1HZ75V"  # SEMPRE VIX75
+        if self.par_atual != "1HZ75V":
+            self.par_atual = "1HZ75V"
 
         # Verifica se deve operar - MAIS OPERAÇÕES SIMULTÂNEAS
         limite_operacoes = {
@@ -529,7 +1159,7 @@ class Motor:
 
         # Análise de tendência
         tendencia_alta = ema8 > ema21
-        preco_na_banda = (preco_atual <= bb_inferior) or (preco_atual >= bb_superior)
+        # Verifica se preço está nas bandas (removido variável não usada)
 
         # Calcula confiança baseada nos indicadores
         confianca = 0.0
@@ -618,9 +1248,18 @@ class Motor:
         """Registra um callback para ser chamado a cada tick recebido."""
         self.callback_tick = callback
 
-    def executar_operacao_inteligente(self, cliente_id: str = "default") -> dict:
+    def executar_operacao_inteligente(self, _: str = "default") -> dict:
         """Executa operação usando ESTRATÉGIA TURBO para contratos de 15 segundos."""
         try:
+            # Verifica se pode executar operação usando o catalogador otimizado
+            if hasattr(self.catalogador, "pode_executar_operacao_agora"):
+                if not self.catalogador.pode_executar_operacao_agora():
+                    return {
+                        "sucesso": False,
+                        "razao": "Aguardando intervalo entre operações",
+                        "tipo": "AGUARDAR",
+                    }
+
             # Calcula lucro atual
             lucro_atual = self.obter_saldo() - self.saldo_inicial
 
@@ -659,8 +1298,18 @@ class Motor:
             sucesso = self.comprar(tipo_operacao, valor_entrada)
 
             if sucesso:
+                # Registra a nova operação no controle
+                if hasattr(self, "modo_operacao") and self.modo_operacao == "iniciante":
+                    try:
+                        import main
+
+                        if hasattr(main, "registrar_nova_operacao"):
+                            main.registrar_nova_operacao()
+                    except:
+                        pass  # Ignora erro se main não estiver disponível
+
                 self.logger.info(
-                    f"TURBO {tipo_operacao} EXECUTADA - Valor: ${valor_entrada:.2f} - "
+                    f"🚀 ENTRADA EXECUTADA! TURBO {tipo_operacao} - ${valor_entrada:.2f} - "
                     f"Confiança: {analise.get('confianca', 0.0):.2f} - {analise.get('razao', 'Operação turbo')}"
                 )
 
@@ -711,12 +1360,84 @@ class Motor:
                 "razao": "Erro na análise, parando por segurança",
             }
 
-    def executar_operacao(self, tipo: str):
-        """Execute uma operação de compra/venda."""
-        self.logger.warning(
-            "Método executar_operacao descontinuado. Use executar_operacao_inteligente()!"
+    async def executar_operacao(self, tipo: str, valor: float):
+        # Validação de risco integrada
+        validacao = self.gestao_riscos.validar_operacao(
+            valor, getattr(self, "modo_operacao", "conservador"), self.obter_saldo()
         )
-        return False
+
+        if not validacao["permitido"]:
+            self.log_unificado(
+                f"❌ Operação bloqueada: {validacao['razao']}", "warning", "risco"
+            )
+            return False
+
+        self.log_unificado(
+            f"✅ Operação aprovada: {tipo} ${valor:.2f} (Risco: {validacao.get('risco_calculado', 0):.1f}%)",
+            "trading",
+            "motor",
+        )
+
+        # Registra operação como aberta
+        self.gestao_riscos.registrar_operacao(
+            {
+                "tipo": tipo,
+                "valor": valor,
+                "status": "aberta",
+                "timestamp": datetime.now().isoformat(),
+                "saldo_antes": self.obter_saldo(),
+            }
+        )
+
+        return True
+
+    def registrar_resultado_operacao(
+        self, tipo: str, valor: float, resultado: float
+    ) -> None:
+        """Registra o resultado de uma operação para análise de risco"""
+        try:
+            self.gestao_riscos.registrar_operacao(
+                {
+                    "tipo": tipo,
+                    "valor": valor,
+                    "resultado": resultado,
+                    "status": "fechada",
+                    "timestamp": datetime.now().isoformat(),
+                    "saldo_antes": self.obter_saldo() - resultado,
+                    "saldo_depois": self.obter_saldo(),
+                }
+            )
+
+            # Log do resultado
+            if resultado > 0:
+                self.log_unificado(
+                    f"✅ WIN: {tipo} | Entrada: ${valor:.2f} | Lucro: ${resultado:.2f}",
+                    "success",
+                    "trading",
+                )
+            else:
+                self.log_unificado(
+                    f"❌ LOSS: {tipo} | Entrada: ${valor:.2f} | Perda: ${abs(resultado):.2f}",
+                    "warning",
+                    "trading",
+                )
+
+            # Verifica alertas de risco
+            alertas = self.gestao_riscos.verificar_alertas(
+                getattr(self, "modo_operacao", "conservador")
+            )
+            for alerta in alertas:
+                if alerta["nivel"] == "critical":
+                    self.log_unificado(
+                        f"🚨 ALERTA CRÍTICO: {alerta['mensagem']}", "error", "risco"
+                    )
+                elif alerta["nivel"] == "warning":
+                    self.log_unificado(
+                        f"⚠️ ALERTA: {alerta['mensagem']}", "warning", "risco"
+                    )
+
+        except Exception as e:
+            self.logger.error(f"Erro ao registrar resultado da operação: {e}")
 
     def comprar(self, tipo: str, valor: float) -> bool:
         """ESTRATÉGIA TURBO - Envia ordem de compra para contratos de 15 segundos."""
@@ -727,8 +1448,8 @@ class Motor:
                     self._tentar_reconectar()
                     return False
 
-                # Obtém configurações da estratégia turbo
-                ativo_config = ATIVOS_TURBO.get(self.par_atual)
+                # Obtém configurações da estratégia turbo integrada
+                ativo_config = ATIVOS_TURBO_INTEGRADOS.get(self.par_atual)
                 if not ativo_config:
                     self.logger.error(
                         f"Ativo {self.par_atual} não configurado para estratégia turbo"
@@ -1034,6 +1755,30 @@ class Motor:
             thread.daemon = True
             thread.start()
 
+    def _fechar_operacao_por_stop(self, contract_id: str, verificacao_stop: dict):
+        """Fecha uma operação devido a stop loss ou take profit"""
+        try:
+            if contract_id not in self.operacoes_abertas:
+                return
+
+            # Envia comando para fechar a operação
+            req = {"sell": contract_id, "price": 0}  # Vende pelo preço atual de mercado
+
+            if self.ws and self.conectado:
+                self.ws.send(json.dumps(req))
+                self.log_unificado(
+                    f"🛑 Stop {verificacao_stop['tipo']}: {verificacao_stop['razao']}",
+                    "warning",
+                    "stops",
+                )
+            else:
+                self.logger.warning(
+                    f"Não foi possível fechar operação {contract_id}: não conectado"
+                )
+
+        except Exception as e:
+            self.logger.error(f"Erro ao fechar operação por stop: {e}")
+
     def _verificar_fechamento_automatico(self):
         """Verifica operações que precisam ser fechadas automaticamente para micro scalping."""
         operacoes_para_fechar = []
@@ -1229,15 +1974,8 @@ class Motor:
                             f"{resultado['razao']}"
                         )
                     else:
-                        # Reduz logs para melhor performance - só loga a cada 10 análises
-                        if not hasattr(self, "_contador_analises"):
-                            self._contador_analises = 0
-                        self._contador_analises += 1
-
-                        if self._contador_analises % 10 == 0:  # Log a cada 10 análises
-                            self.logger.info(
-                                f"ANALISE #{self._contador_analises}: {resultado['razao']}"
-                            )
+                        # Log normal para acompanhar análises
+                        self.logger.info(f"ANALISE: {resultado['razao']}")
 
                     # Verifica se atingiu a meta
                     if resultado["lucro_atual"] >= self.meta_diaria:
@@ -1248,12 +1986,12 @@ class Motor:
                         self.rodando = False
                         break
 
-                    # SCALPING ULTRA RÁPIDO - Intervalos MUITO menores para análise rápida
+                    # Intervalos seguros para análise
                     intervalo = {
-                        "iniciante": 0.1,  # 100ms - MUITO RÁPIDO
-                        "conservador": 0.05,  # 50ms - ULTRA RÁPIDO
-                        "agressivo": 0.02,  # 20ms - EXTREMAMENTE RÁPIDO
-                    }.get(self.modo_operacao, 0.1)
+                        "iniciante": 2.0,  # 2 segundos - Seguro
+                        "conservador": 1.0,  # 1 segundo - Moderado
+                        "agressivo": 0.5,  # 500ms - Rápido mas seguro
+                    }.get(self.modo_operacao, 2.0)
 
                     time.sleep(intervalo)
 
@@ -1270,5 +2008,45 @@ class Motor:
         thread.start()
         self.logger.info("Thread do sistema inteligente iniciada")
 
+    def registrar_log(self, mensagem: str, tipo: str = "info"):
+        """Registra um log com timestamp"""
+        timestamp = datetime.now().strftime("%d/%m/%Y %H:%M:%S.%f")[:-3]
 
-# Instância global removida - será criada no main.py quando necessário
+        log_entry = {
+            "timestamp": timestamp,
+            "tipo": tipo,
+            "mensagem": mensagem,
+            "emoji": self._get_emoji(tipo),
+        }
+
+        self.logs.append(log_entry)
+        self.logger.info(f"{log_entry['emoji']} {mensagem}")
+
+        # Manter apenas últimos 100 logs
+        if len(self.logs) > 100:
+            self.logs.pop(0)
+
+        return log_entry
+
+    def _get_emoji(self, tipo: str) -> str:
+        """Retorna emoji baseado no tipo de log"""
+        emojis = {
+            "info": "ℹ️",
+            "success": "✅",
+            "warning": "⚠️",
+            "error": "❌",
+            "analysis": "🔍",
+            "mode": "🔄",
+            "trade": "💰",
+        }
+        return emojis.get(tipo, "📝")
+
+    async def reconectar(self):
+        """Sistema robusto de reconexão"""
+        for _ in range(self.max_reconexoes):
+            try:
+                await self._conectar()
+                return True
+            except Exception:
+                await asyncio.sleep(self.delay_reconexao)
+        return False

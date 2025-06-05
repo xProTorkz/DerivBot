@@ -243,9 +243,76 @@
             />
           </div>
         </div>
-        <button id="bot-control-btn" aria-label="Controle do robô">
+        <button
+          id="bot-control-btn"
+          aria-label="Controle do robô"
+          onclick="iniciarRoboSeguro()"
+        >
           Iniciar Robô
         </button>
+
+        <!-- Log temporário (uma linha) -->
+        <div
+          class="log-temp"
+          id="log-temporario"
+          role="log"
+          aria-live="polite"
+          style="
+            margin: 10px 0;
+            padding: 8px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 4px;
+            font-size: 13px;
+          "
+        >
+          <span class="log-emoji">⏳</span>
+          <span class="log-texto">Aguardando início das operações...</span>
+        </div>
+
+        <!-- Logs em Tempo Real (compactos) -->
+        <div
+          class="logs-tempo-real"
+          id="logs-tempo-real"
+          style="
+            margin: 10px 0;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+          "
+        >
+          <div
+            class="logs-header"
+            style="
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              padding: 6px 10px;
+              border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+              background: rgba(255, 255, 255, 0.02);
+            "
+          >
+            <span style="font-size: 12px; color: #fff; font-weight: bold"
+              >📊 Logs em Tempo Real</span
+            >
+            <div
+              class="logs-stats"
+              style="display: flex; gap: 10px; font-size: 10px; color: #888"
+            >
+              <span id="win-rate-display">Win Rate: --</span>
+              <span id="operacoes-count">Ops: 0</span>
+            </div>
+          </div>
+          <div
+            class="logs-content"
+            id="container-logs"
+            style="max-height: 100px; overflow-y: auto; padding: 4px 8px"
+          >
+            <div id="lista-logs">
+              <!-- Os logs serão inseridos aqui via JavaScript -->
+            </div>
+          </div>
+        </div>
+
         <div
           id="modo-selecionado"
           style="
@@ -258,12 +325,6 @@
           🔄 Modo selecionado: <span id="modo-texto"></span>
         </div>
         <p id="status-deriv">🔄 Conectando ao servidor Deriv...</p>
-      </div>
-
-      <!-- Logs -->
-      <div class="log-temp" id="log-temporario" role="log" aria-live="polite">
-        <span class="log-emoji">⏳</span>
-        <span class="log-texto">Aguardando início das operações...</span>
       </div>
 
       <!-- Status de Operação -->
@@ -368,31 +429,64 @@
           <p style="color: gray">📈 Gráficos e detalhes em tempo real...</p>
         </div>
 
-        <!-- Logs da Estratégia Turbo -->
-        <div id="logs-tempo-real" style="display: block; margin-top: 20px">
-          <h3>🎯 Estratégia Turbo - Logs em Tempo Real</h3>
-          <div
-            id="container-logs"
-            style="
-              background: #1e1e1e;
-              border-radius: 8px;
-              padding: 15px;
-              max-height: 400px;
-              overflow-y: auto;
-              border: 1px solid #333;
-              font-family: monospace;
-            "
-          >
-            <div id="lista-logs">
-              <p style="color: #4a9eff; text-align: center">
-                🚀 Aguardando logs da estratégia turbo...
-              </p>
+        <div id="historico-completo" style="display: none">
+          <!-- Sistema de Gestão de Riscos integrado -->
+          <div class="risk-management-compact" style="margin-bottom: 20px">
+            <div class="risk-header" onclick="toggleRiskPanel()">
+              <span>📊 Gestão de Riscos</span>
+              <span class="risk-summary" id="risk-summary">
+                Drawdown: <span id="drawdown-atual">0%</span> | Win Rate:
+                <span id="win-rate-sessao">0%</span>
+              </span>
+              <span class="risk-toggle">▼</span>
+            </div>
+            <div class="risk-content" id="risk-panel" style="display: none">
+              <div class="risk-metrics">
+                <div class="risk-item">
+                  <span>Operações Simultâneas:</span>
+                  <span id="ops-simultaneas">0</span>
+                </div>
+                <div class="risk-item">
+                  <span>Sequência de Perdas:</span>
+                  <span id="sequencia-perdas" class="risco-normal">0</span>
+                </div>
+                <div class="risk-item">
+                  <span>🛑 Stops Ativos:</span>
+                  <span id="stops-ativos" class="risco-normal">0</span>
+                </div>
+                <div class="risk-item">
+                  <span>📉 Stop Loss Global:</span>
+                  <span id="stop-loss-global">-10%</span>
+                </div>
+                <div class="risk-item">
+                  <span>📈 Take Profit Global:</span>
+                  <span id="take-profit-global">+20%</span>
+                </div>
+              </div>
+              <div id="alertas-risco" class="risk-alerts">
+                <!-- Alertas serão inseridos aqui -->
+              </div>
             </div>
           </div>
-        </div>
 
-        <div id="historico-completo" style="display: none; text-align: center">
-          <p style="color: gray">📊 Todos os históricos de operações...</p>
+          <h3>📊 Histórico Completo de Operações</h3>
+          <div class="tabela-wrapper">
+            <table id="historico-completo-tabela" role="table">
+              <thead>
+                <tr>
+                  <th scope="col">Data</th>
+                  <th scope="col">Hora</th>
+                  <th scope="col">Ativo</th>
+                  <th scope="col">Tipo</th>
+                  <th scope="col">Entrada</th>
+                  <th scope="col">Resultado</th>
+                </tr>
+              </thead>
+              <tbody id="historico-completo-body">
+                <!-- Histórico completo será inserido aqui -->
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <div class="tabela-wrapper" id="tabela-historico">
@@ -501,8 +595,1226 @@
       </div>
     </div>
 
+    <!-- Sistema de Logs Avançado -->
+    <script>
+      // ===== SISTEMA DE GESTÃO DE RISCOS =====
+
+      class GestaoRiscosUI {
+        constructor() {
+          this.metricas = {};
+          this.alertas = [];
+          this.modo_atual = "conservador";
+          this.inicializar();
+        }
+
+        inicializar() {
+          // Atualiza métricas de risco a cada 3 segundos
+          setInterval(() => this.atualizarMetricas(), 3000);
+
+          // Atualiza alertas a cada 5 segundos
+          setInterval(() => this.atualizarAlertas(), 5000);
+
+          // Primeira carga
+          this.atualizarMetricas();
+          this.atualizarAlertas();
+        }
+
+        async atualizarMetricas() {
+          try {
+            const response = await fetch("/api/riscos/metricas");
+            const data = await response.json();
+
+            if (data.status === "success") {
+              this.metricas = data.metricas;
+              this.renderizarMetricas();
+            }
+          } catch (error) {
+            console.error("Erro ao atualizar métricas de risco:", error);
+          }
+        }
+
+        async atualizarAlertas() {
+          try {
+            const response = await fetch(
+              `/api/riscos/alertas?modo=${this.modo_atual}`
+            );
+            const data = await response.json();
+
+            if (data.status === "success") {
+              this.alertas = data.alertas;
+              this.renderizarAlertas();
+            }
+          } catch (error) {
+            console.error("Erro ao atualizar alertas de risco:", error);
+          }
+        }
+
+        renderizarMetricas() {
+          // Atualiza drawdown
+          const drawdownElement = document.getElementById("drawdown-atual");
+          if (drawdownElement) {
+            drawdownElement.textContent = `${
+              this.metricas.drawdown_atual?.toFixed(1) || 0
+            }%`;
+            drawdownElement.className =
+              this.metricas.drawdown_atual > 5 ? "risco-alto" : "risco-normal";
+          }
+
+          // Atualiza operações simultâneas
+          const opsSimultaneas = document.getElementById("ops-simultaneas");
+          if (opsSimultaneas) {
+            opsSimultaneas.textContent =
+              this.metricas.operacoes_simultaneas || 0;
+          }
+
+          // Atualiza win rate da sessão
+          const winRateElement = document.getElementById("win-rate-sessao");
+          if (winRateElement) {
+            winRateElement.textContent = `${
+              this.metricas.win_rate_sessao?.toFixed(1) || 0
+            }%`;
+            winRateElement.className =
+              this.metricas.win_rate_sessao >= 70 ? "positivo" : "negativo";
+          }
+
+          // Atualiza sequência de perdas
+          const sequenciaPerdas = document.getElementById("sequencia-perdas");
+          if (sequenciaPerdas) {
+            sequenciaPerdas.textContent = this.metricas.sequencia_perdas || 0;
+            sequenciaPerdas.className =
+              this.metricas.sequencia_perdas >= 3
+                ? "risco-alto"
+                : "risco-normal";
+          }
+        }
+
+        renderizarAlertas() {
+          const container = document.getElementById("alertas-risco");
+          if (!container) return;
+
+          container.innerHTML = "";
+
+          if (this.alertas.length === 0) {
+            container.innerHTML =
+              '<div class="alerta-info">✅ Nenhum alerta de risco ativo</div>';
+            return;
+          }
+
+          this.alertas.forEach((alerta) => {
+            const div = document.createElement("div");
+            div.className = `alerta-risco alerta-${alerta.nivel}`;
+
+            const emoji = alerta.nivel === "critical" ? "🚨" : "⚠️";
+            div.innerHTML = `
+                    <span class="alerta-emoji">${emoji}</span>
+                    <span class="alerta-tipo">${alerta.tipo.toUpperCase()}</span>
+                    <span class="alerta-mensagem">${alerta.mensagem}</span>
+                `;
+
+            container.appendChild(div);
+          });
+        }
+
+        async validarOperacao(valor, modo) {
+          try {
+            const response = await fetch("/api/riscos/validar", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ valor, modo }),
+            });
+
+            const data = await response.json();
+            return data.validacao;
+          } catch (error) {
+            console.error("Erro ao validar operação:", error);
+            return { permitido: false, razao: "Erro na validação" };
+          }
+        }
+
+        definirModo(modo) {
+          this.modo_atual = modo;
+          this.atualizarAlertas();
+        }
+      }
+
+      // Função para toggle do painel de riscos
+      function toggleRiskPanel() {
+        const panel = document.getElementById("risk-panel");
+        const toggle = document.querySelector(".risk-toggle");
+
+        if (panel.style.display === "none") {
+          panel.style.display = "block";
+          toggle.textContent = "▲";
+        } else {
+          panel.style.display = "none";
+          toggle.textContent = "▼";
+        }
+      }
+
+      // ===== SISTEMA DE LOGS AVANÇADO =====
+
+      class LogsAvancados {
+        constructor() {
+          this.ultimaAtualizacao = 0;
+          this.estatisticas = {
+            total_operacoes: 0,
+            wins: 0,
+            losses: 0,
+            win_rate: 0,
+          };
+          this.gestaoRiscos = new GestaoRiscosUI();
+          this.inicializar();
+        }
+
+        inicializar() {
+          // Atualiza logs a cada 2 segundos
+          setInterval(() => this.atualizarLogs(), 2000);
+
+          // Atualiza performance a cada 5 segundos
+          setInterval(() => this.atualizarPerformance(), 5000);
+
+          // Atualiza notícias a cada 30 segundos
+          setInterval(() => this.atualizarNoticias(), 30000);
+
+          // Atualiza status do sistema a cada 3 segundos
+          setInterval(() => this.atualizarStatusSistema(), 3000);
+
+          // Primeira carga
+          this.atualizarLogs();
+          this.atualizarPerformance();
+          this.atualizarNoticias();
+        }
+
+        async atualizarLogs() {
+          try {
+            const response = await fetch("/api/logs?limite=15");
+            const data = await response.json();
+
+            if (data.logs) {
+              this.renderizarLogs(data.logs);
+              this.atualizarBarraStatus(data.logs);
+            }
+          } catch (error) {
+            console.error("Erro ao atualizar logs:", error);
+          }
+        }
+
+        async atualizarPerformance() {
+          try {
+            const response = await fetch("/api/performance");
+            const data = await response.json();
+
+            this.estatisticas = data;
+            this.atualizarEstatisticasUI();
+          } catch (error) {
+            console.error("Erro ao atualizar performance:", error);
+          }
+        }
+
+        async atualizarNoticias() {
+          try {
+            const response = await fetch("/api/noticias");
+            const data = await response.json();
+
+            if (data.noticias) {
+              this.renderizarNoticias(data.noticias);
+            }
+          } catch (error) {
+            console.error("Erro ao atualizar notícias:", error);
+          }
+        }
+
+        async atualizarStatusSistema() {
+          try {
+            const response = await fetch("/api/status/sistema");
+            const data = await response.json();
+
+            this.atualizarStatusConexao(data.status_deriv);
+          } catch (error) {
+            console.error("Erro ao atualizar status:", error);
+            this.atualizarStatusConexao("desconectado");
+          }
+        }
+
+        renderizarLogs(logs) {
+          const container = document.getElementById("lista-logs");
+          if (!container) return;
+
+          // Limpa logs antigos
+          container.innerHTML = "";
+
+          logs.forEach((log) => {
+            const logElement = this.criarElementoLog(log);
+            container.appendChild(logElement);
+          });
+
+          // Auto-scroll para o último log
+          container.scrollTop = container.scrollHeight;
+        }
+
+        criarElementoLog(log) {
+          const div = document.createElement("div");
+          div.className = `log-item log-${log.tipo} log-categoria-${log.categoria}`;
+
+          const emoji = this.obterEmojiPorTipo(log.tipo, log.categoria);
+          const timestamp = log.timestamp || new Date().toLocaleTimeString();
+
+          div.innerHTML = `
+                <div class="log-header">
+                    <span class="log-emoji">${emoji}</span>
+                    <span class="log-timestamp">${timestamp}</span>
+                    <span class="log-categoria">${log.categoria.toUpperCase()}</span>
+                </div>
+                <div class="log-mensagem">${log.mensagem}</div>
+            `;
+
+          return div;
+        }
+
+        obterEmojiPorTipo(tipo, categoria) {
+          const emojis = {
+            success: "✅",
+            error: "❌",
+            warning: "⚠️",
+            trading: "💰",
+            info: "ℹ️",
+            debug: "🔧",
+          };
+
+          if (categoria === "trading") {
+            return "🎯";
+          }
+
+          return emojis[tipo] || "ℹ️";
+        }
+
+        atualizarBarraStatus(logs) {
+          // Atualiza as bolinhas de status baseado nos logs recentes
+          const logRecente = logs[logs.length - 1];
+          if (!logRecente) return;
+
+          // Reset todas as bolinhas
+          document.querySelectorAll(".bolinha").forEach((b) => {
+            b.className = "bolinha";
+          });
+
+          // Atualiza baseado no tipo de log
+          if (logRecente.categoria === "trading") {
+            if (logRecente.mensagem.includes("ENTRADA")) {
+              this.ativarBolinha("bolinha-abrindo");
+            } else if (
+              logRecente.mensagem.includes("WIN") ||
+              logRecente.mensagem.includes("LOSS")
+            ) {
+              this.ativarBolinha("bolinha-finalizado");
+            }
+          } else if (logRecente.categoria === "sistema") {
+            this.ativarBolinha("bolinha-analisando");
+          }
+        }
+
+        ativarBolinha(id) {
+          const bolinha = document.getElementById(id);
+          if (bolinha) {
+            bolinha.classList.add("ativo");
+
+            // Remove após 3 segundos
+            setTimeout(() => {
+              bolinha.classList.remove("ativo");
+            }, 3000);
+          }
+        }
+
+        atualizarEstatisticasUI() {
+          // Atualiza operações diárias
+          const opDiarias = document.getElementById("operacoes-diarias");
+          if (opDiarias) {
+            opDiarias.textContent = this.estatisticas.total_operacoes;
+          }
+
+          // Atualiza win rate se houver elemento
+          const winRateElement = document.getElementById("win-rate");
+          if (winRateElement) {
+            winRateElement.textContent = `${this.estatisticas.win_rate}%`;
+            winRateElement.className =
+              this.estatisticas.win_rate >= 70 ? "positivo" : "negativo";
+          }
+        }
+
+        renderizarNoticias(noticias) {
+          // Procura por container de notícias (pode ser implementado no futuro)
+          const container = document.getElementById("container-noticias");
+          if (!container) return;
+
+          container.innerHTML = "";
+
+          noticias.forEach((noticia) => {
+            const div = document.createElement("div");
+            div.className = `noticia-item impacto-${noticia.impacto}`;
+            div.innerHTML = `
+                    <div class="noticia-header">
+                        <span class="noticia-categoria">${noticia.categoria.toUpperCase()}</span>
+                        <span class="noticia-timestamp">${
+                          noticia.timestamp
+                        }</span>
+                    </div>
+                    <div class="noticia-titulo">${noticia.titulo}</div>
+                    <div class="noticia-resumo">${noticia.resumo}</div>
+                `;
+            container.appendChild(div);
+          });
+        }
+
+        atualizarStatusConexao(status) {
+          const statusElement = document.getElementById("status-deriv");
+          if (!statusElement) return;
+
+          const statusTextos = {
+            conectado: "🟢 Conectado ao Deriv",
+            desconectado: "🔴 Desconectado",
+            reconectando: "🟡 Reconectando...",
+          };
+
+          statusElement.textContent =
+            statusTextos[status] || "⚪ Status desconhecido";
+          statusElement.className = `status-${status}`;
+        }
+      }
+
+      // Inicializa o sistema quando a página carrega
+      document.addEventListener("DOMContentLoaded", function () {
+        window.logsAvancados = new LogsAvancados();
+
+        // Adiciona estilos CSS para os logs
+        const style = document.createElement("style");
+        style.textContent = `
+            .log-item {
+                margin: 5px 0;
+                padding: 8px 12px;
+                border-radius: 6px;
+                border-left: 3px solid;
+                background: rgba(255,255,255,0.05);
+                font-size: 13px;
+                line-height: 1.4;
+            }
+
+            .log-success { border-left-color: #4CAF50; }
+            .log-error { border-left-color: #f44336; }
+            .log-warning { border-left-color: #ff9800; }
+            .log-trading { border-left-color: #2196F3; }
+            .log-info { border-left-color: #9E9E9E; }
+
+            .log-header {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                margin-bottom: 4px;
+            }
+
+            .log-emoji { font-size: 14px; }
+            .log-timestamp {
+                font-size: 11px;
+                color: #888;
+                font-family: monospace;
+            }
+            .log-categoria {
+                font-size: 10px;
+                background: rgba(255,255,255,0.1);
+                padding: 2px 6px;
+                border-radius: 3px;
+                color: #ccc;
+            }
+
+            .log-mensagem {
+                color: #fff;
+                word-wrap: break-word;
+            }
+
+            .bolinha.ativo {
+                background: #4CAF50 !important;
+                box-shadow: 0 0 10px #4CAF50;
+                animation: pulse 1s infinite;
+            }
+
+            @keyframes pulse {
+                0% { transform: scale(1); }
+                50% { transform: scale(1.1); }
+                100% { transform: scale(1); }
+            }
+
+            .status-conectado { color: #4CAF50; }
+            .status-desconectado { color: #f44336; }
+            .status-reconectando { color: #ff9800; }
+
+            /* Estilos para Gestão de Riscos */
+            .alerta-risco {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                padding: 8px 12px;
+                margin: 4px 0;
+                border-radius: 6px;
+                font-size: 13px;
+                border-left: 3px solid;
+            }
+
+            .alerta-warning {
+                background: rgba(255, 152, 0, 0.1);
+                border-left-color: #ff9800;
+                color: #ff9800;
+            }
+
+            .alerta-critical {
+                background: rgba(244, 67, 54, 0.1);
+                border-left-color: #f44336;
+                color: #f44336;
+                animation: pulse-alert 2s infinite;
+            }
+
+            .alerta-info {
+                background: rgba(76, 175, 80, 0.1);
+                border-left: 3px solid #4CAF50;
+                color: #4CAF50;
+                padding: 8px 12px;
+                border-radius: 6px;
+                font-size: 13px;
+            }
+
+            .risco-alto {
+                color: #f44336 !important;
+                font-weight: bold;
+            }
+
+            .risco-normal {
+                color: #4CAF50 !important;
+            }
+
+            .positivo {
+                color: #4CAF50 !important;
+                font-weight: bold;
+            }
+
+            .negativo {
+                color: #f44336 !important;
+                font-weight: bold;
+            }
+
+            @keyframes pulse-alert {
+                0% { opacity: 1; }
+                50% { opacity: 0.7; }
+                100% { opacity: 1; }
+            }
+
+            .alerta-emoji { font-size: 16px; }
+            .alerta-tipo {
+                font-size: 10px;
+                background: rgba(255,255,255,0.1);
+                padding: 2px 6px;
+                border-radius: 3px;
+                font-weight: bold;
+            }
+            .alerta-mensagem { flex: 1; }
+
+            /* Estilos para Gestão de Riscos Compacta */
+            .risk-management-compact {
+                background: rgba(255,255,255,0.05);
+                border-radius: 8px;
+                margin: 10px 0;
+                border: 1px solid rgba(255,255,255,0.1);
+            }
+
+            .risk-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 12px 16px;
+                cursor: pointer;
+                transition: background 0.3s ease;
+            }
+
+            .risk-header:hover {
+                background: rgba(255,255,255,0.05);
+            }
+
+            .risk-summary {
+                font-size: 12px;
+                color: #ccc;
+            }
+
+            .risk-toggle {
+                font-size: 12px;
+                color: #888;
+                transition: transform 0.3s ease;
+            }
+
+            .risk-content {
+                padding: 0 16px 16px 16px;
+                border-top: 1px solid rgba(255,255,255,0.1);
+            }
+
+            .risk-metrics {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 12px;
+                margin-bottom: 12px;
+            }
+
+            .risk-item {
+                display: flex;
+                justify-content: space-between;
+                font-size: 13px;
+                padding: 6px 0;
+            }
+
+            .risk-alerts {
+                max-height: 150px;
+                overflow-y: auto;
+            }
+
+            .logs-stats {
+                display: flex;
+                gap: 15px;
+                font-size: 12px;
+                color: #888;
+            }
+
+            .logs-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 10px;
+                padding-bottom: 8px;
+                border-bottom: 1px solid rgba(255,255,255,0.1);
+            }
+
+            .logs-content {
+                max-height: 300px;
+                overflow-y: auto;
+                padding: 8px 0;
+            }
+
+            /* Estilos para botão ativo */
+            #bot-control-btn.ativo {
+                background: #f44336 !important;
+                color: white !important;
+            }
+
+            #bot-control-btn:disabled {
+                background: #666 !important;
+                cursor: not-allowed !important;
+                opacity: 0.7;
+            }
+
+            /* Estilos para logs unificados */
+            .logs-unificados {
+                margin: 15px 0;
+            }
+
+            .logs-tempo-real {
+                background: rgba(255,255,255,0.05);
+                border-radius: 8px;
+                margin-top: 10px;
+                border: 1px solid rgba(255,255,255,0.1);
+                max-height: 200px;
+            }
+
+            .logs-tempo-real .logs-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 8px 12px;
+                border-bottom: 1px solid rgba(255,255,255,0.1);
+                background: rgba(255,255,255,0.02);
+            }
+
+            .logs-tempo-real .logs-header h4 {
+                margin: 0;
+                font-size: 14px;
+                color: #fff;
+            }
+
+            .logs-tempo-real .logs-content {
+                max-height: 120px;
+                overflow-y: auto;
+                padding: 4px 8px;
+                font-size: 12px;
+                line-height: 1.3;
+            }
+
+            /* Logs em linha única */
+            #lista-logs .log-item {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                padding: 2px 0;
+                border-bottom: 1px solid rgba(255,255,255,0.05);
+                font-size: 11px;
+            }
+
+            #lista-logs .log-time {
+                color: #888;
+                font-size: 10px;
+                min-width: 50px;
+            }
+
+            #lista-logs .log-category {
+                background: rgba(255,255,255,0.1);
+                padding: 1px 4px;
+                border-radius: 3px;
+                font-size: 9px;
+                min-width: 40px;
+                text-align: center;
+            }
+
+            #lista-logs .log-message {
+                flex: 1;
+                color: #fff;
+            }
+
+            /* Cores por categoria */
+            .log-categoria-sistema { background: #2196F3 !important; }
+            .log-categoria-trading { background: #4CAF50 !important; }
+            .log-categoria-risco { background: #ff9800 !important; }
+            .log-categoria-error { background: #f44336 !important; }
+            .log-categoria-stops { background: #9c27b0 !important; }
+
+            /* Estilos para indicadores de risco */
+            .risco-normal { color: #4CAF50; }
+            .risco-medio { color: #ff9800; }
+            .risco-alto { color: #f44336; font-weight: bold; }
+
+            /* Alertas de stops */
+            .alert {
+                padding: 8px 12px;
+                margin: 4px 0;
+                border-radius: 4px;
+                font-size: 12px;
+            }
+
+            .alert-danger {
+                background: rgba(244, 67, 54, 0.1);
+                border: 1px solid #f44336;
+                color: #f44336;
+            }
+
+            .alert-warning {
+                background: rgba(255, 152, 0, 0.1);
+                border: 1px solid #ff9800;
+                color: #ff9800;
+            }
+
+            .alert-success {
+                background: rgba(76, 175, 80, 0.1);
+                border: 1px solid #4CAF50;
+                color: #4CAF50;
+            }
+
+            .logs-tempo-real .logs-stats {
+                display: flex;
+                gap: 15px;
+                font-size: 11px;
+                color: #888;
+            }
+
+            /* Fonte Courier New APENAS para resultados */
+            .resultado-valor, .lucro-valor {
+                font-family: 'Courier New', monospace !important;
+                font-weight: bold;
+                font-size: 14px;
+            }
+
+            /* Saldo mantém fonte normal */
+            .saldo-valor {
+                font-weight: bold;
+                font-size: 14px;
+            }
+
+            .positivo {
+                color: #4CAF50 !important;
+            }
+
+            .negativo {
+                color: #f44336 !important;
+            }
+
+            .neutro {
+                color: #ffc107 !important;
+            }
+
+            /* Melhora exibição da tabela de histórico */
+            #historico-tabela td {
+                font-family: 'Courier New', monospace;
+                font-size: 12px;
+            }
+
+            #historico-tabela .resultado-cell {
+                font-weight: bold;
+            }
+
+            /* Melhora exibição do resumo financeiro */
+            .resumo-item .valor {
+                font-family: 'Courier New', monospace !important;
+                font-weight: bold !important;
+                font-size: 16px !important;
+            }
+        `;
+        document.head.appendChild(style);
+      });
+    </script>
+
     <script src="{{ url_for('static', filename='mobile.js') }}"></script>
     <script src="{{ url_for('static', filename='scripts.js') }}"></script>
     <script src="/static/persistencia.js"></script>
+
+    <!-- Script de teste direto -->
+    <script>
+      console.log("🔥 Script inline carregado!");
+
+      let roboAtivo = false;
+
+      function iniciarRoboSeguro() {
+        console.log("🚀 Iniciando robô...");
+
+        // Obtém dados do formulário
+        const modo = document.getElementById("modo").value || "iniciante";
+        const meta = parseFloat(document.getElementById("meta").value) || 20;
+        const botao = document.getElementById("bot-control-btn");
+
+        console.log("Dados:", { modo, meta, roboAtivo });
+
+        // Atualiza interface imediatamente
+        if (!roboAtivo) {
+          botao.textContent = "Iniciando...";
+          botao.disabled = true;
+
+          // Move histórico atual para histórico completo
+          moverHistoricoParaCompleto();
+
+          // Limpa histórico atual
+          const tabelaBody = document.getElementById("historico-tabela-body");
+          if (tabelaBody) tabelaBody.innerHTML = "";
+
+          // Atualiza log temporário
+          const logTemp = document.getElementById("log-temporario");
+          if (logTemp) {
+            logTemp.innerHTML =
+              '<span class="log-emoji">🚀</span><span class="log-texto">Robô iniciado!</span>';
+          }
+
+          // Adiciona logs informativos
+          setTimeout(() => {
+            adicionarLogInformativo("🔧 Configurando estratégia turbo...");
+            setTimeout(() => {
+              adicionarLogInformativo("📊 Analisando VIX75 - Contratos 15s");
+              setTimeout(() => {
+                adicionarLogInformativo("⚡ Sistema inteligente ativo!");
+              }, 1000);
+            }, 500);
+          }, 500);
+        }
+
+        // Configura stops para o modo selecionado antes de iniciar
+        fetch('/api/stops/configurar', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ modo: modo })
+        })
+        .then(response => response.json())
+        .then(data => {
+          if (data.status === 'success') {
+            console.log('Stops configurados para modo:', modo);
+            atualizarStatusStops(); // Atualiza interface imediatamente
+          }
+        })
+        .catch(error => {
+          console.error('Erro ao configurar stops:', error);
+        });
+
+        fetch("/toggle_bot", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ modo, meta }),
+        })
+          .then((response) => {
+            console.log("Resposta:", response.status, response.statusText);
+            if (!response.ok) {
+              throw new Error(
+                `HTTP ${response.status}: ${response.statusText}`
+              );
+            }
+            return response.json();
+          })
+          .then((data) => {
+            console.log("Dados recebidos:", data);
+
+            // Atualiza estado do robô
+            roboAtivo = data.status === "iniciado";
+
+            // Atualiza botão
+            botao.textContent = roboAtivo ? "Parar Robô" : "Iniciar Robô";
+            botao.disabled = false;
+            botao.classList.toggle("ativo", roboAtivo);
+
+            // Mostra mensagem de sucesso
+            if (roboAtivo) {
+              console.log("✅ Robô iniciado com sucesso!");
+              if (logTemp) {
+                logTemp.innerHTML =
+                  '<span class="log-emoji">✅</span><span class="log-texto">Robô ativo - Analisando mercado...</span>';
+              }
+            } else {
+              console.log("⏹️ Robô parado");
+              if (logTemp) {
+                logTemp.innerHTML =
+                  '<span class="log-emoji">⏹️</span><span class="log-texto">Robô parado</span>';
+              }
+            }
+          })
+          .catch((error) => {
+            console.error("❌ Erro:", error);
+
+            // Restaura botão em caso de erro
+            botao.textContent = "Iniciar Robô";
+            botao.disabled = false;
+
+            // Mostra erro
+            if (logTemp) {
+              logTemp.innerHTML = `<span class="log-emoji">❌</span><span class="log-texto">Erro: ${error.message}</span>`;
+            }
+
+            alert("Erro ao iniciar robô: " + error.message);
+          });
+      }
+
+      // Função para atualizar lucro e resultados
+      function atualizarResumoFinanceiro() {
+        // Primeiro tenta a API de performance
+        fetch("/api/performance")
+          .then((response) => response.json())
+          .then((data) => {
+            console.log("Dados da API performance:", data);
+
+            if (data.status === "success" || data.lucro_atual !== undefined) {
+              // Atualiza saldo usando ID correto (mantém fonte normal)
+              const saldoElement = document.getElementById("saldo-valor");
+              if (saldoElement && (data.saldo_atual !== undefined || data.saldo !== undefined)) {
+                const saldo = data.saldo_atual || data.saldo || 0;
+                saldoElement.textContent = saldo.toFixed(2);
+                // NÃO aplica classe saldo-valor para manter fonte normal
+              }
+
+              // Atualiza lucro usando ID correto
+              const lucroElement = document.getElementById("lucro-valor");
+              if (lucroElement && (data.lucro_total !== undefined || data.lucro_atual !== undefined)) {
+                const lucro = data.lucro_total || data.lucro_atual || 0;
+                lucroElement.textContent = lucro.toFixed(2);
+                lucroElement.className = `lucro-valor ${
+                  lucro >= 0 ? "positivo" : "negativo"
+                }`;
+              }
+
+              // Atualiza meta
+              const metaElement = document.getElementById("meta-valor");
+              const metaInput = document.getElementById("meta");
+              if (metaElement && metaInput) {
+                metaElement.textContent = `/${metaInput.value || 0}`;
+              }
+            }
+          })
+          .catch((error) => {
+            console.error("Erro na API performance, tentando status_robo:", error);
+
+            // Fallback: usa status_robo
+            fetch("/status_robo")
+              .then((response) => response.json())
+              .then((data) => {
+                console.log("Dados do status_robo:", data);
+
+                // Atualiza saldo
+                const saldoElement = document.getElementById("saldo-valor");
+                if (saldoElement && data.saldo !== undefined) {
+                  saldoElement.textContent = data.saldo.toFixed(2);
+                  saldoElement.className = "saldo-valor";
+                }
+
+                // Atualiza lucro
+                const lucroElement = document.getElementById("lucro-valor");
+                if (lucroElement && data.lucro !== undefined) {
+                  lucroElement.textContent = data.lucro.toFixed(2);
+                  lucroElement.className = `lucro-valor ${
+                    data.lucro >= 0 ? "positivo" : "negativo"
+                  }`;
+                }
+              })
+              .catch((error2) => {
+                console.error("Erro também no status_robo:", error2);
+              });
+          });
+
+              // Atualiza win rate nos logs
+              const winRateDisplay =
+                document.getElementById("win-rate-display");
+              if (winRateDisplay && data.win_rate !== undefined) {
+                winRateDisplay.textContent = `Win Rate: ${data.win_rate.toFixed(
+                  1
+                )}%`;
+              }
+
+              // Atualiza contador de operações
+              const opsCount = document.getElementById("operacoes-count");
+              if (opsCount && data.total_operacoes !== undefined) {
+                opsCount.textContent = `Ops: ${data.total_operacoes}`;
+              }
+            }
+          })
+          .catch((error) => {
+            console.error("Erro ao atualizar resumo financeiro:", error);
+          });
+      }
+
+      // Função para adicionar resultado na tabela
+      function adicionarResultadoTabela(operacao) {
+        const tabelaBody = document.getElementById("historico-tabela-body");
+        if (!tabelaBody) return;
+
+        const linha = document.createElement("tr");
+        const resultado = operacao.resultado || 0;
+        const classeResultado =
+          resultado > 0 ? "positivo" : resultado < 0 ? "negativo" : "neutro";
+
+        linha.innerHTML = `
+          <td>${new Date().toLocaleTimeString("pt-BR")}</td>
+          <td>${operacao.ativo || "N/A"}</td>
+          <td>${operacao.tipo || "N/A"}</td>
+          <td class="resultado-cell ${classeResultado} resultado-valor">$${resultado.toFixed(
+          2
+        )}</td>
+        `;
+
+        // Adiciona no topo da tabela
+        tabelaBody.insertBefore(linha, tabelaBody.firstChild);
+
+        // Limita a 50 linhas
+        while (tabelaBody.children.length > 50) {
+          tabelaBody.removeChild(tabelaBody.lastChild);
+        }
+      }
+
+      // Função para mover histórico atual para histórico completo
+      function moverHistoricoParaCompleto() {
+        const tabelaAtual = document.getElementById("historico-tabela-body");
+        const tabelaCompleta = document.getElementById("historico-completo-body");
+
+        if (tabelaAtual && tabelaCompleta && tabelaAtual.children.length > 0) {
+          // Move todas as linhas para o histórico completo
+          while (tabelaAtual.firstChild) {
+            const linha = tabelaAtual.firstChild;
+            // Adiciona timestamp se não tiver
+            if (linha.cells && linha.cells.length >= 4) {
+              const agora = new Date();
+              linha.cells[0].textContent = agora.toLocaleDateString('pt-BR');
+              linha.cells[1].textContent = agora.toLocaleTimeString('pt-BR');
+            }
+            tabelaCompleta.appendChild(linha);
+          }
+
+          console.log("Histórico movido para aba completa");
+        }
+      }
+
+      // Função para adicionar log informativo
+      function adicionarLogInformativo(mensagem) {
+        const listaLogs = document.getElementById('lista-logs');
+        if (!listaLogs) return;
+
+        const logItem = document.createElement('div');
+        logItem.className = 'log-item';
+
+        const tempo = new Date().toLocaleTimeString('pt-BR', {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit'
+        });
+
+        logItem.innerHTML = `
+          <span class="log-time">${tempo}</span>
+          <span class="log-category log-categoria-sistema">SISTEMA</span>
+          <span class="log-message">${mensagem}</span>
+        `;
+
+        listaLogs.appendChild(logItem);
+        listaLogs.scrollTop = listaLogs.scrollHeight;
+      }
+
+      // Função para atualizar logs em tempo real
+      function atualizarLogsTempoReal() {
+        fetch("/api/logs?limite=10")
+          .then((response) => response.json())
+          .then((data) => {
+            if (data.status === "success" && data.logs) {
+              const listaLogs = document.getElementById("lista-logs");
+              if (!listaLogs) return;
+
+              // Limpa logs antigos
+              listaLogs.innerHTML = "";
+
+              // Adiciona novos logs
+              data.logs.forEach((log) => {
+                const logItem = document.createElement("div");
+                logItem.className = "log-item";
+
+                const tempo = new Date(log.timestamp).toLocaleTimeString(
+                  "pt-BR",
+                  {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    second: "2-digit",
+                  }
+                );
+
+                logItem.innerHTML = `
+                  <span class="log-time">${tempo}</span>
+                  <span class="log-category log-categoria-${
+                    log.categoria
+                  }">${log.categoria.toUpperCase()}</span>
+                  <span class="log-message">${log.mensagem}</span>
+                `;
+
+                listaLogs.appendChild(logItem);
+              });
+
+              // Auto-scroll para o último log
+              listaLogs.scrollTop = listaLogs.scrollHeight;
+            }
+          })
+          .catch((error) => {
+            console.error("Erro ao atualizar logs:", error);
+          });
+      }
+
+      // Função para atualizar status dos stops
+      function atualizarStatusStops() {
+        fetch('/api/stops/status')
+          .then(response => response.json())
+          .then(data => {
+            if (data.status === 'success') {
+              // Atualiza stops ativos
+              const stopsAtivos = document.getElementById('stops-ativos');
+              if (stopsAtivos && data.stops_status) {
+                stopsAtivos.textContent = data.stops_status.stops_ativos || 0;
+                stopsAtivos.className = data.stops_status.stops_ativos > 0 ? 'risco-alto' : 'risco-normal';
+              }
+
+              // Atualiza stop loss global
+              const stopLossGlobal = document.getElementById('stop-loss-global');
+              if (stopLossGlobal && data.stops_status.configuracoes) {
+                const percent = data.stops_status.configuracoes.stop_loss_global_percent || 10;
+                stopLossGlobal.textContent = `-${percent}%`;
+              }
+
+              // Atualiza take profit global
+              const takeProfitGlobal = document.getElementById('take-profit-global');
+              if (takeProfitGlobal && data.stops_status.configuracoes) {
+                const percent = data.stops_status.configuracoes.take_profit_global_percent || 20;
+                takeProfitGlobal.textContent = `+${percent}%`;
+              }
+
+              // Verifica se algum stop global foi atingido
+              if (data.verificacao_global && data.verificacao_global.acao === 'parar_sistema') {
+                const alertDiv = document.createElement('div');
+                alertDiv.className = 'alert alert-danger';
+                alertDiv.innerHTML = `🛑 ${data.verificacao_global.razao}`;
+
+                const alertasRisco = document.getElementById('alertas-risco');
+                if (alertasRisco) {
+                  alertasRisco.appendChild(alertDiv);
+                }
+              }
+            }
+          })
+          .catch(error => {
+            console.error('Erro ao atualizar status dos stops:', error);
+          });
+      }
+
+      // Teste se o DOM está carregado
+      document.addEventListener("DOMContentLoaded", function () {
+        console.log("🔥 DOM carregado!");
+        const botao = document.getElementById("bot-control-btn");
+        console.log("Botão encontrado:", botao);
+
+        // Atualiza resumo financeiro a cada 3 segundos
+        setInterval(atualizarResumoFinanceiro, 3000);
+
+        // Atualiza logs em tempo real a cada 2 segundos
+        setInterval(atualizarLogsTempoReal, 2000);
+
+        // Atualiza status dos stops a cada 5 segundos
+        setInterval(atualizarStatusStops, 5000);
+
+        // Primeira atualização imediata
+        atualizarResumoFinanceiro();
+        atualizarLogsTempoReal();
+        atualizarStatusStops();
+
+        // Adiciona botões de teste (temporário)
+        adicionarBotoesTeste();
+      });
+
+      // Função para adicionar botões de teste
+      function adicionarBotoesTeste() {
+        const container = document.querySelector('.painel-robo');
+        if (!container) return;
+
+        const divTeste = document.createElement('div');
+        divTeste.style.cssText = 'margin-top: 10px; padding: 8px; background: rgba(255,255,255,0.05); border-radius: 4px; text-align: center;';
+        divTeste.innerHTML = `
+          <div style="font-size: 11px; color: #888; margin-bottom: 5px;">🧪 Testes (temporário)</div>
+          <button onclick="simularOperacao(15)" style="margin: 2px; padding: 4px 8px; background: #4CAF50; color: white; border: none; border-radius: 3px; font-size: 10px;">+$15</button>
+          <button onclick="simularOperacao(-8)" style="margin: 2px; padding: 4px 8px; background: #f44336; color: white; border: none; border-radius: 3px; font-size: 10px;">-$8</button>
+          <button onclick="simularOperacao(22)" style="margin: 2px; padding: 4px 8px; background: #4CAF50; color: white; border: none; border-radius: 3px; font-size: 10px;">+$22</button>
+          <button onclick="resetarLucro()" style="margin: 2px; padding: 4px 8px; background: #666; color: white; border: none; border-radius: 3px; font-size: 10px;">Reset</button>
+        `;
+        container.appendChild(divTeste);
+      }
+
+      // Função para simular operação
+      function simularOperacao(resultado) {
+        fetch('/simular_operacao', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ resultado: resultado })
+        })
+        .then(response => response.json())
+        .then(data => {
+          console.log('Operação simulada:', data);
+          // Força atualização imediata
+          atualizarResumoFinanceiro();
+        })
+        .catch(error => {
+          console.error('Erro ao simular operação:', error);
+        });
+      }
+
+      // Função para resetar lucro
+      function resetarLucro() {
+        if (confirm('Resetar lucro e histórico?')) {
+          fetch('/limpar_historico', { method: 'POST' })
+          .then(response => response.json())
+          .then(data => {
+            console.log('Histórico limpo:', data);
+            atualizarResumoFinanceiro();
+            // Limpa tabela
+            const tabela = document.getElementById('historico-tabela-body');
+            if (tabela) tabela.innerHTML = '';
+          });
+        }
+      }
+      });
+    </script>
   </body>
 </html>

@@ -8,16 +8,14 @@ Responsável por inicializar o servidor Flask e gerenciar as rotas principais
 import os
 import json
 import logging
-import secrets
+
 
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify
-from dotenv import load_dotenv
 
 # Importações locais
-from utils.motor import DerivAPI
 from src.core.motor import Motor
-from utils.endpoints_estado import EstadoAPI
+from src.config.config import Config
 from src.utils.gerador_licencas import (
     carregar_licencas,
     salvar_licencas,
@@ -26,9 +24,6 @@ from src.utils.gerador_licencas import (
     obter_hwid,
     obter_ip,
 )
-
-# Carrega variáveis de ambiente
-load_dotenv()
 
 # Configuração de logging
 logging.basicConfig(
@@ -56,7 +51,7 @@ if not os.path.exists(LICENCAS_FILE):
 
 # Inicialização do Flask
 app = Flask(__name__)
-app.secret_key = os.getenv("SECRET_KEY", secrets.token_hex(16))
+app.secret_key = Config.SECRET_KEY
 app.config["SESSION_TYPE"] = "filesystem"
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=7)
 app.config["SESSION_FILE_DIR"] = os.path.join(DATA_DIR, "flask_session")
@@ -66,8 +61,6 @@ app.config["SESSION_PERMANENT"] = True
 os.makedirs(app.config["SESSION_FILE_DIR"], exist_ok=True)
 
 # Inicialização das APIs
-estado_api = EstadoAPI()
-deriv_api = None
 motor = None
 
 # Variáveis globais
@@ -81,28 +74,294 @@ ultima_mensagem = "Robô pronto para iniciar."
 contador_operacoes = 0
 status_operacao = "parado"
 
-# Sistema de logs em tempo real
+# CONTROLE DE OPERAÇÕES PARA MODO INICIANTE
+operacoes_ativas = []  # Lista de operações em andamento
+ultima_operacao_tempo = 0  # Timestamp da última operação
+max_operacoes_simultaneas = {"Iniciante": 3, "Conservador": 5, "Agressivo": 10}
+intervalo_entre_operacoes = {
+    "Iniciante": 5,
+    "Conservador": 3,
+    "Agressivo": 1,
+}  # segundos
+
+# Sistema de logs unificado e otimizado
 logs_tempo_real = []
-max_logs = 100  # Máximo de logs a manter
+logs_painel = []
+max_logs = 100
+max_logs_painel = 50
 
 
+class LoggerUnificado:
+    """Sistema de logs unificado para evitar duplicações"""
+
+    def __init__(self):
+        """Inicializa sistema de logs avançado"""
+        self.estatisticas = {
+            "total_operacoes": 0,
+            "operacoes_win": 0,
+            "operacoes_loss": 0,
+            "lucro_total": 0.0,
+            "inicio_sessao": datetime.now(),
+            "ultima_operacao": None,
+            "win_rate": 0.0,
+            "melhor_sequencia": 0,
+            "sequencia_atual": 0,
+            "pior_sequencia": 0,
+        }
+        self.historico_performance = []
+        self.alertas_ativos = []
+
+    @staticmethod
+    def adicionar_log(
+        mensagem,
+        tipo="info",
+        categoria="sistema",
+        incluir_painel=False,
+        incluir_tempo_real=True,
+        dados_extras=None,
+    ):
+        """Adiciona log de forma unificada com categorização avançada"""
+        global logs_tempo_real, logs_painel
+
+        agora = datetime.now()
+        timestamp = agora.strftime("%H:%M:%S")
+        timestamp_completo = agora.strftime("%Y-%m-%d %H:%M:%S")
+
+        log_entry = {
+            "id": len(logs_tempo_real) + 1,
+            "timestamp": timestamp,
+            "timestamp_completo": timestamp_completo,
+            "timestamp_unix": agora.timestamp(),
+            "mensagem": str(mensagem),
+            "tipo": tipo,
+            "categoria": categoria,
+            "dados_extras": dados_extras or {},
+            "nivel_prioridade": LoggerUnificado._obter_prioridade(tipo),
+        }
+
+        # Adiciona aos logs de tempo real se solicitado
+        if incluir_tempo_real:
+            logs_tempo_real.append(log_entry)
+            if len(logs_tempo_real) > max_logs:
+                logs_tempo_real = logs_tempo_real[-max_logs:]
+
+        # Adiciona aos logs do painel se solicitado
+        if incluir_painel:
+            logs_painel.append(log_entry)
+            if len(logs_painel) > max_logs_painel:
+                logs_painel = logs_painel[-max_logs_painel:]
+
+        # Log no sistema padrão também
+        LoggerUnificado._log_sistema(mensagem, tipo, categoria)
+
+        return log_entry
+
+    @staticmethod
+    def _obter_prioridade(tipo):
+        """Define prioridade do log para ordenação"""
+        prioridades = {
+            "error": 1,
+            "warning": 2,
+            "trading": 3,
+            "success": 4,
+            "info": 5,
+            "debug": 6,
+        }
+        return prioridades.get(tipo, 5)
+
+    @staticmethod
+    def _log_sistema(mensagem, tipo, categoria):
+        """Log no sistema padrão com formatação melhorada"""
+        prefixo = f"[{categoria.upper()}]"
+
+        if tipo == "error":
+            logger.error(f"{prefixo} ❌ {mensagem}")
+        elif tipo == "warning":
+            logger.warning(f"{prefixo} ⚠️ {mensagem}")
+        elif tipo == "success":
+            logger.info(f"{prefixo} ✅ {mensagem}")
+        elif tipo == "trading":
+            logger.info(f"{prefixo} 💰 {mensagem}")
+        else:
+            logger.info(f"{prefixo} ℹ️ {mensagem}")
+
+    @staticmethod
+    def log_operacao(
+        tipo_operacao, valor_entrada, resultado=None, ativo=None, modo=None
+    ):
+        """Log específico para operações de trading com análise de performance"""
+        dados_operacao = {
+            "tipo_operacao": tipo_operacao,
+            "valor_entrada": valor_entrada,
+            "resultado": resultado,
+            "ativo": ativo,
+            "modo": modo,
+            "timestamp_operacao": datetime.now().isoformat(),
+        }
+
+        if resultado is not None:
+            # Operação finalizada
+            if resultado > 0:
+                mensagem = f"✅ WIN: {tipo_operacao} | Entrada: ${valor_entrada:.2f} | Lucro: ${resultado:.2f}"
+                tipo_log = "success"
+            else:
+                mensagem = f"❌ LOSS: {tipo_operacao} | Entrada: ${valor_entrada:.2f} | Perda: ${abs(resultado):.2f}"
+                tipo_log = "warning"
+        else:
+            # Operação iniciada
+            mensagem = f"🎯 ENTRADA: {tipo_operacao} | Valor: ${valor_entrada:.2f} | Ativo: {ativo}"
+            tipo_log = "trading"
+
+        return LoggerUnificado.adicionar_log(
+            mensagem,
+            tipo_log,
+            "trading",
+            incluir_painel=True,
+            dados_extras=dados_operacao,
+        )
+
+    @staticmethod
+    def log_sistema_status(status, detalhes=None):
+        """Log para status do sistema (conexão, reconexão, etc.)"""
+        dados_status = {
+            "status": status,
+            "detalhes": detalhes,
+            "timestamp_status": datetime.now().isoformat(),
+        }
+
+        if status == "conectado":
+            mensagem = "🟢 Sistema conectado e operacional"
+            tipo_log = "success"
+        elif status == "desconectado":
+            mensagem = "🔴 Sistema desconectado"
+            tipo_log = "error"
+        elif status == "reconectando":
+            mensagem = "🟡 Tentando reconectar..."
+            tipo_log = "warning"
+        else:
+            mensagem = f"ℹ️ Status: {status}"
+            tipo_log = "info"
+
+        return LoggerUnificado.adicionar_log(
+            mensagem,
+            tipo_log,
+            "sistema",
+            incluir_painel=True,
+            dados_extras=dados_status,
+        )
+
+    @staticmethod
+    def obter_estatisticas_performance():
+        """Obtém estatísticas de performance em tempo real"""
+        global logs_tempo_real
+
+        # Filtra logs de trading
+        logs_trading = [
+            log for log in logs_tempo_real if log.get("categoria") == "trading"
+        ]
+
+        total_ops = len(
+            [
+                log
+                for log in logs_trading
+                if "WIN:" in log["mensagem"] or "LOSS:" in log["mensagem"]
+            ]
+        )
+        wins = len([log for log in logs_trading if "WIN:" in log["mensagem"]])
+        losses = len([log for log in logs_trading if "LOSS:" in log["mensagem"]])
+
+        win_rate = (wins / total_ops * 100) if total_ops > 0 else 0
+
+        return {
+            "total_operacoes": total_ops,
+            "wins": wins,
+            "losses": losses,
+            "win_rate": round(win_rate, 2),
+            "ultima_atualizacao": datetime.now().strftime("%H:%M:%S"),
+        }
+
+
+# Instância global do logger
+logger_unificado = LoggerUnificado()
+
+
+# Funções de conveniência para compatibilidade
 def adicionar_log_tempo_real(mensagem, tipo="info"):
-    """Adiciona um log ao sistema de tempo real"""
+    """Função de compatibilidade para logs de tempo real"""
+    LoggerUnificado.adicionar_log(
+        mensagem, tipo, incluir_painel=True, incluir_tempo_real=True
+    )
+
+    # Força adição aos logs globais também
     global logs_tempo_real
-    from datetime import datetime
-
-    timestamp = datetime.now().strftime("%H:%M:%S")
-    log_entry = {"timestamp": timestamp, "mensagem": mensagem, "tipo": tipo}
-
+    timestamp = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    log_entry = {
+        "timestamp": timestamp,
+        "categoria": (
+            "sistema"
+            if tipo in ["info", "success"]
+            else "trading" if tipo == "trade" else "error"
+        ),
+        "tipo": tipo,
+        "mensagem": mensagem,
+    }
     logs_tempo_real.append(log_entry)
 
-    # Mantém apenas os últimos logs
-    if len(logs_tempo_real) > max_logs:
-        logs_tempo_real = logs_tempo_real[-max_logs:]
+    # Mantém apenas os últimos 50 logs
+    if len(logs_tempo_real) > 50:
+        logs_tempo_real.pop(0)
 
-    # Atualiza a última mensagem global
-    global ultima_mensagem
-    ultima_mensagem = mensagem
+
+def adicionar_log_painel(mensagem, tipo="info"):
+    """Função de compatibilidade para logs do painel"""
+    LoggerUnificado.adicionar_log(
+        mensagem, tipo, incluir_painel=True, incluir_tempo_real=True
+    )
+
+
+def pode_executar_operacao():
+    """Verifica se pode executar uma nova operação baseado no modo"""
+    global operacoes_ativas, ultima_operacao_tempo, modo_operacao
+    import time
+
+    agora = time.time()
+    modo_atual = modo_operacao.capitalize()
+
+    # Remove operações antigas (mais de 60 segundos)
+    operacoes_ativas[:] = [op for op in operacoes_ativas if agora - op < 60]
+
+    # Verifica limite de operações simultâneas
+    max_ops = max_operacoes_simultaneas.get(modo_atual, 3)
+    if len(operacoes_ativas) >= max_ops:
+        adicionar_log_painel(
+            f"🚫 Limite de {max_ops} operações simultâneas atingido", "warning"
+        )
+        return False
+
+    # Verifica intervalo entre operações
+    intervalo = intervalo_entre_operacoes.get(modo_atual, 5)
+    if agora - ultima_operacao_tempo < intervalo:
+        tempo_restante = int(intervalo - (agora - ultima_operacao_tempo))
+        adicionar_log_painel(
+            f"⏳ Aguardando {tempo_restante}s para próxima operação", "info"
+        )
+        return False
+
+    return True
+
+
+def registrar_nova_operacao():
+    """Registra uma nova operação no controle"""
+    global operacoes_ativas, ultima_operacao_tempo
+    import time
+
+    agora = time.time()
+    operacoes_ativas.append(agora)
+    ultima_operacao_tempo = agora
+
+    adicionar_log_painel(
+        f"🚀 Nova operação iniciada ({len(operacoes_ativas)} ativas)", "success"
+    )
 
 
 # Sistema de autenticação baseado apenas em licencas.json
@@ -127,9 +386,9 @@ def verificar_token(token):
                 conta_id = licenca.get("deriv_real")
                 tipo_conta = "real"
                 # Tenta obter saldo real da API
-                api_temp = DerivAPI(token)
-                if api_temp.conectado:
-                    resultado_saldo = api_temp.obter_saldo()
+                # API removida - usando motor
+                if motor and motor.conectado:
+                    resultado_saldo = {"status": "ok", "saldo": motor.obter_saldo()}
                     if resultado_saldo.get("status") == "ok":
                         saldo = resultado_saldo["saldo"]
                     else:
@@ -141,9 +400,9 @@ def verificar_token(token):
                 conta_id = licenca.get("deriv_demo")
                 tipo_conta = "demo"
                 # Tenta obter saldo real da API
-                api_temp = DerivAPI(token)
-                if api_temp.conectado:
-                    resultado_saldo = api_temp.obter_saldo()
+                # API removida - usando motor
+                if motor and motor.conectado:
+                    resultado_saldo = {"status": "ok", "saldo": motor.obter_saldo()}
                     if resultado_saldo.get("status") == "ok":
                         saldo = resultado_saldo["saldo"]
                     else:
@@ -154,7 +413,7 @@ def verificar_token(token):
 
         # Se não encontrou nas licenças, usa verificação padrão
         if not conta_id:
-            api_temp = DerivAPI(token)
+            # API removida - usando motor
             resultado = api_temp.verificar_token()
             if resultado.get("status") == "ok":
                 return True, resultado
@@ -176,15 +435,8 @@ def verificar_token(token):
 
 
 def inicializar_api(token):
-    """Inicializa a API e o Motor com o token fornecido"""
-    global deriv_api, motor
-    try:
-        # Inicializa a API simples
-        deriv_api = DerivAPI(token)
-        logger.info("API simples inicializada")
-    except Exception as e:
-        logger.warning(f"Erro ao inicializar API simples: {e}")
-
+    """Inicializa o Motor com o token fornecido"""
+    global motor
     # SEMPRE cria o motor, mesmo se der erro
     motor = None
     try:
@@ -192,21 +444,11 @@ def inicializar_api(token):
         if token:
             motor.conectar(token)
         logger.info("MOTOR TURBO INICIALIZADO COM SUCESSO")
+        return True
     except Exception as motor_error:
         logger.warning(f"Erro ao inicializar motor: {motor_error}")
         # Cria motor básico mesmo com erro
-        try:
-            motor = Motor()
-            motor.token = token
-            motor.conectado = True  # Marca como conectado em modo básico
-            motor.rodando = False  # Inicialmente parado
-            logger.info("Motor criado em modo básico")
-        except Exception as e:
-            logger.error(f"Erro ao criar motor básico: {e}")
-            motor = None
-
-    # SEMPRE retorna True para garantir que o sistema continue
-    return True
+        return False
 
 
 def verificar_autenticacao_automatica():
@@ -285,7 +527,9 @@ def forcar_demo_para_teste_ai():
     try:
         licenca_auto = verificar_autenticacao_automatica()
         if licenca_auto:
-            token_real, token_demo = obter_tokens_da_licenca(licenca_auto)
+            _, token_demo = obter_tokens_da_licenca(
+                licenca_auto
+            )  # Removido token_real não usado
             # 🛡️ SEMPRE DEMO PARA TESTES DA AI - PROTEGE SEU DINHEIRO!
             if token_demo:
                 logger.info(
@@ -328,7 +572,12 @@ def adicionar_operacao(tipo, valor, resultado):
     """Adiciona uma operação ao histórico"""
     global historico_operacoes, contador_operacoes, lucro_atual, saldo_atual
 
-    agora = datetime.now()
+    # Usa timezone local do Brasil
+    from datetime import timezone, timedelta
+
+    fuso_brasil = timezone(timedelta(hours=-3))  # UTC-3 (Brasília)
+    agora = datetime.now(fuso_brasil)
+
     operacao = {
         "data": agora.strftime("%d/%m/%Y"),
         "hora": agora.strftime("%H:%M:%S"),
@@ -351,14 +600,78 @@ def adicionar_operacao(tipo, valor, resultado):
         except:
             pass
 
-    # Adiciona log para a UI
-    resultado_texto = "GANHO" if resultado >= 0 else "PERDA"
+    # Adiciona logs visuais para o painel
+    resultado_texto = f"+${resultado:.2f}" if resultado > 0 else f"${resultado:.2f}"
+    emoji = "📈" if resultado > 0 else "📉"
+
+    adicionar_log_painel(
+        f"{emoji} {tipo} finalizada: {resultado_texto} | Total: ${lucro_atual:.2f}",
+        "success" if resultado > 0 else "error",
+    )
+
+    # Log para tempo real também
     adicionar_log_tempo_real(
-        f"💰 {tipo} finalizada: {resultado_texto} ${resultado:.2f}",
-        "success" if resultado >= 0 else "warning",
+        f"💰 {tipo} finalizada: {resultado_texto} (Total: ${lucro_atual:.2f})",
+        "success" if resultado > 0 else "warning",
     )
 
     salvar_historico()
+
+
+def sincronizar_dados_motor():
+    """Sincroniza dados do motor com as variáveis globais"""
+    global lucro_atual, saldo_atual, contador_operacoes, historico_operacoes
+
+    if motor and hasattr(motor, "catalogador"):
+        try:
+            # Obtém status do lucro do catalogador otimizado
+            if hasattr(motor.catalogador, "obter_status_lucro"):
+                status_lucro = motor.catalogador.obter_status_lucro()
+
+                # Atualiza variáveis globais com dados do catalogador
+                if status_lucro.get("lucro_sessao") is not None:
+                    lucro_atual = status_lucro["lucro_sessao"]
+
+                if status_lucro.get("total_operacoes") is not None:
+                    contador_operacoes = status_lucro["total_operacoes"]
+
+                # Adiciona operações recentes ao histórico global se necessário
+                historico_recente = status_lucro.get("historico_recente", [])
+                for operacao in historico_recente:
+                    # Verifica se a operação já está no histórico global
+                    if not any(
+                        op.get("timestamp") == operacao.get("timestamp")
+                        for op in historico_operacoes
+                    ):
+                        historico_operacoes.append(
+                            {
+                                "data": operacao.get("data"),
+                                "hora": operacao.get("hora"),
+                                "tipo": operacao.get("tipo"),
+                                "valor": operacao.get("valor"),
+                                "resultado_real": operacao.get("resultado"),
+                                "timestamp": operacao.get("timestamp"),
+                            }
+                        )
+
+            # Atualiza saldo
+            if hasattr(motor, "obter_saldo"):
+                saldo_atual = motor.obter_saldo()
+
+            # Fallback para histórico do motor se catalogador não tiver dados
+            if (
+                not lucro_atual
+                and hasattr(motor, "historico_resultados")
+                and motor.historico_resultados
+            ):
+                lucro_total = sum(
+                    op.get("lucro", 0) for op in motor.historico_resultados
+                )
+                lucro_atual = lucro_total
+                contador_operacoes = len(motor.historico_resultados)
+
+        except Exception as e:
+            logger.error(f"Erro ao sincronizar dados do motor: {e}")
 
 
 # Rotas do Flask
@@ -730,46 +1043,60 @@ def toggle_bot():
                 "💰 Gestão: Stop 2% | Take 4-6% | Martingale 2x", "info"
             )
 
-            # Inicia o sistema inteligente no motor - FORÇADO
+            # Inicia o sistema inteligente no motor - VERSÃO SEGURA
             adicionar_log_tempo_real("⚙️ Configurando motor...", "info")
             try:
-                # SEMPRE cria novo motor para garantir funcionamento
-                from src.core.motor import Motor
+                # Usa motor existente se disponível e conectado
+                if motor and hasattr(motor, "conectado") and motor.conectado:
+                    logger.info("Usando motor existente já conectado")
+                else:
+                    # Cria novo motor apenas se necessário
+                    from src.core.motor import Motor
 
-                motor = Motor()
+                    motor = Motor()
 
-                # Conecta com o token da sessão
-                token_atual = session.get("token")
-                if token_atual:
-                    motor.conectar(token_atual)
+                    # Conecta com o token da sessão
+                    token_atual = session.get("token")
+                    if token_atual:
+                        motor.conectar(token_atual)
 
                 # Configura modo e meta
                 motor.modo_operacao = modo
                 motor.meta_diaria = meta
 
-                # FORÇA início do sistema inteligente
-                motor.iniciar_sistema_inteligente()
+                # Inicia sistema inteligente de forma segura
+                if hasattr(motor, "iniciar_sistema_inteligente"):
+                    # Inicia em thread separada para não travar
+                    import threading
 
-                logger.info("SISTEMA INTELIGENTE FORÇADO A INICIAR")
-                adicionar_log_tempo_real("🚀 Motor Turbo FORÇADO a iniciar!", "success")
-                adicionar_log_tempo_real("⚡ Sistema inteligente ATIVO!", "info")
+                    def iniciar_motor_seguro():
+                        try:
+                            motor.iniciar_sistema_inteligente()
+                            logger.info("Sistema inteligente iniciado com sucesso")
+                        except Exception as e:
+                            logger.error(f"Erro ao iniciar sistema inteligente: {e}")
+
+                    thread = threading.Thread(target=iniciar_motor_seguro, daemon=True)
+                    thread.start()
+
+                    logger.info("SISTEMA INTELIGENTE INICIADO EM THREAD SEPARADA")
+                    adicionar_log_tempo_real("🚀 Motor Turbo iniciado!", "success")
+                    adicionar_log_tempo_real("⚡ Sistema inteligente ATIVO!", "info")
+                else:
+                    logger.warning(
+                        "Motor não possui método iniciar_sistema_inteligente"
+                    )
+                    adicionar_log_tempo_real("⚠️ Motor em modo básico", "warning")
 
                 # Atualiza variável global
                 globals()["motor"] = motor
 
             except Exception as e:
-                logger.error(f"ERRO CRÍTICO ao iniciar sistema: {e}")
-                adicionar_log_tempo_real(f"❌ ERRO CRÍTICO: {str(e)}", "error")
+                logger.error(f"ERRO ao iniciar sistema: {e}")
+                adicionar_log_tempo_real(f"❌ ERRO: {str(e)}", "error")
 
-                # Tenta fallback
-                try:
-                    if "motor" in globals() and motor:
-                        motor.iniciar_sistema_inteligente()
-                        adicionar_log_tempo_real(
-                            "🔄 Fallback: Sistema iniciado!", "success"
-                        )
-                except Exception as e2:
-                    adicionar_log_tempo_real(f"❌ Fallback falhou: {str(e2)}", "error")
+                # Continua mesmo com erro para não travar a interface
+                adicionar_log_tempo_real("🔄 Sistema em modo básico", "warning")
 
             return jsonify(
                 {
@@ -804,6 +1131,75 @@ def status_robo_teste():
     return jsonify({"status": "ok", "teste": "funcionando"})
 
 
+@app.route("/toggle_bot_teste", methods=["POST"])
+def toggle_bot_teste():
+    """Rota de teste para toggle_bot"""
+    try:
+        data = request.get_json()
+        logger.info(f"Teste toggle_bot recebido: {data}")
+        return jsonify(
+            {
+                "status": "teste_ok",
+                "dados_recebidos": data,
+                "motor_existe": motor is not None,
+                "sessao_token": "token" in session,
+            }
+        )
+    except Exception as e:
+        logger.error(f"Erro no teste toggle_bot: {e}")
+        return jsonify({"status": "erro", "mensagem": str(e)}), 500
+
+
+@app.route("/simular_operacao", methods=["POST"])
+def simular_operacao():
+    """Simula uma operação para testar a atualização do lucro"""
+    try:
+        global lucro_atual, contador_operacoes, historico_operacoes
+
+        data = request.get_json()
+        resultado = float(data.get("resultado", 10.0))  # Padrão: +$10
+
+        # Adiciona ao lucro atual
+        lucro_atual += resultado
+        contador_operacoes += 1
+
+        # Adiciona ao histórico
+        operacao = {
+            "data": datetime.now().strftime("%d/%m/%Y"),
+            "hora": datetime.now().strftime("%H:%M:%S"),
+            "tipo": "CALL" if resultado > 0 else "PUT",
+            "valor": 2.0,
+            "resultado_real": resultado,
+            "timestamp": datetime.now().isoformat(),
+        }
+
+        historico_operacoes.append(operacao)
+
+        # Adiciona log
+        adicionar_log_tempo_real(
+            f"Operação simulada: {'+' if resultado >= 0 else ''}${resultado:.2f}",
+            "success" if resultado >= 0 else "error",
+        )
+
+        logger.info(
+            f"Operação simulada: ${resultado:.2f} - Lucro total: ${lucro_atual:.2f}"
+        )
+
+        return jsonify(
+            {
+                "status": "ok",
+                "resultado": resultado,
+                "lucro_total": lucro_atual,
+                "operacoes": contador_operacoes,
+                "mensagem": f"Operação simulada: {'+' if resultado >= 0 else ''}${resultado:.2f}",
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Erro ao simular operação: {e}")
+        return jsonify({"status": "erro", "mensagem": str(e)}), 500
+
+
 @app.route("/status_robo")
 def status_robo():
     """Rota para obter status do robô com informações inteligentes"""
@@ -828,6 +1224,9 @@ def status_robo():
 
     try:
         global robo_ativo, modo_operacao, meta_diaria, status_operacao, ultima_mensagem
+
+        # Sincroniza dados do motor antes de retornar
+        sincronizar_dados_motor()
 
         # Informações do ativo atual - ESTRATÉGIA TURBO FIXA
         ativo_info = {
@@ -898,6 +1297,9 @@ def status_robo():
             "ativo_atual": dict(ativo_info),
             "motor_status": dict(motor_status),
             "logs_tempo_real": list(logs_tempo_real[-20:] if logs_tempo_real else []),
+            "logs_painel": list(
+                logs_painel[-10:] if logs_painel else []
+            ),  # Logs visuais
             "historico_recente": list(
                 historico_operacoes[-3:] if historico_operacoes else []
             ),
@@ -974,8 +1376,8 @@ def selecionar_conta():
                 time.sleep(1)
 
                 # Obtém saldo real da API
-                if deriv_api and deriv_api.conectado and hasattr(deriv_api, "saldo"):
-                    saldo_atual = deriv_api.saldo
+                if motor and motor.conectado and hasattr(deriv_api, "saldo"):
+                    saldo_atual = motor.obter_saldo()
                 else:
                     saldo_atual = resultado.get("saldo", 0)
 
@@ -1019,8 +1421,8 @@ def selecionar_conta():
                 time.sleep(1)
 
                 # Obtém saldo real da API
-                if deriv_api and deriv_api.conectado and hasattr(deriv_api, "saldo"):
-                    saldo_atual = deriv_api.saldo
+                if motor and motor.conectado and hasattr(deriv_api, "saldo"):
+                    saldo_atual = motor.obter_saldo()
                 else:
                     saldo_atual = resultado.get("saldo", 0)
 
@@ -1059,8 +1461,8 @@ def status_deriv():
         return jsonify({"status": "erro", "mensagem": "Não autenticado"}), 401
 
     try:
-        if deriv_api:
-            resultado = deriv_api.verificar_conexao()
+        if motor:
+            resultado = motor.status_conexao()
             return jsonify(resultado)
         else:
             return jsonify({"status": "erro", "mensagem": "API não inicializada"})
@@ -1070,7 +1472,7 @@ def status_deriv():
 
 
 @app.route("/saldo_atual")
-def saldo_atual():
+def obter_saldo_atual():
     """Rota para obter saldo atual"""
     global saldo_atual
 
@@ -1079,15 +1481,15 @@ def saldo_atual():
 
     try:
         # SEMPRE tenta obter saldo real da API primeiro
-        if deriv_api and deriv_api.conectado:
+        if motor and motor.conectado:
             # Usa o saldo já capturado na autorização
-            if hasattr(deriv_api, "saldo") and deriv_api.saldo > 0:
-                saldo_atual = deriv_api.saldo
+            if hasattr(deriv_api, "saldo") and motor.obter_saldo() > 0:
+                saldo_atual = motor.obter_saldo()
                 session["saldo"] = saldo_atual
                 return {"status": "ok", "saldo": saldo_atual}
 
             # Se não tem saldo, tenta obter via requisição
-            resultado = deriv_api.obter_saldo()
+            resultado = motor.obter_saldo()
             if resultado["status"] == "ok":
                 saldo_atual = resultado["saldo"]
                 session["saldo"] = saldo_atual
@@ -1096,12 +1498,12 @@ def saldo_atual():
         # Se não há API conectada, tenta reconectar
         if session.get("token"):
             token_atual = session["token"]
-            if not deriv_api or not deriv_api.conectado:
+            if not motor or not motor.conectado:
                 inicializar_api(token_atual)
 
             # Tenta novamente após reconexão
-            if deriv_api and deriv_api.conectado and hasattr(deriv_api, "saldo"):
-                saldo_atual = deriv_api.saldo
+            if motor and motor.conectado and hasattr(deriv_api, "saldo"):
+                saldo_atual = motor.obter_saldo()
                 session["saldo"] = saldo_atual
                 return {"status": "ok", "saldo": saldo_atual}
 
@@ -1225,6 +1627,9 @@ def status_detalhado():
         return jsonify({"status": "erro", "mensagem": "Não autenticado"}), 401
 
     try:
+        # Sincroniza dados do motor antes de retornar
+        sincronizar_dados_motor()
+
         return jsonify(
             {
                 "ativo": robo_ativo,
@@ -1368,6 +1773,45 @@ def teste_ai_demo():
         return jsonify({"status": "erro", "mensagem": f"Erro no teste AI: {e}"})
 
 
+@app.route("/teste_historico_publico", methods=["POST"])
+def teste_historico_publico():
+    """Teste público para verificar histórico - SEM AUTENTICAÇÃO"""
+    try:
+        # Adiciona operações de teste diretamente
+        adicionar_operacao("CALL", 0.35, 0.65)  # Ganho
+        adicionar_operacao("PUT", 0.35, -0.35)  # Perda
+        adicionar_operacao("CALL", 0.35, 0.70)  # Ganho
+
+        return jsonify(
+            {
+                "status": "ok",
+                "mensagem": "3 operações de teste adicionadas",
+                "operacoes_adicionadas": 3,
+                "lucro_atual": lucro_atual,
+                "contador_operacoes": contador_operacoes,
+            }
+        )
+    except Exception as e:
+        return jsonify({"status": "erro", "mensagem": str(e)}), 500
+
+
+@app.route("/historico_publico")
+def historico_publico():
+    """Rota pública para obter histórico - SEM AUTENTICAÇÃO"""
+    try:
+        return jsonify(
+            {
+                "status": "ok",
+                "historico": historico_operacoes,
+                "total_operacoes": len(historico_operacoes),
+                "lucro_atual": lucro_atual,
+                "contador_operacoes": contador_operacoes,
+            }
+        )
+    except Exception as e:
+        return jsonify({"status": "erro", "mensagem": str(e)}), 500
+
+
 @app.route("/forcar_operacao_teste", methods=["POST"])
 def forcar_operacao_teste():
     """Força uma operação de teste para verificar se o sistema está funcionando"""
@@ -1432,6 +1876,588 @@ def restaurar_sessao():
 
 # Tenta restaurar a sessão ao iniciar
 restaurar_sessao()
+
+
+# ===== NOVAS ROTAS DA API PARA LOGS AVANÇADOS =====
+
+
+@app.route("/api/logs")
+def api_logs():
+    """API para obter logs em tempo real com categorização"""
+    try:
+        categoria = request.args.get("categoria", "all")
+        limite = int(request.args.get("limite", 20))
+
+        if categoria == "all":
+            logs_filtrados = logs_tempo_real[-limite:]
+        else:
+            logs_filtrados = [
+                log for log in logs_tempo_real if log.get("categoria") == categoria
+            ][-limite:]
+
+        # Se não há logs, adiciona alguns padrão
+        if not logs_filtrados:
+            agora = datetime.now()
+            logs_filtrados = [
+                {
+                    "timestamp": agora.strftime("%d/%m/%Y %H:%M:%S"),
+                    "categoria": "sistema",
+                    "tipo": "info",
+                    "mensagem": "🔍 Robô pronto para iniciar.",
+                },
+                {
+                    "timestamp": agora.strftime("%d/%m/%Y %H:%M:%S"),
+                    "categoria": "sistema",
+                    "tipo": "info",
+                    "mensagem": "⚙️ Sistema configurado e aguardando.",
+                },
+            ]
+
+        return jsonify(
+            {
+                "status": "success",
+                "logs": logs_filtrados,
+                "total": len(logs_filtrados),
+                "categoria": categoria,
+                "timestamp_servidor": datetime.now().isoformat(),
+            }
+        )
+    except Exception as e:
+        logger.error(f"Erro na API de logs: {e}")
+        return jsonify({"erro": "Erro interno"}), 500
+
+
+@app.route("/api/logs/painel")
+def api_logs_painel():
+    """API específica para logs do painel visual"""
+    try:
+        return jsonify(
+            {
+                "logs": logs_painel[-10:],
+                "timestamp": datetime.now().strftime("%H:%M:%S"),
+            }
+        )
+    except Exception as e:
+        logger.error(f"Erro na API de logs do painel: {e}")
+        return jsonify({"erro": "Erro interno"}), 500
+
+
+@app.route("/api/performance")
+def api_performance():
+    """API para estatísticas de performance em tempo real"""
+    try:
+        global lucro_atual, saldo_atual, contador_operacoes, historico_operacoes
+
+        # Calcula win rate
+        operacoes_fechadas = [
+            op for op in historico_operacoes if op.get("resultado_real") is not None
+        ]
+        wins = len([op for op in operacoes_fechadas if op.get("resultado_real", 0) > 0])
+        win_rate = (wins / len(operacoes_fechadas) * 100) if operacoes_fechadas else 0
+
+        # Tenta obter dados do LoggerUnificado se disponível
+        try:
+            stats = LoggerUnificado.obter_estatisticas_performance()
+            if stats.get("status") == "success":
+                return jsonify(stats)
+        except:
+            pass
+
+        # Fallback: usa variáveis globais
+        return jsonify(
+            {
+                "status": "success",
+                "saldo_atual": float(saldo_atual),
+                "lucro_atual": float(lucro_atual),
+                "lucro_total": float(lucro_atual),
+                "total_operacoes": int(contador_operacoes),
+                "win_rate": float(win_rate),
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
+    except Exception as e:
+        logger.error(f"Erro na API de performance: {e}")
+        return jsonify({"erro": "Erro interno"}), 500
+
+
+@app.route("/api/status/sistema")
+def api_status_sistema():
+    """API para status do sistema em tempo real"""
+    try:
+        # Verifica status das conexões
+        status_deriv = (
+            "conectado"
+            if motor and hasattr(motor, "ws") and motor.ws
+            else "desconectado"
+        )
+
+        # Últimos logs de sistema
+        logs_sistema = [
+            log for log in logs_tempo_real if log.get("categoria") == "sistema"
+        ][-5:]
+
+        return jsonify(
+            {
+                "status_deriv": status_deriv,
+                "logs_sistema": logs_sistema,
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
+    except Exception as e:
+        logger.error(f"Erro na API de status: {e}")
+        return jsonify({"erro": "Erro interno"}), 500
+
+
+@app.route("/api/noticias")
+def api_noticias():
+    """API para notícias do mercado financeiro"""
+    try:
+        # Simulação de notícias (pode ser integrado com API real)
+        noticias = [
+            {
+                "id": 1,
+                "titulo": "Mercados em alta após dados econômicos positivos",
+                "resumo": "Índices globais sobem com otimismo dos investidores",
+                "timestamp": datetime.now().strftime("%H:%M"),
+                "categoria": "economia",
+                "impacto": "positivo",
+            },
+            {
+                "id": 2,
+                "titulo": "Volatilidade esperada para próximas horas",
+                "resumo": "Analistas preveem movimentos significativos",
+                "timestamp": (datetime.now() - timedelta(minutes=15)).strftime("%H:%M"),
+                "categoria": "analise",
+                "impacto": "neutro",
+            },
+        ]
+
+        return jsonify(
+            {
+                "noticias": noticias,
+                "ultima_atualizacao": datetime.now().strftime("%H:%M:%S"),
+            }
+        )
+    except Exception as e:
+        logger.error(f"Erro na API de notícias: {e}")
+        return jsonify({"erro": "Erro interno"}), 500
+
+
+# ===== APIS DO SISTEMA DE GESTÃO DE RISCOS =====
+
+
+@app.route("/api/riscos/metricas")
+def api_riscos_metricas():
+    """API para métricas de risco em tempo real"""
+    try:
+        if motor and hasattr(motor, "gestao_riscos"):
+            metricas = motor.gestao_riscos.obter_metricas_tempo_real()
+            return jsonify(
+                {
+                    "status": "success",
+                    "metricas": metricas,
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
+        else:
+            return (
+                jsonify(
+                    {
+                        "status": "error",
+                        "mensagem": "Sistema de gestão de riscos não disponível",
+                    }
+                ),
+                503,
+            )
+    except Exception as e:
+        logger.error(f"Erro na API de métricas de risco: {e}")
+        return jsonify({"erro": "Erro interno"}), 500
+
+
+@app.route("/api/riscos/alertas")
+def api_riscos_alertas():
+    """API para alertas de risco ativos"""
+    try:
+        if motor and hasattr(motor, "gestao_riscos"):
+            modo = request.args.get("modo", "conservador")
+            alertas = motor.gestao_riscos.verificar_alertas(modo)
+            return jsonify(
+                {
+                    "status": "success",
+                    "alertas": alertas,
+                    "total_alertas": len(alertas),
+                    "modo": modo,
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
+        else:
+            return (
+                jsonify(
+                    {
+                        "status": "error",
+                        "mensagem": "Sistema de gestão de riscos não disponível",
+                    }
+                ),
+                503,
+            )
+    except Exception as e:
+        logger.error(f"Erro na API de alertas de risco: {e}")
+        return jsonify({"erro": "Erro interno"}), 500
+
+
+@app.route("/api/riscos/validar", methods=["POST"])
+def api_riscos_validar():
+    """API para validar uma operação antes de executar"""
+    try:
+        if not motor or not hasattr(motor, "gestao_riscos"):
+            return (
+                jsonify(
+                    {
+                        "status": "error",
+                        "mensagem": "Sistema de gestão de riscos não disponível",
+                    }
+                ),
+                503,
+            )
+
+        dados = request.get_json()
+        valor = float(dados.get("valor", 0))
+        modo = dados.get("modo", "conservador")
+
+        if valor <= 0:
+            return (
+                jsonify(
+                    {"status": "error", "mensagem": "Valor deve ser maior que zero"}
+                ),
+                400,
+            )
+
+        saldo_atual = motor.obter_saldo()
+        validacao = motor.gestao_riscos.validar_operacao(valor, modo, saldo_atual)
+
+        return jsonify(
+            {
+                "status": "success",
+                "validacao": validacao,
+                "saldo_atual": saldo_atual,
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Erro na API de validação de risco: {e}")
+        return jsonify({"erro": "Erro interno"}), 500
+
+
+@app.route("/api/riscos/historico")
+def api_riscos_historico():
+    """API para histórico de operações com análise de risco"""
+    try:
+        if motor and hasattr(motor, "gestao_riscos"):
+            limite = int(request.args.get("limite", 50))
+            historico = motor.gestao_riscos.historico_operacoes[-limite:]
+
+            # Calcula estatísticas do histórico
+            total_ops = len(historico)
+            ops_fechadas = [op for op in historico if op.get("status") == "fechada"]
+            wins = len([op for op in ops_fechadas if op.get("resultado", 0) > 0])
+
+            estatisticas = {
+                "total_operacoes": total_ops,
+                "operacoes_fechadas": len(ops_fechadas),
+                "wins": wins,
+                "losses": len(ops_fechadas) - wins,
+                "win_rate": (wins / len(ops_fechadas) * 100) if ops_fechadas else 0,
+                "lucro_total": sum([op.get("resultado", 0) for op in ops_fechadas]),
+                "maior_ganho": max(
+                    [op.get("resultado", 0) for op in ops_fechadas], default=0
+                ),
+                "maior_perda": min(
+                    [op.get("resultado", 0) for op in ops_fechadas], default=0
+                ),
+            }
+
+            return jsonify(
+                {
+                    "status": "success",
+                    "historico": historico,
+                    "estatisticas": estatisticas,
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
+        else:
+            return (
+                jsonify(
+                    {
+                        "status": "error",
+                        "mensagem": "Sistema de gestão de riscos não disponível",
+                    }
+                ),
+                503,
+            )
+    except Exception as e:
+        logger.error(f"Erro na API de histórico de risco: {e}")
+        return jsonify({"erro": "Erro interno"}), 500
+
+
+@app.route("/api/riscos/configurar", methods=["POST"])
+def api_riscos_configurar():
+    """API para configurar limites de risco"""
+    try:
+        if not motor or not hasattr(motor, "gestao_riscos"):
+            return (
+                jsonify(
+                    {
+                        "status": "error",
+                        "mensagem": "Sistema de gestão de riscos não disponível",
+                    }
+                ),
+                503,
+            )
+
+        dados = request.get_json()
+        modo = dados.get("modo")
+        novos_limites = dados.get("limites")
+
+        if not modo or not novos_limites:
+            return (
+                jsonify(
+                    {"status": "error", "mensagem": "Modo e limites são obrigatórios"}
+                ),
+                400,
+            )
+
+        if modo in motor.gestao_riscos.limites_por_modo:
+            # Atualiza apenas os campos fornecidos
+            for campo, valor in novos_limites.items():
+                if campo in motor.gestao_riscos.limites_por_modo[modo]:
+                    motor.gestao_riscos.limites_por_modo[modo][campo] = valor
+
+            LoggerUnificado.adicionar_log(
+                f"Limites de risco atualizados para modo {modo}",
+                "success",
+                "risco",
+                incluir_painel=True,
+            )
+
+            return jsonify(
+                {
+                    "status": "success",
+                    "mensagem": f"Limites atualizados para modo {modo}",
+                    "novos_limites": motor.gestao_riscos.limites_por_modo[modo],
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
+        else:
+            return (
+                jsonify(
+                    {"status": "error", "mensagem": f"Modo '{modo}' não encontrado"}
+                ),
+                404,
+            )
+
+    except Exception as e:
+        logger.error(f"Erro na API de configuração de risco: {e}")
+        return jsonify({"erro": "Erro interno"}), 500
+
+
+# ===== APIS DO SISTEMA DE STOPS =====
+
+
+@app.route("/api/stops/status")
+def api_stops_status():
+    """API para obter status dos stops ativos"""
+    try:
+        if motor and hasattr(motor, "sistema_stops"):
+            status = motor.sistema_stops.obter_status_stops()
+
+            # Verifica stops globais
+            saldo_atual = motor.obter_saldo() if hasattr(motor, "obter_saldo") else 0
+            verificacao_global = motor.sistema_stops.verificar_stops_globais(
+                saldo_atual
+            )
+
+            return jsonify(
+                {
+                    "status": "success",
+                    "stops_status": status,
+                    "verificacao_global": verificacao_global,
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
+        else:
+            return (
+                jsonify(
+                    {"status": "error", "mensagem": "Sistema de stops não disponível"}
+                ),
+                503,
+            )
+    except Exception as e:
+        logger.error(f"Erro na API de status de stops: {e}")
+        return jsonify({"erro": "Erro interno"}), 500
+
+
+@app.route("/api/stops/configurar", methods=["POST"])
+def api_stops_configurar():
+    """API para configurar stops por modo"""
+    try:
+        if not motor or not hasattr(motor, "sistema_stops"):
+            return (
+                jsonify(
+                    {"status": "error", "mensagem": "Sistema de stops não disponível"}
+                ),
+                503,
+            )
+
+        dados = request.get_json()
+        modo = dados.get("modo")
+
+        if not modo:
+            return jsonify({"status": "error", "mensagem": "Modo é obrigatório"}), 400
+
+        # Configura stops para o modo
+        motor.sistema_stops.configurar_stops_por_modo(modo)
+
+        # Atualiza saldo inicial se necessário
+        if hasattr(motor, "obter_saldo"):
+            motor.sistema_stops.saldo_inicial = motor.obter_saldo()
+
+        adicionar_log_tempo_real(f"Stops configurados para modo {modo}", "success")
+
+        return jsonify(
+            {
+                "status": "success",
+                "mensagem": f"Stops configurados para modo {modo}",
+                "configuracoes": motor.sistema_stops.configuracoes,
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Erro na API de configuração de stops: {e}")
+        return jsonify({"erro": "Erro interno"}), 500
+
+
+# ===== APIS DO SISTEMA DE LOGS APRIMORADO =====
+
+
+@app.route("/api/logs/stops")
+def api_logs_stops():
+    """API para obter logs específicos de stops"""
+    try:
+        limite = request.args.get("limite", 20, type=int)
+
+        if logger_unificado:
+            logs_stops = logger_unificado.obter_logs_stops(limite)
+            return jsonify(
+                {
+                    "status": "success",
+                    "logs": logs_stops,
+                    "total": len(logs_stops),
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
+        else:
+            return (
+                jsonify(
+                    {"status": "error", "mensagem": "Sistema de logs não disponível"}
+                ),
+                503,
+            )
+
+    except Exception as e:
+        logger.error(f"Erro na API de logs de stops: {e}")
+        return jsonify({"erro": "Erro interno"}), 500
+
+
+@app.route("/api/logs/erros")
+def api_logs_erros():
+    """API para obter logs específicos de erros"""
+    try:
+        limite = request.args.get("limite", 20, type=int)
+
+        if logger_unificado:
+            logs_erros = logger_unificado.obter_logs_erros(limite)
+            status_erros = logger_unificado.obter_status_erros()
+
+            return jsonify(
+                {
+                    "status": "success",
+                    "logs": logs_erros,
+                    "status_erros": status_erros,
+                    "total": len(logs_erros),
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
+        else:
+            return (
+                jsonify(
+                    {"status": "error", "mensagem": "Sistema de logs não disponível"}
+                ),
+                503,
+            )
+
+    except Exception as e:
+        logger.error(f"Erro na API de logs de erros: {e}")
+        return jsonify({"erro": "Erro interno"}), 500
+
+
+@app.route("/api/logs/categoria/<categoria>")
+def api_logs_categoria(categoria):
+    """API para obter logs por categoria"""
+    try:
+        limite = request.args.get("limite", 20, type=int)
+
+        if logger_unificado:
+            logs_categoria = logger_unificado.obter_logs_por_categoria(
+                categoria, limite
+            )
+            return jsonify(
+                {
+                    "status": "success",
+                    "categoria": categoria,
+                    "logs": logs_categoria,
+                    "total": len(logs_categoria),
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
+        else:
+            return (
+                jsonify(
+                    {"status": "error", "mensagem": "Sistema de logs não disponível"}
+                ),
+                503,
+            )
+
+    except Exception as e:
+        logger.error(f"Erro na API de logs por categoria: {e}")
+        return jsonify({"erro": "Erro interno"}), 500
+
+
+@app.route("/api/logs/estatisticas")
+def api_logs_estatisticas():
+    """API para obter estatísticas dos logs"""
+    try:
+        if logger_unificado:
+            estatisticas = logger_unificado.obter_estatisticas()
+            return jsonify(
+                {
+                    "status": "success",
+                    "estatisticas": estatisticas,
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
+        else:
+            return (
+                jsonify(
+                    {"status": "error", "mensagem": "Sistema de logs não disponível"}
+                ),
+                503,
+            )
+
+    except Exception as e:
+        logger.error(f"Erro na API de estatísticas de logs: {e}")
+        return jsonify({"erro": "Erro interno"}), 500
 
 
 # Função para inicializar o servidor

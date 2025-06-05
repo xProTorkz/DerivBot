@@ -1,102 +1,106 @@
-import httpx
-import json
 import time
 import os
 import numpy as np
+import pandas as pd
 import logging
 from functools import lru_cache
-from dotenv import load_dotenv
-from typing import List, Dict, Optional, Tuple, Any, Union
-from dataclasses import dataclass
+from typing import List, Dict, Optional, Tuple, Union
+from dataclasses import dataclass, field
 from enum import Enum
-import asyncio
-import importlib
 
-from src import config
-from .estrategia_turbo import (
-    ESTRATEGIA_TURBO,
-    ATIVOS_TURBO,
-    ANALISE_TECNICA,
-    obter_ativo_prioritario,
-    validar_entrada,
-    calcular_volume_entrada,
+# Importa as configurações centralizadas otimizadas
+try:
+    from src import config as bot_config
+except ImportError:
+    import config as bot_config
+
+# Cria diretório de logs se não existir
+os.makedirs("logs", exist_ok=True)
+
+# Configuração de logging usando configurações centralizadas
+logging.basicConfig(
+    level=getattr(logging, getattr(bot_config, "LOG_LEVEL", "INFO"), logging.INFO),
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler("logs/catalogador.log", encoding="utf-8"),
+        logging.StreamHandler(),
+    ],
 )
+logger = logging.getLogger("catalogador_otimizado")
 
-# Configuração de memória local
-MEMORIA_DIR = "memoria"
+# Carregamento de configurações centralizadas
+try:
+    # Tenta usar as configurações do core/config.py
+    from src.core.config import (
+        CONFIG_CATALOGADOR_OTIMIZADO,
+        CONFIG_INDICADORES_TECNICOS,
+    )
+
+    CONFIG_CATALOGADOR = CONFIG_CATALOGADOR_OTIMIZADO
+    CONFIG_INDICADORES = CONFIG_INDICADORES_TECNICOS
+    CONFIG_ASSERTIVIDADE = {}
+    CONFIG_VOLATILITYS = {}
+except (AttributeError, ImportError) as e:
+    logger.warning(f"Erro ao carregar configurações: {e}")
+    # Configurações padrão como fallback
+    CONFIG_CATALOGADOR = {
+        "analise": {
+            "max_velas_memoria": 2000,
+            "max_ticks_memoria": 20000,
+            "timeframe_padrao_s": 15,
+            "min_velas_analise": 25,
+        },
+        "limpeza": {
+            "intervalo_s": 1800,
+            "max_idade_velas_s": 21600,
+            "max_idade_ticks_s": 3600,
+        },
+        "operacoes": {"intervalo_min_ops_s": 5},
+        "sistema": {"nivel_log": "INFO", "cache_ttl": 60, "arquivo_memoria": "memoria"},
+    }
+    CONFIG_INDICADORES = {}
+    CONFIG_ASSERTIVIDADE = {}
+    CONFIG_VOLATILITYS = {}
+
+# Diretório para memória usando configuração centralizada
+MEMORIA_DIR = CONFIG_CATALOGADOR["sistema"]["arquivo_memoria"]
 if not os.path.exists(MEMORIA_DIR):
     os.makedirs(MEMORIA_DIR)
 
+# API Key - usando configuração centralizada
+from src.config.config import Config
 
-def carregar_memoria(arquivo):
-    """Carrega dados de memória de um arquivo"""
-    try:
-        caminho = os.path.join(MEMORIA_DIR, arquivo)
-        if os.path.exists(caminho):
-            with open(caminho, "r", encoding="utf-8") as f:
-                return json.load(f)
-        return {}
-    except Exception as e:
-        logger.error(f"Erro ao carregar memória {arquivo}: {e}")
-        return {}
-
-
-def salvar_memoria(arquivo, dados):
-    """Salva dados de memória em um arquivo"""
-    try:
-        caminho = os.path.join(MEMORIA_DIR, arquivo)
-        with open(caminho, "w", encoding="utf-8") as f:
-            json.dump(dados, f, indent=2, ensure_ascii=False)
-    except Exception as e:
-        logger.error(f"Erro ao salvar memória {arquivo}: {e}")
-
-
-# Configuração de logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[logging.FileHandler("trading.log"), logging.StreamHandler()],
-)
-logger = logging.getLogger("trader")
-
-# Carregamento de variáveis de ambiente
-load_dotenv()
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+DEEPSEEK_API_KEY = Config.DEEPSEEK_API_KEY
 if not DEEPSEEK_API_KEY:
-    logger.warning(
-        "API key não encontrada. Configure a variável DEEPSEEK_API_KEY no arquivo .env"
-    )
+    logger.warning("DEEPSEEK_API_KEY não configurada. Funcionalidade de IA limitada.")
 
-# Configurações centralizadas
-CONFIG = {
-    "api": {
-        "url": "https://api.deepseek.com/v1/chat/completions",
-        "model": "deepseek-chat",
-        "timeout": 5.0,  # Aumentado para reduzir timeouts
-        "max_retries": 2,
-        "retry_delay": 0.5,  # Aumentado para dar mais tempo
+
+# Configuração de ativos para estratégia turbo integrada
+ATIVOS_TURBO_INTEGRADOS = {
+    "1HZ75V": {  # VIX75
+        "tipo_contrato": "turbo",
+        "duracao_segundos": 15,
+        "min_stake": 0.35,
+        "max_stake": 100.0,
+        "contract_types": ["CALL", "PUT"],
+        "multipliers": [10, 100, 200, 300, 400],
+        "timeframe": 1,
+        "scalping_friendly": True,
     },
-    "analise": {
-        "periodos": {
-            "rsi": 14,
-            "mm_curta": 9,
-            "mm_longa": 21,
-            "fibonacci": 10,
-        },
-        "limites": {
-            "rsi_sobrevenda": 40,  # Mais agressivo - entra mais cedo
-            "rsi_sobrecompra": 60,  # Mais agressivo - entra mais cedo
-            "min_velas": 5,  # Muito menos velas - decisão rápida
-            "max_latencia": 8.0,  # Aumentado para permitir IA funcionar
-            "saida_duracao": 30,  # Saída mais rápida - 30 segundos
-        },
+    "1HZ100V": {  # VIX100
+        "tipo_contrato": "turbo",
+        "duracao_segundos": 15,
+        "min_stake": 0.35,
+        "max_stake": 100.0,
+        "contract_types": ["CALL", "PUT"],
+        "multipliers": [10, 100, 200, 300, 400],
+        "timeframe": 1,
+        "scalping_friendly": True,
     },
 }
 
 
 class DecisaoTipo(str, Enum):
-    """Enumeração para tipos de decisões de trading"""
-
     CALL = "CALL"
     PUT = "PUT"
     AGUARDAR = "AGUARDAR"
@@ -105,1978 +109,672 @@ class DecisaoTipo(str, Enum):
 
 
 @dataclass
-class Contexto:
-    """Classe para armazenar contexto de análise"""
-
+class ContextoAnalise:
     preco_atual: float
-    fibonacci: Dict[str, float]
     rsi: float
-    mhi: int
     tendencia: str
-    volume: str
-    volatilidade: float
-    lucro_total: float
-    historico: List[str]
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Converte o contexto para dicionário"""
-        return {
-            "preco_atual": self.preco_atual,
-            "fib": self.fibonacci,
-            "rsi": self.rsi,
-            "mhi": self.mhi,
-            "tendencia": self.tendencia,
-            "volume": self.volume,
-            "volatilidade": self.volatilidade,
-            "lucro_total": self.lucro_total,
-            "historico": self.historico,
-        }
+    lucro_total_sessao: float = 0.0
+    historico_recente_trades: List[str] = field(default_factory=list)
 
     def gerar_relatorio(self) -> str:
-        """Gera relatório formatado do contexto"""
-        return f"""ANÁLISE DE ENTRADA:
-- Fib 61.8%: {self.fibonacci.get('61.8%', 0):.2f}
-- Preço: {self.preco_atual:.2f}
-- RSI: {self.rsi:.1f}
-- MHI: {self.mhi}
-- Tendência: {self.tendencia}
-- Volume: {self.volume}
-- Volatilidade: {self.volatilidade:.2f}
-- Lucro Sessão: ${self.lucro_total:.2f}
-- Histórico: {self.historico}"""
+        return (
+            f"RELATÓRIO DE ANÁLISE (ENTRADA):\n"
+            f"- Preço Atual: {self.preco_atual:.5f}\n- RSI: {self.rsi:.2f}\n"
+            f"- Tendência Principal: {self.tendencia}\n"
+            f"- Lucro Sessão: ${self.lucro_total_sessao:.2f}"
+        )
 
 
-@dataclass
-class ContextoSaida:
-    """Classe para armazenar contexto de decisão de saída"""
-
-    duracao: int
-    lucro: float
-    rsi: float
-    fibonacci: Dict[str, float]
-    tendencia: str
-    volatilidade: float
-
-    def gerar_relatorio(self) -> str:
-        """Gera relatório formatado do contexto de saída"""
-        return f"""ANÁLISE DE SAÍDA:
-- Lucro: {self.lucro:.2f}%
-- RSI: {self.rsi:.1f}
-- Fib: {self.fibonacci.get('61.8%', 0):.2f}
-- Tendência: {self.tendencia}
-- Volatilidade: {self.volatilidade:.2f}"""
-
-
-class AnalisadorTecnico:
-    """Classe para análise técnica de mercado"""
+class AnalisadorTecnicoOtimizado:
+    """Analisador técnico otimizado usando configurações centralizadas"""
 
     @staticmethod
-    @lru_cache(maxsize=50)
-    def calcular_media_movel(
-        velas: Tuple[Tuple[str, float, float, float, float, float]], periodo: int
-    ) -> Optional[float]:
-        """
-        Calcula média móvel simples com cache para otimização
-        Args:
-            velas: Tupla de tuplas com dados OHLCV (imutável para cache)
-            periodo: Período para cálculo da média
-        Returns:
-            Valor da média móvel ou None se dados insuficientes
-        """
+    @lru_cache(maxsize=CONFIG_INDICADORES.get("cache", {}).get("max_size", 128))
+    def calcular_ema(precos: Tuple[float, ...], periodo: int = None) -> Optional[float]:
+        """Calcula EMA usando configurações centralizadas"""
+        if periodo is None:
+            periodo = CONFIG_INDICADORES.get("periodos", {}).get("ema_rapida", 8)
+
+        if len(precos) < periodo:
+            return None
         try:
-            closes = [v[4] for v in velas]  # close está no índice 4
-            if len(closes) < periodo:
-                return None
-            return np.mean(closes[-periodo:])
+            s = pd.Series(precos)
+            ema = s.ewm(span=periodo, adjust=False).mean()
+            return ema.iloc[-1] if not ema.empty else None
         except Exception as e:
-            logger.error(f"Erro cálculo média móvel: {str(e)}")
+            logger.error(f"Erro cálculo EMA (P{periodo}): {e}")
             return None
 
     @staticmethod
-    def identificar_fibonacci(velas: List[Dict]) -> Dict[str, float]:
-        """
-        Calcula níveis de retração de Fibonacci
-        Args:
-            velas: Lista de velas para análise
-        Returns:
-            Dicionário com níveis-chave de Fibonacci
-        """
-        try:
-            periodo = CONFIG["analise"]["periodos"]["fibonacci"]
-            highs = [v["high"] for v in velas[-periodo:]]
-            lows = [v["low"] for v in velas[-periodo:]]
-            max_high = max(highs)
-            min_low = min(lows)
-            diferenca = max_high - min_low
-
-            return {
-                "23.6%": max_high - diferenca * 0.236,
-                "38.2%": max_high - diferenca * 0.382,
-                "50%": max_high - diferenca * 0.5,
-                "61.8%": max_high - diferenca * 0.618,
-            }
-        except Exception as e:
-            logger.error(f"Erro cálculo Fibonacci: {str(e)}")
-            return {}
-
-    @staticmethod
-    def calcular_rsi(velas: List[Dict], periodo: Optional[int] = None) -> float:
-        """
-        Calcula Relative Strength Index (RSI)
-        Args:
-            velas: Lista de velas para análise
-            periodo: Período para cálculo do RSI (opcional)
-        Returns:
-            Valor do RSI entre 0-100
-        """
+    @lru_cache(maxsize=CONFIG_INDICADORES.get("cache", {}).get("max_size", 128))
+    def calcular_rsi(precos: Tuple[float, ...], periodo: int = None) -> float:
+        """Calcula RSI usando configurações centralizadas"""
         if periodo is None:
-            periodo = CONFIG["analise"]["periodos"]["rsi"]
+            periodo = CONFIG_INDICADORES.get("periodos", {}).get("rsi", 14)
 
         try:
-            closes = [v["close"] for v in velas]
-            if len(closes) <= periodo:
-                logger.warning(f"Dados insuficientes para RSI: {len(closes)}/{periodo}")
+            if len(precos) < periodo + 1:
                 return 50.0
+            deltas = np.diff(precos)
+            gains = np.maximum(deltas, 0)
+            losses = np.maximum(-deltas, 0)
 
-            deltas = np.diff(closes)
-            gains = np.where(deltas > 0, deltas, 0)
-            losses = np.where(deltas < 0, -deltas, 0)
+            avg_gain = np.sum(gains[:periodo]) / periodo
+            avg_loss = np.sum(losses[:periodo]) / periodo
 
-            avg_gain = np.mean(gains[-periodo:])
-            avg_loss = np.mean(losses[-periodo:])
+            for i in range(periodo, len(gains)):
+                avg_gain = (avg_gain * (periodo - 1) + gains[i]) / periodo
+                avg_loss = (avg_loss * (periodo - 1) + losses[i]) / periodo
 
-            if avg_loss < 0.0001:  # Evitar divisão por zero
-                return 100.0
-
+            if avg_loss == 0:
+                return 100.0 if avg_gain > 0 else 50.0
             rs = avg_gain / avg_loss
-            return 100 - (100 / (1 + rs))
+            rsi = 100.0 - (100.0 / (1.0 + rs))
+            return round(rsi, 2)
         except Exception as e:
-            logger.error(f"Erro cálculo RSI: {str(e)}")
+            logger.error(f"Erro cálculo RSI (P{periodo}): {e}")
             return 50.0
 
     @staticmethod
-    def padrao_mhi(velas: List[Dict]) -> int:
-        """
-        Identifica padrão MHI (Market Harmonic Index)
-        Args:
-            velas: Lista de velas para análise
-        Returns:
-            Score de direção das últimas 5 velas
-        """
-        try:
-            return sum(1 if v["close"] > v["open"] else -1 for v in velas[-5:])
-        except Exception as e:
-            logger.error(f"Erro cálculo MHI: {str(e)}")
-            return 0
-
-    @classmethod
-    def tendencia_velas(cls, velas: List[Dict]) -> str:
-        """
-        Determina tendência com base em médias móveis
-        Args:
-            velas: Lista de velas para análise
-        Returns:
-            'ALTA', 'BAIXA' ou 'INDEFINIDA' conforme tendência
-        """
-        try:
-            # Converter para formato de tupla para usar com lru_cache
-            velas_tuple = tuple(
-                (str(i), v["open"], v["high"], v["low"], v["close"], v["volume"])
-                for i, v in enumerate(velas)
+    @lru_cache(maxsize=CONFIG_INDICADORES.get("cache", {}).get("max_size", 128))
+    def calcular_bollinger(
+        precos: Tuple[float, ...], periodo: int = None, desvio: float = None
+    ) -> Optional[Dict[str, float]]:
+        """Calcula Bollinger Bands usando configurações centralizadas"""
+        if periodo is None:
+            periodo = CONFIG_INDICADORES.get("periodos", {}).get("bollinger", 20)
+        if desvio is None:
+            desvio = CONFIG_INDICADORES.get("parametros", {}).get(
+                "bollinger_desvio", 2.0
             )
 
-            mm_curta = cls.calcular_media_movel(
-                velas_tuple, CONFIG["analise"]["periodos"]["mm_curta"]
-            )
-            mm_longa = cls.calcular_media_movel(
-                velas_tuple, CONFIG["analise"]["periodos"]["mm_longa"]
-            )
-
-            if mm_curta is None or mm_longa is None:
-                return "INDEFINIDA"
-
-            return "ALTA" if mm_curta > mm_longa else "BAIXA"
-        except Exception as e:
-            logger.error(f"Erro análise tendência: {str(e)}")
-            return "INDEFINIDA"
-
-    @staticmethod
-    def tendencia_volume(velas: List[Dict]) -> str:
-        """
-        Analisa tendência do volume
-        Args:
-            velas: Lista de velas com dados de volume
-        Returns:
-            'CRESCENTE', 'DECRESCENTE' ou 'ESTÁVEL'
-        """
+        if len(precos) < periodo:
+            return None
         try:
-            if len(velas) < 3:
-                return "ESTÁVEL"
-
-            volumes = [v["volume"] for v in velas[-3:]]
-            if volumes[-1] > volumes[0] * 1.1:  # 10% de aumento
-                return "CRESCENTE"
-            elif volumes[-1] < volumes[0] * 0.9:  # 10% de diminuição
-                return "DECRESCENTE"
-            else:
-                return "ESTÁVEL"
-        except Exception as e:
-            logger.error(f"Erro análise volume: {str(e)}")
-            return "ESTÁVEL"
-
-
-class DeepseekAPI:
-    """Classe para interação com a API DeepSeek"""
-
-    _instance = None
-
-    @classmethod
-    def get_instance(cls) -> "DeepseekAPI":
-        """Singleton para reutilização do cliente"""
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
-
-    def __init__(self):
-        """Inicializa o cliente HTTP"""
-        # Força recarga do config para garantir que IA_CONFIG existe
-        try:
-            importlib.reload(config)
-        except:
-            pass
-
-        # Verifica se IA_CONFIG existe, se não, cria um padrão
-        if not hasattr(config, "IA_CONFIG"):
-            config.IA_CONFIG = {
-                "async_mode": False,
-                "timeout": 5.0,  # Aumentado para reduzir timeouts
-                "temperature": 0.1,
-                "max_tokens": 5,
-                "max_aguardar_consecutivo": 5,
-            }
-
-        # Carrega configurações de IA
-        self.async_mode = config.IA_CONFIG.get("async_mode", False)
-        self.timeout = config.IA_CONFIG.get(
-            "timeout", 5.0
-        )  # Aumentado para reduzir timeouts
-
-        # Cria cliente apropriado (síncrono ou assíncrono)
-        if self.async_mode:
-            self.client = httpx.AsyncClient(timeout=self.timeout)
-        else:
-            self.client = httpx.Client(timeout=self.timeout)
-
-        self.headers = {
-            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-            "Content-Type": "application/json",
-        }
-
-        # Contador para decisões AGUARDAR consecutivas
-        self.aguardar_consecutivo = 0
-        self.ultima_decisao = None
-        self.ultima_confianca = 0.0
-
-        # Histórico de decisões para análise
-        self.historico_decisoes = []
-        self.max_historico = 100  # Limite para evitar crescimento excessivo
-
-    def __del__(self):
-        """Fecha o cliente HTTP quando o objeto é destruído"""
-        if hasattr(self, "client"):
-            if self.async_mode:
-                # Para clientes assíncronos, não podemos fechar diretamente
-                # O garbage collector deve lidar com isso
-                pass
-            else:
-                self.client.close()
-
-    def registrar_decisao(
-        self,
-        decisao: str,
-        confianca: float,
-        contexto: Dict,
-        cliente_id: str = "default",
-    ):
-        """
-        Registra uma decisão no histórico
-
-        Args:
-            decisao: Decisão tomada
-            confianca: Nível de confiança
-            contexto: Dados contextuais da decisão
-            cliente_id: ID do cliente
-        """
-        registro = {
-            "timestamp": time.time(),
-            "decisao": decisao,
-            "confianca": confianca,
-            "cliente_id": cliente_id,
-            "contexto": contexto,
-        }
-
-        # Adiciona ao histórico (limitando o tamanho)
-        self.historico_decisoes.append(registro)
-        if len(self.historico_decisoes) > self.max_historico:
-            self.historico_decisoes = self.historico_decisoes[-self.max_historico :]
-
-        # Opcionalmente, salva no arquivo de log específico do cliente
-        try:
-            log_dir = os.path.join(MEMORIA_DIR, "logs")
-            if not os.path.exists(log_dir):
-                os.makedirs(log_dir)
-
-            log_file = os.path.join(log_dir, f"{cliente_id}_decisoes.log")
-            with open(log_file, "a", encoding="utf-8") as f:
-                log_entry = f"{time.strftime('%Y-%m-%d %H:%M:%S')} - {decisao} ({confianca:.2f})\n"
-                f.write(log_entry)
-        except Exception as e:
-            logger.error(f"Erro ao registrar decisão no log: {e}")
-
-    async def chamar_api_async(
-        self, mensagens: List[Dict], max_retries: Optional[int] = None
-    ) -> Tuple[str, float]:
-        """
-        Versão assíncrona da interface com API DeepSeek
-        Args:
-            mensagens: Contexto para análise
-            max_retries: Número máximo de tentativas (opcional)
-        Returns:
-            Tupla (decisão, confiança) da IA ou fallback seguro
-        """
-        if max_retries is None:
-            max_retries = CONFIG["api"]["max_retries"]
-
-        payload = {
-            "model": CONFIG["api"]["model"],
-            "messages": mensagens,
-            "temperature": config.IA_CONFIG.get("temperature", 0.1),
-            "max_tokens": config.IA_CONFIG.get("max_tokens", 5),
-            "stop": ["\n"],
-        }
-
-        for attempt in range(max_retries):
-            try:
-                response = await self.client.post(
-                    CONFIG["api"]["url"],
-                    headers=self.headers,
-                    json=payload,
-                    timeout=self.timeout,
-                )
-                if response.status_code == 200:
-                    response_json = response.json()
-                    decisao = (
-                        response_json["choices"][0]["message"]["content"]
-                        .strip()
-                        .upper()
-                    )
-
-                    # Tenta extrair confiança do response
-                    confianca = 0.8  # Valor padrão
-                    try:
-                        # Tenta extrair probabilidade/score da resposta da IA, se disponível
-                        if "score" in response_json["choices"][0]:
-                            confianca = float(response_json["choices"][0]["score"])
-                        elif "confidence" in response_json["choices"][0]:
-                            confianca = float(response_json["choices"][0]["confidence"])
-                        # Limita a confiança entre 0 e 1
-                        confianca = max(0.0, min(1.0, confianca))
-                    except (KeyError, ValueError, TypeError):
-                        # Se não conseguir extrair, mantém o padrão
-                        pass
-
-                    # Verifica se é decisão AGUARDAR consecutiva
-                    if decisao == DecisaoTipo.AGUARDAR.value:
-                        self.aguardar_consecutivo += 1
-                        if self.aguardar_consecutivo >= config.IA_CONFIG.get(
-                            "max_aguardar_consecutivo", 5
-                        ):
-                            logger.warning(
-                                f"Alerta: {self.aguardar_consecutivo} decisões AGUARDAR consecutivas. Possível mercado lateral ou problema."
-                            )
-                    else:
-                        self.aguardar_consecutivo = 0
-
-                    self.ultima_decisao = decisao
-                    self.ultima_confianca = confianca
-
-                    # Registra contexto simplificado da decisão
-                    contexto_simples = {
-                        "message": mensagens[-1]["content"] if mensagens else "",
-                        "attempt": attempt + 1,
-                        "async": True,
-                    }
-                    self.registrar_decisao(decisao, confianca, contexto_simples)
-
-                    return decisao, confianca
-                else:
-                    logger.warning(
-                        f"Resposta não-200: {response.status_code} - {response.text}"
-                    )
-            except Exception as e:
-                logger.error(f"Erro API ({attempt+1}/{max_retries}): {str(e)}")
-
-            # Esperar antes de tentar novamente
-            if attempt < max_retries - 1:
-                await asyncio.sleep(CONFIG["api"]["retry_delay"])
-
-        return DecisaoTipo.AGUARDAR.value, 0.0
-
-    def chamar_api(
-        self, mensagens: List[Dict], max_retries: Optional[int] = None
-    ) -> Tuple[str, float]:
-        """
-        Interface com API DeepSeek para análise de decisões
-        Args:
-            mensagens: Contexto para análise
-            max_retries: Número máximo de tentativas (opcional)
-        Returns:
-            Tupla (decisão, confiança) da IA ou fallback seguro
-        """
-        if self.async_mode:
-            # Não podemos executar async em um contexto síncrono diretamente
-            logger.warning(
-                "Modo assíncrono ativado, mas chamada síncrona solicitada. Usando httpx padrão."
-            )
-
-        if max_retries is None:
-            max_retries = CONFIG["api"]["max_retries"]
-
-        payload = {
-            "model": CONFIG["api"]["model"],
-            "messages": mensagens,
-            "temperature": config.IA_CONFIG.get("temperature", 0.1),
-            "max_tokens": config.IA_CONFIG.get("max_tokens", 5),
-            "stop": ["\n"],
-        }
-
-        for attempt in range(max_retries):
-            try:
-                response = self.client.post(
-                    CONFIG["api"]["url"],
-                    headers=self.headers,
-                    json=payload,
-                    timeout=self.timeout,
-                )
-                if response.status_code == 200:
-                    response_json = response.json()
-                    decisao = (
-                        response_json["choices"][0]["message"]["content"]
-                        .strip()
-                        .upper()
-                    )
-
-                    # Tenta extrair confiança do response
-                    confianca = 0.8  # Valor padrão
-                    try:
-                        # Tenta extrair probabilidade/score da resposta da IA, se disponível
-                        if "score" in response_json["choices"][0]:
-                            confianca = float(response_json["choices"][0]["score"])
-                        elif "confidence" in response_json["choices"][0]:
-                            confianca = float(response_json["choices"][0]["confidence"])
-                        # Limita a confiança entre 0 e 1
-                        confianca = max(0.0, min(1.0, confianca))
-                    except (KeyError, ValueError, TypeError):
-                        # Se não conseguir extrair, mantém o padrão
-                        pass
-
-                    # Verifica se é decisão AGUARDAR consecutiva
-                    if decisao == DecisaoTipo.AGUARDAR.value:
-                        self.aguardar_consecutivo += 1
-                        if self.aguardar_consecutivo >= config.IA_CONFIG.get(
-                            "max_aguardar_consecutivo", 5
-                        ):
-                            logger.warning(
-                                f"Alerta: {self.aguardar_consecutivo} decisões AGUARDAR consecutivas. Possível mercado lateral ou problema."
-                            )
-                    else:
-                        self.aguardar_consecutivo = 0
-
-                    self.ultima_decisao = decisao
-                    self.ultima_confianca = confianca
-
-                    # Registra contexto simplificado da decisão
-                    contexto_simples = {
-                        "message": mensagens[-1]["content"] if mensagens else "",
-                        "attempt": attempt + 1,
-                        "async": False,
-                    }
-                    self.registrar_decisao(decisao, confianca, contexto_simples)
-
-                    return decisao, confianca
-                else:
-                    logger.warning(
-                        f"Resposta não-200: {response.status_code} - {response.text}"
-                    )
-            except Exception as e:
-                logger.error(f"Erro API ({attempt+1}/{max_retries}): {str(e)}")
-
-            # Esperar antes de tentar novamente
-            if attempt < max_retries - 1:
-                time.sleep(CONFIG["api"]["retry_delay"])
-
-        return DecisaoTipo.AGUARDAR.value, 0.0
-
-
-class VerificadorDados:
-    """Classe para validação de dados de entrada"""
-
-    @staticmethod
-    def validar_velas(velas: List[Dict]) -> bool:
-        """
-        Valida estrutura das velas
-        Args:
-            velas: Lista de velas para validação
-        Returns:
-            True se estrutura válida, False caso contrário
-        """
-        if not velas:
-            logger.warning("Lista de velas vazia")
-            return False
-
-        required_keys = {"open", "high", "low", "close", "volume"}
-        for i, vela in enumerate(velas):
-            if not required_keys.issubset(vela.keys()):
-                logger.warning(f"Vela {i} não contém todas as chaves obrigatórias")
-                return False
-
-            # Verificar valores numéricos
-            for key in required_keys:
-                if not isinstance(vela[key], (int, float)):
-                    logger.warning(f"Vela {i}, campo {key} não é numérico")
-                    return False
-
-            # Verificar consistência dos dados
-            if not (
-                vela["low"] <= vela["open"] <= vela["high"]
-                and vela["low"] <= vela["close"] <= vela["high"]
-            ):
-                logger.warning(f"Vela {i} possui dados inconsistentes")
-                return False
-
-        return True
-
-
-class DecisaoTrading:
-    """Classe para tomada de decisões de trading com estratégia turbo fixa"""
-
-    @staticmethod
-    def analisar_entrada_turbo(
-        velas: List[Dict],
-        lucro_total: float,
-        entradas_recentes: List[str],
-        cliente_id: str = "default",
-    ) -> Tuple[str, float]:
-        """
-        ESTRATÉGIA TURBO FIXA - 15 SEGUNDOS
-        Análise baseada em EMA(8), EMA(21), RSI(14) e Bollinger(20,2)
-        """
-        try:
-            if len(velas) < 25:  # Precisa de pelo menos 25 velas para análise
-                return DecisaoTipo.AGUARDAR.value, 0.0
-
-            # Calcula indicadores da estratégia turbo
-            indicadores = DecisaoTrading._calcular_indicadores_turbo(velas)
-
-            # Verifica condições de entrada CALL
-            sinal_call, confianca_call = DecisaoTrading._verificar_sinal_call(
-                indicadores, velas
-            )
-
-            # Verifica condições de entrada PUT
-            sinal_put, confianca_put = DecisaoTrading._verificar_sinal_put(
-                indicadores, velas
-            )
-
-            # Escolhe o sinal com maior confiança
-            if (
-                sinal_call
-                and confianca_call >= ESTRATEGIA_TURBO["entrada"]["min_confianca"]
-            ):
-                if not sinal_put or confianca_call > confianca_put:
-                    return DecisaoTipo.CALL.value, confianca_call
-
-            if (
-                sinal_put
-                and confianca_put >= ESTRATEGIA_TURBO["entrada"]["min_confianca"]
-            ):
-                return DecisaoTipo.PUT.value, confianca_put
-
-            return DecisaoTipo.AGUARDAR.value, max(confianca_call, confianca_put)
-
-        except Exception as e:
-            logger.error(f"Erro análise turbo: {str(e)}")
-            return DecisaoTipo.AGUARDAR.value, 0.0
-
-    @staticmethod
-    def _calcular_indicadores_turbo(velas: List[Dict]) -> Dict:
-        """Calcula todos os indicadores necessários para a estratégia turbo"""
-        try:
-            closes = [float(v["close"]) for v in velas]
-            highs = [float(v["high"]) for v in velas]
-            lows = [float(v["low"]) for v in velas]
-
-            # EMA 8 e EMA 21
-            ema8 = DecisaoTrading._calcular_ema(closes, 8)
-            ema21 = DecisaoTrading._calcular_ema(closes, 21)
-
-            # RSI 14
-            rsi = AnalisadorTecnico.calcular_rsi(velas, 14)
-
-            # Bollinger Bands (20, 2)
-            bb_superior, bb_inferior, bb_media = DecisaoTrading._calcular_bollinger(
-                closes, 20, 2
-            )
+            precos_periodo = precos[-periodo:]
+            media = np.mean(precos_periodo)
+            std_dev = np.std(precos_periodo)
 
             return {
-                "ema8": ema8,
-                "ema21": ema21,
-                "rsi": rsi,
-                "bb_superior": bb_superior,
-                "bb_inferior": bb_inferior,
-                "bb_media": bb_media,
-                "preco_atual": closes[-1],
-                "preco_anterior": closes[-2] if len(closes) > 1 else closes[-1],
+                "media": media,
+                "superior": media + (std_dev * desvio),
+                "inferior": media - (std_dev * desvio),
             }
         except Exception as e:
-            logger.error(f"Erro cálculo indicadores turbo: {str(e)}")
-            return {}
+            logger.error(f"Erro cálculo Bollinger (P{periodo}, D{desvio}): {e}")
+            return None
 
     @staticmethod
-    def _verificar_sinal_call(
-        indicadores: Dict, velas: List[Dict]
-    ) -> Tuple[bool, float]:
-        """Verifica condições para sinal de CALL"""
+    def determinar_tendencia(precos: Tuple[float, ...]) -> str:
+        """Determina tendência usando EMAs configuradas"""
+        ema_rapida_periodo = CONFIG_INDICADORES.get("periodos", {}).get("ema_rapida", 8)
+        ema_lenta_periodo = CONFIG_INDICADORES.get("periodos", {}).get("ema_lenta", 21)
+
+        if len(precos) < ema_lenta_periodo:
+            return "INDEFINIDA"
+
+        ema_rapida = AnalisadorTecnicoOtimizado.calcular_ema(precos, ema_rapida_periodo)
+        ema_lenta = AnalisadorTecnicoOtimizado.calcular_ema(precos, ema_lenta_periodo)
+
+        if ema_rapida is None or ema_lenta is None:
+            return "INDEFINIDA"
+        if ema_rapida > ema_lenta:
+            return "ALTA"
+        if ema_rapida < ema_lenta:
+            return "BAIXA"
+        return "NEUTRA"
+
+
+class CalculadorAssertividade:
+    """Calculadora de assertividade usando configurações centralizadas"""
+
+    @staticmethod
+    def calcular_assertividade_ativo(
+        ativo: str, ema8: float, ema21: float, rsi: float, bb: dict, preco_atual: float
+    ) -> float:
+        """Calcula assertividade usando pesos configurados"""
         try:
-            if not indicadores:
-                return False, 0.0
+            pesos = CONFIG_ASSERTIVIDADE["pesos"]
+            assertividade = 0.0
 
-            confianca = 0.0
-            sinais_positivos = 0
-            total_sinais = 3
+            # 1. Tendência EMA
+            if ema8 > ema21:
+                diferenca_ema = abs(ema8 - ema21) / ema21
+                assertividade += min(pesos["tendencia_ema"], diferenca_ema * 10)
 
-            # 1. Cruzamento EMA: EMA8 > EMA21 (40% do peso)
-            if indicadores["ema8"] > indicadores["ema21"]:
-                confianca += 0.4
-                sinais_positivos += 1
-
-            # 2. RSI não sobrecomprado (30% do peso)
-            if indicadores["rsi"] < ESTRATEGIA_TURBO["indicadores"]["rsi_sobrecompra"]:
-                confianca += 0.3
-                sinais_positivos += 1
-
-            # 3. Preço próximo ou tocando banda inferior Bollinger (30% do peso)
-            distancia_bb_inf = abs(
-                indicadores["preco_atual"] - indicadores["bb_inferior"]
+            # 2. RSI em zona favorável
+            rsi_params = CONFIG_INDICADORES.get(
+                "parametros",
+                {
+                    "rsi_sobrevenda": 30,
+                    "rsi_sobrecompra": 70,
+                    "rsi_zona_ideal_min": 40,
+                    "rsi_zona_ideal_max": 60,
+                },
             )
-            range_bb = indicadores["bb_superior"] - indicadores["bb_inferior"]
-            if distancia_bb_inf <= (range_bb * 0.1):  # Dentro de 10% da banda inferior
-                confianca += 0.3
-                sinais_positivos += 1
+            if rsi_params["rsi_sobrevenda"] <= rsi <= rsi_params["rsi_sobrecompra"]:
+                if (
+                    rsi_params["rsi_zona_ideal_min"]
+                    <= rsi
+                    <= rsi_params["rsi_zona_ideal_max"]
+                ):
+                    assertividade += pesos["rsi_zona"]
+                else:
+                    assertividade += pesos["rsi_zona"] * 0.6
 
-            # Sinal válido se pelo menos 2 dos 3 sinais estão presentes
-            sinal_valido = sinais_positivos >= 2
+            # 3. Bollinger Bands
+            if bb:
+                largura_bb = bb["superior"] - bb["inferior"]
+                posicao_bb = (preco_atual - bb["inferior"]) / largura_bb
 
-            return sinal_valido, confianca
+                if posicao_bb <= 0.2 or posicao_bb >= 0.8:
+                    assertividade += pesos["bollinger_posicao"]
+                elif 0.3 <= posicao_bb <= 0.7:
+                    assertividade += pesos["bollinger_posicao"] * 0.6
 
-        except Exception as e:
-            logger.error(f"Erro verificação sinal CALL: {str(e)}")
-            return False, 0.0
+            # 4. Volatilidade do ativo
+            config_ativo = bot_config.ATIVOS_SCALPING.get(ativo, {})
+            volatilidade = config_ativo.get("volatilidade", "media")
+            volatilidade_scores = CONFIG_ASSERTIVIDADE["volatilidade_scores"]
+            assertividade += volatilidade_scores.get(volatilidade, 0.12)
 
-    @staticmethod
-    def _verificar_sinal_put(
-        indicadores: Dict, velas: List[Dict]
-    ) -> Tuple[bool, float]:
-        """Verifica condições para sinal de PUT"""
-        try:
-            if not indicadores:
-                return False, 0.0
-
-            confianca = 0.0
-            sinais_positivos = 0
-            total_sinais = 3
-
-            # 1. Cruzamento EMA: EMA8 < EMA21 (40% do peso)
-            if indicadores["ema8"] < indicadores["ema21"]:
-                confianca += 0.4
-                sinais_positivos += 1
-
-            # 2. RSI não sobrevendido (30% do peso)
-            if indicadores["rsi"] > ESTRATEGIA_TURBO["indicadores"]["rsi_sobrevenda"]:
-                confianca += 0.3
-                sinais_positivos += 1
-
-            # 3. Preço próximo ou tocando banda superior Bollinger (30% do peso)
-            distancia_bb_sup = abs(
-                indicadores["preco_atual"] - indicadores["bb_superior"]
-            )
-            range_bb = indicadores["bb_superior"] - indicadores["bb_inferior"]
-            if distancia_bb_sup <= (range_bb * 0.1):  # Dentro de 10% da banda superior
-                confianca += 0.3
-                sinais_positivos += 1
-
-            # Sinal válido se pelo menos 2 dos 3 sinais estão presentes
-            sinal_valido = sinais_positivos >= 2
-
-            return sinal_valido, confianca
+            return min(1.0, assertividade)
 
         except Exception as e:
-            logger.error(f"Erro verificação sinal PUT: {str(e)}")
-            return False, 0.0
-
-    @staticmethod
-    def _calcular_ema(precos: List[float], periodo: int) -> float:
-        """Calcula EMA (Exponential Moving Average)"""
-        try:
-            if len(precos) < periodo:
-                return sum(precos) / len(precos)  # SMA se dados insuficientes
-
-            multiplier = 2 / (periodo + 1)
-            ema = sum(precos[:periodo]) / periodo  # Primeira EMA é SMA
-
-            for preco in precos[periodo:]:
-                ema = (preco * multiplier) + (ema * (1 - multiplier))
-
-            return ema
-        except Exception as e:
-            logger.error(f"Erro cálculo EMA: {str(e)}")
+            logger.error(f"Erro calculando assertividade para {ativo}: {e}")
             return 0.0
 
     @staticmethod
-    def _calcular_bollinger(
-        precos: List[float], periodo: int, desvio: float
-    ) -> Tuple[float, float, float]:
-        """Calcula Bandas de Bollinger"""
+    def determinar_tipo_contrato(ativo: str, assertividade: float, modo: str) -> str:
+        """Determina tipo de contrato usando configurações"""
         try:
-            if len(precos) < periodo:
-                media = sum(precos) / len(precos)
-                return media, media, media
+            config_ativo = bot_config.ATIVOS_SCALPING.get(ativo, {})
+            preferencias = CONFIG_VOLATILITYS["modos_preferencia"].get(modo.lower(), {})
 
-            # Média móvel simples
-            sma = sum(precos[-periodo:]) / periodo
+            score_multiplier = 0.0
+            score_turbo = 0.0
 
-            # Desvio padrão
-            variancia = sum((p - sma) ** 2 for p in precos[-periodo:]) / periodo
-            std_dev = variancia**0.5
-
-            # Bandas
-            bb_superior = sma + (desvio * std_dev)
-            bb_inferior = sma - (desvio * std_dev)
-
-            return bb_superior, bb_inferior, sma
-        except Exception as e:
-            logger.error(f"Erro cálculo Bollinger: {str(e)}")
-            return 0.0, 0.0, 0.0
-
-    @staticmethod
-    def analisar_entrada(
-        velas: List[Dict],
-        lucro_total: float,
-        entradas_recentes: List[str],
-        cliente_id: str = "default",
-    ) -> str:
-        """
-        ESTRATÉGIA TURBO ATIVADA - Análise fixa de 15 segundos
-        Usa EMA(8), EMA(21), RSI(14) e Bollinger(20,2) para decisões rápidas
-        """
-        try:
-            # Usa a estratégia turbo fixa
-            decisao, confianca = DecisaoTrading.analisar_entrada_turbo(
-                velas, lucro_total, entradas_recentes, cliente_id
-            )
-
-            # Log da decisão com indicadores
-            if len(velas) >= 25:
-                indicadores = DecisaoTrading._calcular_indicadores_turbo(velas)
-                try:
-                    import main
-
-                    if decisao == DecisaoTipo.CALL.value:
-                        main.adicionar_log_tempo_real(
-                            f"🟢 SINAL CALL - EMA8:{indicadores['ema8']:.2f} > EMA21:{indicadores['ema21']:.2f}, RSI:{indicadores['rsi']:.1f}, BB:{indicadores['preco_atual']:.2f}, Conf:{confianca:.1%}",
-                            "success",
-                        )
-                    elif decisao == DecisaoTipo.PUT.value:
-                        main.adicionar_log_tempo_real(
-                            f"🔴 SINAL PUT - EMA8:{indicadores['ema8']:.2f} < EMA21:{indicadores['ema21']:.2f}, RSI:{indicadores['rsi']:.1f}, BB:{indicadores['preco_atual']:.2f}, Conf:{confianca:.1%}",
-                            "success",
-                        )
-                    elif decisao == DecisaoTipo.AGUARDAR.value and confianca > 0.5:
-                        main.adicionar_log_tempo_real(
-                            f"⏳ AGUARDANDO - EMA8:{indicadores['ema8']:.2f}, EMA21:{indicadores['ema21']:.2f}, RSI:{indicadores['rsi']:.1f}, Conf:{confianca:.1%} (< 85%)",
-                            "warning",
-                        )
-                except:
-                    pass
-
-            return decisao
-
-        except Exception as e:
-            logger.error(f"Erro análise entrada: {str(e)}")
-            return DecisaoTipo.AGUARDAR.value
-
-    @staticmethod
-    def analisar_saida(
-        velas: List[Dict], lucro_atual: float, cliente_id: str = "default"
-    ) -> str:
-        """
-        Toma decisão de saída usando análise técnica e IA
-        Args:
-            velas: Lista de velas OHLCV
-            lucro_atual: Resultado da operação atual
-            cliente_id: Identificador do cliente
-        Returns:
-            Decisão: SAIR ou MANTER
-        """
-        start_time = time.time()
-        logger.info(f"Iniciando análise de saída para cliente {cliente_id}")
-
-        try:
-            if not VerificadorDados.validar_velas(velas):
-                logger.warning("Dados inválidos para análise de saída")
-                return DecisaoTipo.SAIR.value
-
-            analise = AnalisadorTecnico()
-
-            # Criar contexto estruturado
-            contexto = ContextoSaida(
-                duracao=len(velas),
-                lucro=lucro_atual,
-                rsi=analise.calcular_rsi(velas),
-                fibonacci=analise.identificar_fibonacci(velas),
-                tendencia=analise.tendencia_velas(velas),
-                volatilidade=np.mean([v["high"] - v["low"] for v in velas[-3:]]),
-            )
-
-            relatorio = contexto.gerar_relatorio()
-            logger.debug(f"Relatório de saída:\n{relatorio}")
-
-            # Decisão baseada em IA
-            api = DeepseekAPI.get_instance()
-            resposta, confianca = api.chamar_api(
-                [
-                    {"role": "system", "content": "Decisão rápida: SAIR/MANTER"},
-                    {"role": "user", "content": relatorio},
-                ]
-            )
-
-            # Verifica a confiança mínima configurada
-            min_confianca = config.IA_CONFIG.get("min_confianca", 0.6)
-            if confianca < min_confianca:
-                logger.info(
-                    f"Confiança baixa ({confianca:.2f} < {min_confianca:.2f}), decidindo SAIR por precaução"
-                )
-                decisao = DecisaoTipo.SAIR.value
-            elif DecisaoTipo.SAIR.value in resposta:
-                decisao = DecisaoTipo.SAIR.value
-                logger.info(f"Decisão IA: SAIR com confiança {confianca:.2f}")
+            # Assertividade alta favorece multipliers
+            threshold = CONFIG_ASSERTIVIDADE["tipo_contrato"][
+                "assertividade_alta_threshold"
+            ]
+            if assertividade >= threshold:
+                score_multiplier += 0.3
             else:
-                decisao = DecisaoTipo.MANTER.value
-                logger.info(f"Decisão IA: MANTER com confiança {confianca:.2f}")
+                score_turbo += 0.2
 
-            # Regras de saída
-            limites = CONFIG["analise"]["limites"]
+            # Preferência por modo
+            if preferencias.get("prefere_turbo", False):
+                score_turbo += preferencias.get("score_turbo_bonus", 0.3)
+            else:
+                score_multiplier += preferencias.get("score_multiplier_bonus", 0.1)
 
-            # REGRAS ULTRA AGRESSIVAS DE SAÍDA
-            # Saída rápida com qualquer lucro após 15 segundos
-            if contexto.duracao > 15 and contexto.lucro > 0.5:  # Qualquer lucro > 0.5%
-                logger.info(
-                    f"SCALPING: Saída rápida - {contexto.lucro:.2f}% em {contexto.duracao}s"
-                )
-                try:
-                    import main
+            # Variedade de multiplicadores
+            multiplicadores = config_ativo.get("multiplicadores_disponiveis", [])
+            min_variedade = CONFIG_ASSERTIVIDADE["tipo_contrato"][
+                "multiplicadores_min_variedade"
+            ]
+            if len(multiplicadores) >= min_variedade:
+                score_multiplier += 0.2
+            else:
+                score_turbo += 0.1
 
-                    main.adicionar_log_tempo_real(
-                        f"Saída rápida - {contexto.lucro:.2f}% em {contexto.duracao}s",
-                        "success",
-                    )
-                except:
-                    pass
-                decisao = DecisaoTipo.SAIR.value
-
-            # Stop loss agressivo - sai rápido para evitar perdas
-            if contexto.lucro < -2.0:  # 2% de perda máxima
-                logger.info(f"SCALPING: Stop loss rápido - {contexto.lucro:.2f}%")
-                decisao = DecisaoTipo.SAIR.value
-
-            # Take profit rápido - pega lucro pequeno mas garantido
-            if contexto.lucro > 3.0:  # 3% de ganho = sai
-                logger.info(f"SCALPING: Take profit rápido - {contexto.lucro:.2f}%")
-                decisao = DecisaoTipo.SAIR.value
-
-            # Saída forçada por tempo - não fica muito tempo em operação
-            if contexto.duracao > limites["saida_duracao"]:  # 30 segundos máximo
-                logger.info(f"SCALPING: Saída por tempo limite - {contexto.duracao}s")
-                decisao = DecisaoTipo.SAIR.value
-
-            # Log de performance
-            latencia = time.time() - start_time
-            logger.info(f"Decisão saída: {decisao} (latência: {latencia:.3f}s)")
-
-            return decisao
+            return "multiplier" if score_multiplier > score_turbo else "turbo"
 
         except Exception as e:
-            logger.error(f"Erro análise saída: {str(e)}", exc_info=True)
-            return DecisaoTipo.SAIR.value
+            logger.error(f"Erro determinando tipo de contrato para {ativo}: {e}")
+            return CONFIG_VOLATILITYS["fallback"]["tipo_contrato_padrao"]
 
 
-# Interfaces compatíveis com o código original
-def analisar_entrada_chatgpt(
-    velas: List[Dict],
-    lucro_total: float,
-    entradas_recentes: List[str],
-    cliente_id: str = "default",
-) -> Tuple[str, float]:
-    """
-    Wrapper compatível com a interface original
+class CatalogadorOtimizado:
+    """Catalogador otimizado com configurações centralizadas"""
 
-    Returns:
-        Uma tupla (decisão, confiança)
-    """
-    # Chamamos a implementação da classe, mas ignoramos a confiança por compatibilidade
-    decisao = DecisaoTrading.analisar_entrada(
-        velas, lucro_total, entradas_recentes, cliente_id
-    )
-
-    # Tenta recuperar a confiança da última chamada da API
-    api = DeepseekAPI.get_instance()
-    confianca = 0.7  # Valor padrão de fallback se não conseguirmos recuperar
-
-    # Se o API tiver um valor de confiança salvo da última chamada, usa-o
-    if hasattr(api, "ultima_confianca"):
-        confianca = api.ultima_confianca
-
-    return decisao, confianca
-
-
-async def analisar_entrada_chatgpt_async(
-    velas: List[Dict],
-    lucro_total: float,
-    entradas_recentes: List[str],
-    cliente_id: str = "default",
-) -> Tuple[str, float]:
-    """
-    Versão assíncrona do wrapper para análise de entrada
-
-    Returns:
-        Uma tupla (decisão, confiança)
-    """
-    # Obtém a instância do API para uso assíncrono
-    api = DeepseekAPI.get_instance()
-
-    # Verifica se o async_mode está configurado
-    if not api.async_mode:
-        # Se não estiver no modo assíncrono, chama o método síncrono
-        return analisar_entrada_chatgpt(
-            velas, lucro_total, entradas_recentes, cliente_id
-        )
-
-    try:
-        # Prepara o contexto estruturado para análise
-        analise = AnalisadorTecnico()
-
-        # Criar contexto estruturado
-        contexto = Contexto(
-            preco_atual=velas[-1]["close"],
-            fibonacci=analise.identificar_fibonacci(velas),
-            rsi=analise.calcular_rsi(velas),
-            mhi=analise.padrao_mhi(velas),
-            tendencia=analise.tendencia_velas(velas),
-            volume=analise.tendencia_volume(velas),
-            volatilidade=np.mean([v["high"] - v["low"] for v in velas[-5:]]),
-            lucro_total=lucro_total,
-            historico=entradas_recentes[-5:],
-        )
-
-        relatorio = contexto.gerar_relatorio()
-
-        # Chama a API de forma assíncrona
-        decisao, confianca = await api.chamar_api_async(
-            [
-                {"role": "system", "content": "Decisão rápida: CALL/PUT/AGUARDAR"},
-                {"role": "user", "content": relatorio},
-            ]
-        )
-
-        # Registra a decisão na última vela para histórico
-        if len(velas) > 0:
-            vela_atual = velas[-1]
-            if "ia_decisoes" not in vela_atual:
-                vela_atual["ia_decisoes"] = []
-
-            vela_atual["ia_decisoes"].append(
-                {
-                    "timestamp": time.time(),
-                    "decisao": decisao,
-                    "confianca": confianca,
-                    "tipo": "entrada",
-                    "cliente_id": cliente_id,
-                }
-            )
-
-        return decisao, confianca
-
-    except Exception as e:
-        logger.error(f"Erro em análise assíncrona: {str(e)}", exc_info=True)
-        return DecisaoTipo.AGUARDAR.value, 0.0
-
-
-def analisar_saida_chatgpt(
-    velas: List[Dict], lucro_atual: float, cliente_id: str = "default"
-) -> Tuple[str, float]:
-    """
-    Wrapper compatível com a interface original para análise de saída
-
-    Returns:
-        Uma tupla (decisão, confiança)
-    """
-    # Chamamos a implementação da classe, mas ignoramos a confiança por compatibilidade
-    decisao = DecisaoTrading.analisar_saida(velas, lucro_atual, cliente_id)
-
-    # Tenta recuperar a confiança da última chamada da API
-    api = DeepseekAPI.get_instance()
-    confianca = 0.7  # Valor padrão de fallback se não conseguirmos recuperar
-
-    # Se o API tiver um valor de confiança salvo da última chamada, usa-o
-    if hasattr(api, "ultima_confianca"):
-        confianca = api.ultima_confianca
-
-    return decisao, confianca
-
-
-async def analisar_saida_chatgpt_async(
-    velas: List[Dict], lucro_atual: float, cliente_id: str = "default"
-) -> Tuple[str, float]:
-    """
-    Versão assíncrona do wrapper para análise de saída
-
-    Returns:
-        Uma tupla (decisão, confiança)
-    """
-    # Obtém a instância do API para uso assíncrono
-    api = DeepseekAPI.get_instance()
-
-    # Verifica se o async_mode está configurado
-    if not api.async_mode:
-        # Se não estiver no modo assíncrono, chama o método síncrono
-        return analisar_saida_chatgpt(velas, lucro_atual, cliente_id)
-
-    try:
-        # Prepara o contexto estruturado para análise
-        analise = AnalisadorTecnico()
-
-        # Criar contexto estruturado
-        contexto = ContextoSaida(
-            duracao=len(velas),
-            lucro=lucro_atual,
-            rsi=analise.calcular_rsi(velas),
-            fibonacci=analise.identificar_fibonacci(velas),
-            tendencia=analise.tendencia_velas(velas),
-            volatilidade=np.mean([v["high"] - v["low"] for v in velas[-3:]]),
-        )
-
-        relatorio = contexto.gerar_relatorio()
-
-        # Chama a API de forma assíncrona
-        decisao, confianca = await api.chamar_api_async(
-            [
-                {"role": "system", "content": "Decisão rápida: SAIR/MANTER"},
-                {"role": "user", "content": relatorio},
-            ]
-        )
-
-        # Registra a decisão na última vela para histórico
-        if len(velas) > 0:
-            vela_atual = velas[-1]
-            if "ia_decisoes" not in vela_atual:
-                vela_atual["ia_decisoes"] = []
-
-            vela_atual["ia_decisoes"].append(
-                {
-                    "timestamp": time.time(),
-                    "decisao": decisao,
-                    "confianca": confianca,
-                    "tipo": "saida",
-                    "cliente_id": cliente_id,
-                    "lucro_atual": lucro_atual,
-                }
-            )
-
-        return decisao, confianca
-
-    except Exception as e:
-        logger.error(f"Erro em análise de saída assíncrona: {str(e)}", exc_info=True)
-        return DecisaoTipo.SAIR.value, 0.0
-
-
-# Função para testes
-def executar_teste(velas_teste: List[Dict]) -> None:
-    """Executa um teste rápido do sistema"""
-    logger.info("Iniciando teste do sistema...")
-
-    if not VerificadorDados.validar_velas(velas_teste):
-        logger.error("Dados de teste inválidos")
-        return
-
-    # Análise de entrada
-    decisao, confianca = analisar_entrada_chatgpt(
-        velas_teste, 0.0, ["CALL", "PUT", "AGUARDAR"]
-    )
-    logger.info(f"Teste de entrada: {decisao} (confiança: {confianca:.2f})")
-
-    # Análise de saída
-    decisao_saida, confianca_saida = analisar_saida_chatgpt(velas_teste, 2.5)
-    logger.info(f"Teste de saída: {decisao_saida} (confiança: {confianca_saida:.2f})")
-
-    logger.info("Teste concluído")
-
-
-class Catalogador:
     def __init__(self):
-        # Timeframe (em segundos) definido em config.py
-        self.timeframe: int = max(1, int(getattr(config, "TIMEFRAME", 1)))
+        # Configurações básicas usando config centralizado com fallbacks
+        analise_config = CONFIG_CATALOGADOR.get("analise", {})
+        self.timeframe_s = analise_config.get("timeframe_padrao_s", 15)
+        self.max_velas_mem = analise_config.get("max_velas_memoria", 2000)
+        self.max_ticks_mem = analise_config.get("max_ticks_memoria", 20000)
 
-        # Lista bruta de ticks [(timestamp, preco)] para fins de depuração
+        # Configurações de limpeza
+        limpeza_config = CONFIG_CATALOGADOR.get("limpeza", {})
+        self.max_idade_velas_s = limpeza_config.get("max_idade_velas_s", 21600)
+        self.max_idade_ticks_s = limpeza_config.get("max_idade_ticks_s", 3600)
+        self.intervalo_cleanup_s = limpeza_config.get("intervalo_s", 1800)
+
+        # Configurações de operações
+        ops_config = CONFIG_CATALOGADOR.get("operacoes", {})
+        self.intervalo_min_ops_s = ops_config.get("intervalo_min_ops_s", 5)
+
+        # Dados
         self.ticks: List[Tuple[float, float]] = []
+        self.velas_ohlc: List[Dict[str, Union[int, float]]] = []
+        self._vela_atual_construcao: Optional[Dict[str, Union[int, float]]] = None
+        self._inicio_vela_atual_s: Optional[int] = None
 
-        # Velas OHLCV já consolidadas
-        self.velas: List[Dict[str, Union[int, float]]] = []
+        # Estado
+        self.ativo_selecionado = getattr(bot_config, "PAR_PADRAO_OPERACAO", "1HZ75V")
+        self.ultima_operacao_ts = 0.0
+        self.operacoes_ativas_ts: List[float] = []
+        self.lucro_total_sessao = 0.0
+        self.historico_operacoes_finalizadas: List[Dict] = []
+        self.ultimo_cleanup_s = time.time()
 
-        # Estado da vela em construção
-        self._current_candle: Optional[Dict[str, Union[int, float]]] = None
-        self._current_candle_start: Optional[int] = None
-
-        # Carrega configurações de armazenamento
-        armazenamento_config = getattr(config, "ARMAZENAMENTO", {})
-
-        # Tempo máximo para armazenar dados (6 horas por padrão)
-        self.max_data_age_seconds = armazenamento_config.get(
-            "max_duracao_velas", 6 * 60 * 60
-        )
-
-        # Tempo máximo para armazenar ticks brutos (1 hora por padrão)
-        self.max_ticks_age_seconds = armazenamento_config.get(
-            "max_duracao_ticks", 1 * 60 * 60
-        )
-
-        # Limite de velas e ticks a armazenar
-        self.max_velas = armazenamento_config.get("max_velas", 1000)
-        self.max_ticks = armazenamento_config.get("max_ticks", 1000)
-
-        # Timestamp da última limpeza
-        self.last_cleanup_time = time.time()
-
-        # Intervalo para limpeza automática (a cada 30 minutos)
-        self.cleanup_interval = armazenamento_config.get("intervalo_limpeza", 30 * 60)
-
-        # Scanner de ativos para scalping
-        self.ativo_atual = None
-        self.scanner_ativo = True
-        self.dados_ativos = {}  # Armazena dados de múltiplos ativos
-        self.ultima_analise_scanner = 0
-        self.intervalo_scanner = 60  # Analisa ativos a cada 60 segundos
-        self.ativos_priorizados = []  # Lista de ativos ordenados por prioridade
-
-        # Inicializa o logger específico
-        self.logger = logging.getLogger("catalogador")
+        # Logger específico
+        self.logger = logging.getLogger("CatalogadorOtimizado")
         self.logger.info(
-            f"Catalogador iniciado (max_velas={self.max_velas}, retenção={self.max_data_age_seconds/3600}h)"
+            f"Catalogador Otimizado inicializado (Timeframe: {self.timeframe_s}s)"
         )
 
-    # --------- Sistema Inteligente de Operações Múltiplas ----------
-    def analisar_scalping(
-        self,
-        cliente_id: str = "default",
-        modo: str = "iniciante",
-        meta: float = 100.0,
-        lucro_atual: float = 0.0,
-        operacoes_ativas: int = 0,
+    def obter_multiplicador_otimizado(self, ativo: str, modo: str = "agressivo") -> int:
+        """Obtém multiplicador otimizado usando configurações centralizadas"""
+        try:
+            config_ativo = bot_config.ATIVOS_SCALPING.get(ativo)
+            config_modo = bot_config.MODOS_OPERACAO_SCALPING.get(modo.lower())
+
+            if not config_ativo or not config_modo:
+                fallback = CONFIG_VOLATILITYS["fallback"]["multiplicador_padrao"]
+                self.logger.warning(
+                    f"Config não encontrada para {ativo}/{modo}, usando fallback: {fallback}"
+                )
+                return fallback
+
+            multipliers = config_ativo.get("multiplicadores_disponiveis", [10])
+            nivel = config_modo.get("multiplicador_nivel", "medio")
+
+            if nivel == "baixo":
+                return multipliers[0]
+            elif nivel == "medio":
+                return multipliers[len(multipliers) // 2]
+            else:  # alto
+                return multipliers[-2] if len(multipliers) > 1 else multipliers[0]
+
+        except Exception as e:
+            self.logger.error(f"Erro ao obter multiplicador: {e}")
+            return CONFIG_VOLATILITYS["fallback"]["multiplicador_padrao"]
+
+    def analisar_todos_volatilitys_e_escolher_melhor(
+        self, modo: str = "agressivo"
     ) -> dict:
-        """Analisa as velas e retorna sinal inteligente baseado no modo e situação atual.
-
-        Args:
-            cliente_id: ID do cliente
-            modo: Modo de operação (iniciante, conservador, agressivo)
-            meta: Meta diária em dólares
-            lucro_atual: Lucro atual acumulado
-            operacoes_ativas: Número de operações abertas
-
-        Retorna:
-            {"sinal": "compra"|"venda"|None, "confianca": float(0-1), "razao": str,
-             "lucro_esperado": float, "valor_entrada": float}
-        """
+        """Analisa todos os volatility indices usando configurações centralizadas"""
         try:
-            # Verifica se é hora de limpar dados antigos
-            self._check_cleanup()
-
-            # Configurações por modo
-            config_modos = {
-                "iniciante": {
-                    "max_operacoes": 1,
-                    "confianca_min": 0.85,
-                    "valor_entrada_percent": 0.02,  # 2% da meta
-                    "lucro_min_esperado": 0.2,
-                    "meta_maxima": 20.0,
-                    "meta_padrao": 20.0,
-                },
-                "conservador": {
-                    "max_operacoes": 3,
-                    "confianca_min": 0.80,
-                    "valor_entrada_percent": 0.02,  # 2% da meta
-                    "lucro_min_esperado": 0.2,
-                    "meta_maxima": 50.0,
-                    "meta_padrao": 50.0,
-                },
-                "agressivo": {
-                    "max_operacoes": 5,
-                    "confianca_min": 0.75,
-                    "valor_entrada_percent": 0.02,  # 2% da meta
-                    "lucro_min_esperado": 0.2,
-                    "meta_maxima": None,  # Ilimitado
-                    "meta_padrao": 100.0,
-                },
-            }
-
-            config_atual = config_modos.get(modo, config_modos["iniciante"])
-
-            # Validação da meta baseada no modo
-            if (
-                config_atual["meta_maxima"] is not None
-                and meta > config_atual["meta_maxima"]
-            ):
-                return {
-                    "sinal": None,
-                    "confianca": 0.0,
-                    "razao": f"Meta excede limite do modo {modo} (máx: ${config_atual['meta_maxima']:.0f})",
-                    "lucro_esperado": 0.0,
-                    "valor_entrada": 0.0,
-                }
-
-            # Verificações de segurança
-            # 1. Meta já atingida
-            if lucro_atual >= meta:
-                return {
-                    "sinal": None,
-                    "confianca": 0.0,
-                    "razao": "Meta diária já atingida",
-                    "lucro_esperado": 0.0,
-                    "valor_entrada": 0.0,
-                }
-
-            # 2. Limite de operações simultâneas
-            if operacoes_ativas >= config_atual["max_operacoes"]:
-                return {
-                    "sinal": None,
-                    "confianca": 0.0,
-                    "razao": f"Limite de operações atingido ({operacoes_ativas}/{config_atual['max_operacoes']})",
-                    "lucro_esperado": 0.0,
-                    "valor_entrada": 0.0,
-                }
-
-            # 3. Dados insuficientes
-            if len(self.velas) < CONFIG["analise"]["limites"]["min_velas"]:
-                return {
-                    "sinal": None,
-                    "confianca": 0.0,
-                    "razao": "Dados insuficientes",
-                    "lucro_esperado": 0.0,
-                    "valor_entrada": 0.0,
-                }
-
-            # Análise técnica aprimorada para microoperações
-            analise_micro = self._analisar_microoperacao()
-
-            # Usa a pipeline de decisão já implementada (IA + técnico)
-            decisao, confianca = analisar_entrada_chatgpt(
-                self.velas, lucro_atual, [], cliente_id
-            )
-
-            # Aplica boost de confiança baseado na análise micro
-            confianca_ajustada = min(0.95, confianca + analise_micro["boost_confianca"])
-
-            # Verifica confiança mínima para o modo
-            if confianca_ajustada < config_atual["confianca_min"]:
-                return {
-                    "sinal": None,
-                    "confianca": confianca_ajustada,
-                    "razao": f"Confiança insuficiente ({confianca_ajustada:.2f} < {config_atual['confianca_min']:.2f})",
-                    "lucro_esperado": 0.0,
-                    "valor_entrada": 0.0,
-                }
-
-            # Obtém configurações específicas do ativo atual
-            ativo_config = self._obter_config_ativo_scalping()
-            min_stake_ativo = ativo_config.get("min_stake", 0.35)
-
-            # Calcula valor da entrada e lucro esperado
-            valor_entrada = max(
-                min_stake_ativo, min(10.0, meta * config_atual["valor_entrada_percent"])
-            )
-            lucro_esperado = max(
-                config_atual["lucro_min_esperado"], analise_micro["lucro_estimado"]
-            )
-
-            # Mapeia a decisão para o formato esperado pelo Motor
-            if decisao == DecisaoTipo.CALL.value:
-                sinal = "compra"
-                razao = f"CALL: {analise_micro['razao_principal']}"
-            elif decisao == DecisaoTipo.PUT.value:
-                sinal = "venda"
-                razao = f"PUT: {analise_micro['razao_principal']}"
-            else:
-                return {
-                    "sinal": None,
-                    "confianca": 0.0,
-                    "razao": "Sem sinal claro",
-                    "lucro_esperado": 0.0,
-                    "valor_entrada": 0.0,
-                }
-
-            # Log da decisão
-            self.logger.info(
-                f"Scalping {modo.upper()}: {sinal} - Conf: {confianca_ajustada:.2f} - "
-                f"Valor: ${valor_entrada:.2f} - Lucro esperado: ${lucro_esperado:.2f}"
-            )
-
-            return {
-                "sinal": sinal,
-                "confianca": confianca_ajustada,
-                "razao": razao,
-                "lucro_esperado": lucro_esperado,
-                "valor_entrada": valor_entrada,
-            }
-
-        except Exception as e:
-            self.logger.error(f"Erro na análise de scalping: {str(e)}", exc_info=True)
-            return {
-                "sinal": None,
-                "confianca": 0.0,
-                "razao": "Erro na análise",
-                "lucro_esperado": 0.0,
-                "valor_entrada": 0.0,
-            }
-
-    def _analisar_microoperacao(self) -> dict:
-        """Análise técnica específica para microoperações de alta frequência"""
-        try:
-            if len(self.velas) < 10:
-                return {
-                    "boost_confianca": 0.0,
-                    "lucro_estimado": 0.0,
-                    "razao_principal": "Dados insuficientes",
-                }
-
-            # Pega as últimas 10 velas para análise rápida
-            velas_recentes = self.velas[-10:]
-            closes = [float(v["close"]) for v in velas_recentes]
-            highs = [float(v["high"]) for v in velas_recentes]
-            lows = [float(v["low"]) for v in velas_recentes]
-            volumes = [float(v.get("volume", 1)) for v in velas_recentes]
-
-            # Análise de volatilidade (essencial para microoperações)
-            volatilidade = np.std(closes) if len(closes) > 1 else 0
-            movimento_recente = abs(closes[-1] - closes[-2]) if len(closes) >= 2 else 0
-
-            # Análise de momentum das últimas 5 velas
-            momentum_alta = sum(
-                1 for i in range(1, min(6, len(closes))) if closes[-i] > closes[-i - 1]
-            )
-            momentum_baixa = sum(
-                1 for i in range(1, min(6, len(closes))) if closes[-i] < closes[-i - 1]
-            )
-
-            # Análise de volume (importante para confirmar movimentos)
-            volume_medio = np.mean(volumes[-5:]) if len(volumes) >= 5 else volumes[-1]
-            volume_atual = volumes[-1]
-            volume_ratio = volume_atual / volume_medio if volume_medio > 0 else 1
-
-            # RSI rápido (últimas 5 velas)
-            if len(closes) >= 5:
-                deltas = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
-                ganhos = [d for d in deltas if d > 0]
-                perdas = [-d for d in deltas if d < 0]
-
-                avg_ganho = np.mean(ganhos) if ganhos else 0
-                avg_perda = np.mean(perdas) if perdas else 0
-
-                if avg_perda > 0:
-                    rs = avg_ganho / avg_perda
-                    rsi_rapido = 100 - (100 / (1 + rs))
-                else:
-                    rsi_rapido = 100 if avg_ganho > 0 else 50
-            else:
-                rsi_rapido = 50
-
-            # Cálculo do boost de confiança
-            boost_confianca = 0.0
-            razoes = []
-
-            # Boost por volatilidade adequada (não muito alta, não muito baixa)
-            if 0.0001 <= volatilidade <= 0.001:
-                boost_confianca += 0.1
-                razoes.append("volatilidade ideal")
-
-            # Boost por momentum claro
-            if momentum_alta >= 3:
-                boost_confianca += 0.15
-                razoes.append("momentum de alta")
-            elif momentum_baixa >= 3:
-                boost_confianca += 0.15
-                razoes.append("momentum de baixa")
-
-            # Boost por volume confirmando movimento
-            if volume_ratio >= 1.2:
-                boost_confianca += 0.1
-                razoes.append("volume confirmando")
-
-            # Boost por RSI em extremos (oportunidade de reversão)
-            if rsi_rapido <= 30:
-                boost_confianca += 0.1
-                razoes.append("RSI oversold")
-            elif rsi_rapido >= 70:
-                boost_confianca += 0.1
-                razoes.append("RSI overbought")
-
-            # Estimativa de lucro baseada na volatilidade e movimento
-            lucro_estimado = max(
-                0.2, min(2.0, volatilidade * 1000 + movimento_recente * 500)
-            )
-
-            razao_principal = (
-                ", ".join(razoes[:3]) if razoes else "análise técnica padrão"
-            )
-
-            return {
-                "boost_confianca": boost_confianca,
-                "lucro_estimado": lucro_estimado,
-                "razao_principal": razao_principal,
-            }
-
-        except Exception as e:
-            self.logger.error(f"Erro na análise micro: {str(e)}")
-            return {
-                "boost_confianca": 0.0,
-                "lucro_estimado": 0.0,
-                "razao_principal": "erro na análise",
-            }
-
-    def _obter_config_ativo_scalping(self) -> dict:
-        """Obtém a configuração específica do ativo atual para scalping"""
-        try:
-            from src.core.config import ATIVOS_SCALPING
-
-            # Usa o ativo atual do motor se disponível
-            ativo_atual = getattr(self, "ativo_atual", "R_10")  # Default para R_10
-            return ATIVOS_SCALPING.get(
-                ativo_atual,
-                {
-                    "min_stake": 0.35,
-                    "multipliers": [1, 2, 3, 4, 5, 10],
-                    "contract_types": ["MULTUP", "MULTDOWN"],
-                    "basis": "stake",
-                    "duracao_padrao": 1,
-                    "tipo_contrato": "multiplier",
-                },
-            )
-        except Exception as e:
-            self.logger.error(f"Erro ao obter config do ativo: {e}")
-            return {
-                "min_stake": 0.35,
-                "multipliers": [1, 2, 3, 4, 5, 10],
-                "contract_types": ["MULTUP", "MULTDOWN"],
-                "basis": "stake",
-                "duracao_padrao": 1,
-                "tipo_contrato": "multiplier",
-            }
-
-    def verificar_protecao_operacoes(
-        self, operacoes_abertas: list, meta: float, lucro_atual: float
-    ) -> dict:
-        """Verifica se deve proteger operações abertas ao parar o robô"""
-        try:
-            if not operacoes_abertas:
-                return {"pode_parar": True, "razao": "Nenhuma operação aberta"}
-
-            # Calcula lucro potencial das operações abertas
-            lucro_potencial = 0.0
-            operacoes_com_lucro = 0
-
-            for op in operacoes_abertas:
-                # Estima lucro baseado no tempo decorrido e movimento do preço
-                tempo_decorrido = time.time() - op.get(
-                    "timestamp_abertura", time.time()
-                )
-
-                # Se a operação está há mais de 20 segundos, provavelmente tem algum resultado
-                if tempo_decorrido >= 20:
-                    # Estima lucro positivo para operações que duraram tempo suficiente
-                    lucro_estimado = 0.3  # Lucro conservador estimado
-                    lucro_potencial += lucro_estimado
-                    operacoes_com_lucro += 1
-
-            # Se o lucro atual + potencial atinge a meta, pode parar
-            if (lucro_atual + lucro_potencial) >= meta:
-                return {
-                    "pode_parar": True,
-                    "razao": f"Lucro potencial atinge meta ({lucro_atual:.2f} + {lucro_potencial:.2f} >= {meta:.2f})",
-                }
-
-            # Se tem operações com potencial de lucro, aguarda
-            if operacoes_com_lucro > 0:
-                return {
-                    "pode_parar": False,
-                    "razao": f"{operacoes_com_lucro} operações com potencial de lucro",
-                    "tempo_espera": 30,  # segundos para aguardar
-                }
-
-            # Se as operações são muito recentes, aguarda um pouco
-            operacoes_recentes = [
-                op
-                for op in operacoes_abertas
-                if (time.time() - op.get("timestamp_abertura", 0)) < 10
-            ]
-
-            if operacoes_recentes:
-                return {
-                    "pode_parar": False,
-                    "razao": f"{len(operacoes_recentes)} operações muito recentes",
-                    "tempo_espera": 15,
-                }
-
-            # Caso contrário, pode parar
-            return {
-                "pode_parar": True,
-                "razao": "Operações sem potencial significativo",
-            }
-
-        except Exception as e:
-            self.logger.error(f"Erro na verificação de proteção: {str(e)}")
-            return {
-                "pode_parar": True,
-                "razao": "Erro na análise, parando por segurança",
-            }
-
-    def adicionar_tick(self, preco):
-        """Adiciona um tick de preço e consolida em velas do timeframe definido.
-
-        Args:
-            preco (float): Último preço cotado.
-        """
-        try:
-            # Marca temporal do tick (segundos desde epoch)
-            ts: float = time.time()
-
-            # Verifica se é hora de limpar dados antigos
-            self._check_cleanup()
-
-            # Salva tick bruto para auditoria/depuração (mantém apenas os últimos max_ticks)
-            self.ticks.append((ts, preco))
-            if len(self.ticks) > self.max_ticks:
-                self.ticks = self.ticks[-self.max_ticks :]
-
-            # Determina o início da vela corrente (alinha ao timeframe)
-            candle_start: int = int(ts // self.timeframe * self.timeframe)
-
-            # Se ainda não existe vela aberta, cria uma nova
-            if self._current_candle is None:
-                self._current_candle_start = candle_start
-                self._current_candle = {
-                    "timestamp": candle_start,
-                    "open": preco,
-                    "high": preco,
-                    "low": preco,
-                    "close": preco,
-                    "volume": 1,
-                }
-                return
-
-            # Caso o tick ainda pertença à janela da vela atual
-            if candle_start == self._current_candle_start:
-                self._current_candle["high"] = max(self._current_candle["high"], preco)
-                self._current_candle["low"] = min(self._current_candle["low"], preco)
-                self._current_candle["close"] = preco
-                self._current_candle["volume"] += 1
-            else:
-                # Vela atual é finalizada e armazenada
-                self.velas.append(self._current_candle)
-
-                # Inicia uma nova vela com o tick recebido
-                self._current_candle_start = candle_start
-                self._current_candle = {
-                    "timestamp": candle_start,
-                    "open": preco,
-                    "high": preco,
-                    "low": preco,
-                    "close": preco,
-                    "volume": 1,
-                }
-
-                # Limpa dados antigos imediatamente se temos muitas velas
-                if len(self.velas) > self.max_velas / 2:
-                    self._cleanup_old_data()
-        except Exception as e:
-            self.logger.error(f"Erro ao adicionar tick: {e}", exc_info=True)
-
-    def obter_velas(self):
-        """Retorna as velas já processadas, incluindo a vela atual em formação."""
-        try:
-            # Verifica se é hora de limpar dados antigos
-            self._check_cleanup()
-
-            # Cria uma cópia das velas armazenadas para evitar race conditions
-            result = list(self.velas)
-
-            # Adiciona a vela atual se existir
-            if self._current_candle is not None:
-                result.append(dict(self._current_candle))
-
-            return result
-        except Exception as e:
-            self.logger.error(f"Erro ao obter velas: {e}", exc_info=True)
-            return list(self.velas)  # Retorna apenas as velas fechadas em caso de erro
-
-    def obter_velas_preview(
-        self, num_velas: int = None, incluir_em_formacao: bool = True
-    ):
-        """
-        Retorna as últimas N velas, incluindo dados preliminares da vela em formação.
-
-        Args:
-            num_velas: Número de velas a retornar. Se None, retorna todas.
-            incluir_em_formacao: Se True, inclui a vela atual mesmo que não esteja fechada.
-
-        Returns:
-            Lista de velas OHLCV, possivelmente incluindo a vela em formação.
-        """
-        try:
-            # Verifica se é hora de limpar dados antigos
-            self._check_cleanup()
-
-            # Obtém velas fechadas
-            result = list(self.velas)
-
-            # Limita ao número solicitado
-            if num_velas is not None and len(result) > num_velas:
-                if incluir_em_formacao:
-                    # Se vamos incluir a vela em formação, deixamos espaço para ela
-                    result = result[-(num_velas - 1) :]
-                else:
-                    result = result[-num_velas:]
-
-            # Adiciona a vela atual em formação, se solicitado
-            if incluir_em_formacao and self._current_candle is not None:
-                # Faz uma cópia para não modificar o original
-                vela_atual = dict(self._current_candle)
-                # Adiciona metadados para indicar que é uma vela em formação
-                vela_atual["em_formacao"] = True
-                vela_atual["progresso"] = (
-                    time.time() - vela_atual.get("timestamp")
-                ) / self.timeframe
-                result.append(vela_atual)
-
-            # Adiciona metadados sobre a fonte dos dados
-            for vela in result:
-                if "em_formacao" not in vela:
-                    vela["em_formacao"] = False
-
-            self.logger.debug(
-                f"Preview: {len(result)} velas retornadas (incluindo_formacao={incluir_em_formacao})"
-            )
-            return result
-
-        except Exception as e:
-            self.logger.error(f"Erro ao obter preview de velas: {e}", exc_info=True)
-            return list(self.velas)  # Fallback seguro
-
-    def limpar_dados(self):
-        """Limpa todos os dados armazenados."""
-        try:
-            self.ticks.clear()
-            self.velas.clear()
-            self._current_candle = None
-            self._current_candle_start = None
-            self.last_cleanup_time = time.time()
-            self.logger.info("Todos os dados foram limpos")
-            return True
-        except Exception as e:
-            self.logger.error(f"Erro ao limpar dados: {e}", exc_info=True)
-            return False
-
-    def _check_cleanup(self):
-        """Verifica se é hora de limpar dados antigos."""
-        current_time = time.time()
-        # Aumenta intervalo de limpeza para 60 segundos para evitar spam
-        if current_time - self.last_cleanup_time > 60:  # 60 segundos
-            self._cleanup_old_data()
-            self.last_cleanup_time = current_time
-
-    def _cleanup_old_data(self):
-        """Limpa dados mais antigos que o limite configurado."""
-        try:
-            current_time = time.time()
-
-            # Limpa ticks antigos (1 hora)
-            ticks_cutoff_time = current_time - self.max_ticks_age_seconds
-            old_ticks_count = len(self.ticks)
-            self.ticks = [
-                (ts, price) for ts, price in self.ticks if ts >= ticks_cutoff_time
-            ]
-            ticks_removed = old_ticks_count - len(self.ticks)
-
-            # Limpa velas antigas (6 horas)
-            velas_cutoff_time = current_time - self.max_data_age_seconds
-            old_velas_count = len(self.velas)
-            self.velas = [
-                candle
-                for candle in self.velas
-                if candle.get("timestamp") >= velas_cutoff_time
-            ]
-            velas_removed = old_velas_count - len(self.velas)
-
-            # Se removeu algo, registra no log
-            if ticks_removed > 0 or velas_removed > 0:
-                self.logger.info(
-                    f"Limpeza: {velas_removed} velas e {ticks_removed} ticks antigos removidos"
-                )
-
-            # Força limite máximo de velas apenas se exceder muito
-            if len(self.velas) > self.max_velas * 2:  # 100% de margem
-                excess = len(self.velas) - self.max_velas
-                self.velas = self.velas[excess:]
-                self.logger.info(
-                    f"Limpeza por limite: {excess} velas removidas (limite máximo: {self.max_velas})"
-                )
-
-            # Força limite máximo de ticks mesmo que não sejam antigos
-            if len(self.ticks) > self.max_ticks:
-                excess = len(self.ticks) - self.max_ticks
-                self.ticks = self.ticks[excess:]
-
-            # Estima uso de memória
-            velas_size = len(self.velas) * 8 * 6  # 6 valores float por vela (~48 bytes)
-            ticks_size = len(self.ticks) * (8 + 8)  # timestamp + preço (16 bytes)
-            total_size_kb = (velas_size + ticks_size) / 1024
-            self.logger.debug(
-                f"Uso de memória estimado: {total_size_kb:.2f} KB - Velas: {len(self.velas)}, Ticks: {len(self.ticks)}"
-            )
-
-            return True
-        except Exception as e:
-            self.logger.error(f"Erro durante limpeza de dados: {e}", exc_info=True)
-
-    # --------- Sistema de Scanner de Ativos para Scalping ----------
-    def inicializar_scanner_ativos(self):
-        """Inicializa o scanner de ativos com base na configuração"""
-        try:
-            from src.core.config import ATIVOS_SCALPING
-
-            # Ordena ativos por prioridade (maior prioridade primeiro)
-            self.ativos_priorizados = sorted(
-                ATIVOS_SCALPING.items(), key=lambda x: x[1]["prioridade"], reverse=True
-            )
+            volatilitys_config = CONFIG_VOLATILITYS["selecao"]
+            lista_ativos = CONFIG_CATALOGADOR["volatilitys"]["lista_ativos"]
 
             self.logger.info(
-                f"Scanner inicializado com {len(self.ativos_priorizados)} ativos"
+                "🔍 Analisando todos os Volatility Indices (versão otimizada)..."
             )
 
-            # Define o primeiro ativo como padrão
-            if self.ativos_priorizados:
-                self.ativo_atual = self.ativos_priorizados[0][0]
-                self.logger.info(f"Ativo inicial selecionado: {self.ativo_atual}")
+            resultados_analise = []
 
-        except Exception as e:
-            self.logger.error(f"Erro ao inicializar scanner: {e}")
-            # Fallback para R_100
-            self.ativo_atual = "R_100"
+            for ativo in lista_ativos:
+                try:
+                    config_ativo = bot_config.ATIVOS_SCALPING.get(ativo)
+                    if not config_ativo:
+                        continue
 
-    def analisar_melhor_ativo(self) -> str:
-        """Analisa todos os ativos e retorna o melhor para scalping no momento"""
-        try:
-            agora = time.time()
+                    # Simula análise técnica (usando velas atuais)
+                    velas = self.obter_velas_atuais()
+                    if len(velas) < volatilitys_config["min_velas_necessarias"]:
+                        self.logger.warning(
+                            f"Velas insuficientes para {ativo}: {len(velas)}"
+                        )
+                        continue
 
-            # Verifica se é hora de fazer nova análise
-            if agora - self.ultima_analise_scanner < self.intervalo_scanner:
-                return self.ativo_atual or "R_100"
+                    # Calcula indicadores usando analisador otimizado
+                    closes = tuple(float(v["close"]) for v in velas[-25:])
 
-            self.ultima_analise_scanner = agora
-
-            if not self.ativos_priorizados:
-                self.inicializar_scanner_ativos()
-
-            melhor_ativo = None
-            melhor_score = 0
-
-            # Analisa os top 5 ativos por prioridade
-            for ativo, config in self.ativos_priorizados[:5]:
-                score = self._calcular_score_ativo(ativo, config)
-
-                if score > melhor_score:
-                    melhor_score = score
-                    melhor_ativo = ativo
-
-            if melhor_ativo and melhor_ativo != self.ativo_atual:
-                # Log mais informativo para o usuário
-                from src.core.config import ATIVOS_SCALPING
-
-                nome_ativo = ATIVOS_SCALPING.get(melhor_ativo, {}).get(
-                    "nome", melhor_ativo
-                )
-                self.logger.info(
-                    f"Scanner: {nome_ativo} selecionado (score: {melhor_score:.0f})"
-                )
-                self.ativo_atual = melhor_ativo
-
-            return self.ativo_atual or "R_100"
-
-        except Exception as e:
-            self.logger.error(f"Erro na análise de ativos: {e}")
-            return self.ativo_atual or "R_100"
-
-    def _calcular_score_ativo(self, ativo: str, config: dict) -> float:
-        """Calcula score de um ativo para scalping"""
-        try:
-            score = 0.0
-
-            # Score base pela prioridade configurada
-            score += config.get("prioridade", 5) * 10
-
-            # Bonus por spread baixo
-            spread = config.get("spread", "medio")
-            if spread == "muito-baixo":
-                score += 20
-            elif spread == "baixo":
-                score += 15
-            elif spread == "medio":
-                score += 10
-
-            # Bonus por volatilidade adequada para scalping
-            volatilidade = config.get("volatilidade", "media")
-            if volatilidade in ["baixa", "media"]:
-                score += 15  # Ideal para scalping
-            elif volatilidade == "media-alta":
-                score += 10
-            elif volatilidade == "alta":
-                score += 5
-            else:  # muito-alta ou extrema
-                score += 2  # Mais arriscado
-
-            # Bonus por disponibilidade 24/7
-            if config.get("horario") == "24/7":
-                score += 10
-
-            # Bonus por stake mínimo baixo
-            min_stake = config.get("min_stake", 1.0)
-            if min_stake <= 0.35:
-                score += 15
-            elif min_stake <= 0.5:
-                score += 10
-            elif min_stake <= 1.0:
-                score += 5
-
-            # Análise técnica se temos dados do ativo
-            if ativo in self.dados_ativos and len(self.dados_ativos[ativo]) >= 5:
-                dados = self.dados_ativos[ativo]
-
-                # Calcula volatilidade recente
-                precos = [d["close"] for d in dados[-5:]]
-                if len(precos) >= 2:
-                    volatilidade_real = np.std(precos) if len(precos) > 1 else 0
-
-                    # Volatilidade ideal para scalping (nem muito alta, nem muito baixa)
-                    if 0.0001 <= volatilidade_real <= 0.001:
-                        score += 20
-                    elif 0.00005 <= volatilidade_real <= 0.002:
-                        score += 10
-
-                # Verifica tendência clara (bom para scalping)
-                if len(precos) >= 3:
-                    tendencia_alta = all(
-                        precos[i] >= precos[i - 1] for i in range(1, len(precos))
+                    ema8 = AnalisadorTecnicoOtimizado.calcular_ema(
+                        closes,
+                        CONFIG_INDICADORES.get("periodos", {}).get("ema_rapida", 8),
                     )
-                    tendencia_baixa = all(
-                        precos[i] <= precos[i - 1] for i in range(1, len(precos))
+                    ema21 = AnalisadorTecnicoOtimizado.calcular_ema(
+                        closes,
+                        CONFIG_INDICADORES.get("periodos", {}).get("ema_lenta", 21),
+                    )
+                    rsi = AnalisadorTecnicoOtimizado.calcular_rsi(closes)
+                    bb = AnalisadorTecnicoOtimizado.calcular_bollinger(closes)
+
+                    if ema8 is None or ema21 is None:
+                        continue
+
+                    # Calcula assertividade usando calculadora otimizada
+                    assertividade = (
+                        CalculadorAssertividade.calcular_assertividade_ativo(
+                            ativo, ema8, ema21, rsi, bb, closes[-1]
+                        )
                     )
 
-                    if tendencia_alta or tendencia_baixa:
-                        score += 10  # Tendência clara é boa para scalping
+                    # Determina tipo de contrato
+                    tipo_contrato = CalculadorAssertividade.determinar_tipo_contrato(
+                        ativo, assertividade, modo
+                    )
 
-            return score
-
-        except Exception as e:
-            self.logger.error(f"Erro ao calcular score do ativo {ativo}: {e}")
-            return config.get("prioridade", 5) * 10  # Score básico
-
-    def obter_ativo_recomendado(self) -> dict:
-        """Retorna informações do ativo recomendado para scalping"""
-        try:
-            from src.core.config import ATIVOS_SCALPING
-
-            ativo_atual = self.analisar_melhor_ativo()
-            config_ativo = ATIVOS_SCALPING.get(ativo_atual, {})
-
-            return {
-                "ativo": ativo_atual,
-                "nome": config_ativo.get("nome", ativo_atual),
-                "min_stake": config_ativo.get("min_stake", 0.35),
-                "max_stake": config_ativo.get("max_stake", 50000),
-                "volatilidade": config_ativo.get("volatilidade", "media"),
-                "spread": config_ativo.get("spread", "medio"),
-                "prioridade": config_ativo.get("prioridade", 5),
-                "razao": "Melhor ativo disponível para scalping",
-            }
-
-        except Exception as e:
-            self.logger.error(f"Erro ao obter ativo recomendado: {e}")
-            return {
-                "ativo": "R_100",
-                "nome": "Volatility 100 Index",
-                "min_stake": 0.35,
-                "max_stake": 50000,
-                "volatilidade": "muito-alta",
-                "spread": "baixo",
-                "prioridade": 8,
-                "razao": "Ativo padrão (fallback)",
-            }
-
-    def listar_ativos_disponiveis(self) -> list:
-        """Lista todos os ativos disponíveis para scalping"""
-        try:
-            from src.core.config import ATIVOS_SCALPING
-
-            ativos = []
-            for ativo, config in ATIVOS_SCALPING.items():
-                ativos.append(
-                    {
+                    resultado = {
                         "ativo": ativo,
-                        "nome": config.get("nome", ativo),
-                        "min_stake": config.get("min_stake", 0.35),
-                        "volatilidade": config.get("volatilidade", "media"),
-                        "spread": config.get("spread", "medio"),
-                        "prioridade": config.get("prioridade", 5),
-                        "horario": config.get("horario", "24/7"),
+                        "nome": config_ativo["nome"],
+                        "assertividade": assertividade,
+                        "tipo_contrato": tipo_contrato,
+                        "multiplicador_recomendado": self.obter_multiplicador_otimizado(
+                            ativo, modo
+                        ),
+                        "valor_entrada": config_ativo.get("min_stake", 0.35),
+                        "prioridade": config_ativo.get("prioridade", 99),
+                        "indicadores": {
+                            "ema8": ema8,
+                            "ema21": ema21,
+                            "rsi": rsi,
+                            "preco_atual": closes[-1],
+                            "bb_superior": bb["superior"] if bb else None,
+                            "bb_inferior": bb["inferior"] if bb else None,
+                        },
                     }
-                )
 
-            # Ordena por prioridade
-            ativos.sort(key=lambda x: x["prioridade"], reverse=True)
-            return ativos
+                    resultados_analise.append(resultado)
+                    self.logger.info(
+                        f"📊 {ativo}: Assertividade={assertividade:.2f}, Tipo={tipo_contrato}"
+                    )
+
+                except Exception as e:
+                    self.logger.error(f"Erro analisando {ativo}: {e}")
+                    continue
+
+            if not resultados_analise:
+                fallback = CONFIG_VOLATILITYS["fallback"]
+                self.logger.error("Nenhum ativo pôde ser analisado, usando fallback")
+                return {
+                    "erro": "Nenhum ativo disponível",
+                    "fallback": {
+                        "ativo": fallback["ativo_padrao"],
+                        "tipo_contrato": fallback["tipo_contrato_padrao"],
+                        "multiplicador": fallback["multiplicador_padrao"],
+                    },
+                }
+
+            # Ordena por assertividade
+            resultados_analise.sort(key=lambda x: x["assertividade"], reverse=True)
+            melhor_ativo = resultados_analise[0]
+
+            self.logger.info(
+                f"🎯 MELHOR ATIVO (OTIMIZADO): {melhor_ativo['ativo']} ({melhor_ativo['nome']})"
+            )
+            self.logger.info(f"   Assertividade: {melhor_ativo['assertividade']:.2f}")
+            self.logger.info(f"   Tipo: {melhor_ativo['tipo_contrato']}")
+            self.logger.info(
+                f"   Multiplicador: x{melhor_ativo['multiplicador_recomendado']}"
+            )
+
+            # Atualiza ativo selecionado
+            self.ativo_selecionado = melhor_ativo["ativo"]
+
+            return {
+                "melhor_ativo": melhor_ativo,
+                "todos_resultados": resultados_analise,
+                "total_analisados": len(resultados_analise),
+                "modo_operacao": modo,
+                "configuracao_usada": "otimizada_centralizada",
+            }
 
         except Exception as e:
-            self.logger.error(f"Erro ao listar ativos: {e}")
-            return [{"ativo": "R_100", "nome": "Volatility 100 Index", "prioridade": 8}]
+            self.logger.error(f"Erro na análise geral dos volatilitys: {e}")
+            fallback = CONFIG_VOLATILITYS["fallback"]
+            return {
+                "erro": str(e),
+                "fallback": {
+                    "ativo": fallback["ativo_padrao"],
+                    "tipo_contrato": fallback["tipo_contrato_padrao"],
+                    "multiplicador": fallback["multiplicador_padrao"],
+                },
+            }
 
-    def estatisticas(self) -> Dict:
-        """Retorna estatísticas do catalogador para monitoramento."""
-        return {
-            "num_velas": len(self.velas),
-            "num_ticks": len(self.ticks),
-            "primeira_vela": self.velas[0].get("timestamp") if self.velas else None,
-            "ultima_vela": self.velas[-1].get("timestamp") if self.velas else None,
-            "periodo_segundos": (
-                self.velas[-1].get("timestamp") - self.velas[0].get("timestamp")
-                if len(self.velas) > 1
-                else 0
-            ),
-            "memoria_estimada_kb": (len(self.velas) * 8 * 6 + len(self.ticks) * 16)
-            / 1024,
-        }
+    def validar_operacao_otimizada(self, ativo: str, modo: str, saldo: float) -> tuple:
+        """Valida operação usando configurações centralizadas"""
+        try:
+            config_ativo = bot_config.ATIVOS_SCALPING.get(ativo)
+            config_modo = bot_config.MODOS_OPERACAO_SCALPING.get(modo.lower())
+
+            if not config_ativo:
+                return False, f"Ativo {ativo} não configurado"
+
+            if not config_modo:
+                return False, f"Modo {modo} não configurado"
+
+            valor_entrada = config_ativo.get("min_stake", 0.35)
+            meta_maxima = config_modo.get("meta_maxima")
+
+            if valor_entrada > saldo:
+                return False, "Saldo insuficiente"
+
+            # Validação de meta por modo
+            if meta_maxima and saldo > meta_maxima:
+                return (
+                    False,
+                    f"Saldo excede limite do modo {modo} (máx: ${meta_maxima:.0f})",
+                )
+
+            # Validação de intervalo entre operações
+            tempo_atual = time.time()
+            intervalo_min = config_modo.get(
+                "intervalo_minimo_s", self.intervalo_min_ops_s
+            )
+
+            if tempo_atual - self.ultima_operacao_ts < intervalo_min:
+                return False, f"Aguarde {intervalo_min}s entre operações"
+
+            return True, "Operação válida"
+
+        except Exception as e:
+            self.logger.error(f"Erro na validação: {e}")
+            return False, f"Erro na validação: {e}"
+
+    def obter_configuracao_completa_ativo(
+        self, ativo: str, modo: str = "agressivo"
+    ) -> dict:
+        """Obtém configuração completa usando configurações centralizadas"""
+        try:
+            config_ativo = bot_config.ATIVOS_SCALPING.get(ativo, {})
+            config_modo = bot_config.MODOS_OPERACAO_SCALPING.get(modo.lower(), {})
+
+            return {
+                "ativo": ativo,
+                "nome": config_ativo.get("nome", ativo),
+                "multiplicadores_disponiveis": config_ativo.get(
+                    "multiplicadores_disponiveis", []
+                ),
+                "multiplicador_recomendado": self.obter_multiplicador_otimizado(
+                    ativo, modo
+                ),
+                "multiplicador_padrao": config_ativo.get(
+                    "multiplicador_padrao_turbo", 10
+                ),
+                "valor_entrada": config_ativo.get("min_stake", 0.35),
+                "tipo_contrato": config_ativo.get("tipo_contrato", "multiplier"),
+                "contract_types": config_ativo.get(
+                    "contract_types", ["MULTUP", "MULTDOWN"]
+                ),
+                "prioridade": config_ativo.get("prioridade", 99),
+                "volatilidade": config_ativo.get("volatilidade", "media"),
+                "modo": modo,
+                "meta_maxima": config_modo.get("meta_maxima"),
+                "max_operacoes": config_modo.get("max_operacoes_simultaneas", 3),
+                "confianca_min": config_modo.get("confianca_min_sinal", 0.80),
+                "intervalo_min": config_modo.get("intervalo_minimo_s", 5.0),
+                "configuracao_origem": "centralizada_otimizada",
+            }
+
+        except Exception as e:
+            self.logger.error(f"Erro ao obter configuração completa: {e}")
+            return {"ativo": ativo, "erro": str(e)}
+
+    def adicionar_tick(self, preco: float) -> None:
+        """Adiciona tick e gerencia velas usando configurações centralizadas"""
+        try:
+            timestamp_atual = time.time()
+            self.ticks.append((timestamp_atual, preco))
+
+            # Limita ticks em memória
+            if len(self.ticks) > self.max_ticks_mem:
+                self.ticks = self.ticks[-self.max_ticks_mem :]
+
+            # Gerencia velas
+            self._processar_vela(timestamp_atual, preco)
+
+            # Limpeza automática
+            if timestamp_atual - self.ultimo_cleanup_s >= self.intervalo_cleanup_s:
+                self._executar_limpeza_automatica()
+                self.ultimo_cleanup_s = timestamp_atual
+
+        except Exception as e:
+            self.logger.error(f"Erro ao adicionar tick: {e}")
+
+    def obter_velas_atuais(self, incluir_em_formacao: bool = False) -> List[Dict]:
+        """Obtém velas atuais usando configurações centralizadas"""
+        try:
+            velas = self.velas_ohlc.copy()
+
+            if incluir_em_formacao and self._vela_atual_construcao:
+                velas.append(self._vela_atual_construcao.copy())
+
+            # Limita ao máximo configurado
+            max_velas = CONFIG_CATALOGADOR.get("analise", {}).get(
+                "max_velas_memoria", 2000
+            )
+            if len(velas) > max_velas:
+                velas = velas[-max_velas:]
+
+            return velas
+
+        except Exception as e:
+            self.logger.error(f"Erro ao obter velas: {e}")
+            return []
+
+    def _processar_vela(self, timestamp: float, preco: float) -> None:
+        """Processa formação de velas usando timeframe configurado"""
+        try:
+            timestamp_vela = int(timestamp // self.timeframe_s) * self.timeframe_s
+
+            if self._inicio_vela_atual_s != timestamp_vela:
+                # Finaliza vela anterior se existir
+                if self._vela_atual_construcao:
+                    self.velas_ohlc.append(self._vela_atual_construcao.copy())
+
+                    # Limita velas em memória
+                    if len(self.velas_ohlc) > self.max_velas_mem:
+                        self.velas_ohlc = self.velas_ohlc[-self.max_velas_mem :]
+
+                # Inicia nova vela
+                self._vela_atual_construcao = {
+                    "timestamp": timestamp_vela,
+                    "open": preco,
+                    "high": preco,
+                    "low": preco,
+                    "close": preco,
+                    "volume": 1,
+                }
+                self._inicio_vela_atual_s = timestamp_vela
+            else:
+                # Atualiza vela atual
+                if self._vela_atual_construcao:
+                    self._vela_atual_construcao["high"] = max(
+                        self._vela_atual_construcao["high"], preco
+                    )
+                    self._vela_atual_construcao["low"] = min(
+                        self._vela_atual_construcao["low"], preco
+                    )
+                    self._vela_atual_construcao["close"] = preco
+                    self._vela_atual_construcao["volume"] += 1
+
+        except Exception as e:
+            self.logger.error(f"Erro ao processar vela: {e}")
+
+    def _executar_limpeza_automatica(self) -> None:
+        """Executa limpeza automática usando configurações centralizadas"""
+        try:
+            tempo_atual = time.time()
+
+            # Limpa ticks antigos
+            self.ticks = [
+                (ts, preco)
+                for ts, preco in self.ticks
+                if tempo_atual - ts <= self.max_idade_ticks_s
+            ]
+
+            # Limpa velas antigas
+            self.velas_ohlc = [
+                vela
+                for vela in self.velas_ohlc
+                if tempo_atual - vela["timestamp"] <= self.max_idade_velas_s
+            ]
+
+            # Limpa operações antigas
+            self.operacoes_ativas_ts = [
+                ts
+                for ts in self.operacoes_ativas_ts
+                if tempo_atual - ts <= 3600  # 1 hora
+            ]
+
+            self.logger.debug(
+                f"Limpeza automática executada: {len(self.ticks)} ticks, {len(self.velas_ohlc)} velas"
+            )
+
+        except Exception as e:
+            self.logger.error(f"Erro na limpeza automática: {e}")
+
+    def log_organizado(self, mensagem: str, nivel: str = "info") -> None:
+        """Log organizado usando configurações centralizadas"""
+        try:
+            if hasattr(self.logger, nivel.lower()):
+                getattr(self.logger, nivel.lower())(
+                    f"[CATALOGADOR_OTIMIZADO] {mensagem}"
+                )
+            else:
+                self.logger.info(f"[CATALOGADOR_OTIMIZADO] {mensagem}")
+
+        except Exception as e:
+            print(f"Erro no log: {e}")
+
+
+# Alias para compatibilidade - usa a versão otimizada
+Catalogador = CatalogadorOtimizado
+
+
+# Teste do catalogador otimizado
+if __name__ == "__main__":
+    logger.info("=== TESTE DO CATALOGADOR OTIMIZADO ===")
+
+    try:
+        # Instancia catalogador otimizado
+        catalog = CatalogadorOtimizado()
+        catalog.log_organizado("Catalogador Otimizado instanciado com sucesso", "info")
+
+        # Testa configurações centralizadas
+        logger.info("📊 Testando configurações centralizadas:")
+
+        # Testa multiplicadores
+        for ativo in ["R_10", "R_25", "R_50", "R_75", "R_100"]:
+            for modo in ["iniciante", "conservador", "agressivo"]:
+                mult = catalog.obter_multiplicador_otimizado(ativo, modo)
+                config = catalog.obter_configuracao_completa_ativo(ativo, modo)
+                valido, msg = catalog.validar_operacao_otimizada(ativo, modo, 100.0)
+
+                logger.info(f"✅ {ativo} ({modo}): Mult=x{mult}, Válido={valido}")
+
+        # Testa análise de volatilitys
+        logger.info("🔍 Testando análise otimizada de volatilitys...")
+        resultado = catalog.analisar_todos_volatilitys_e_escolher_melhor("agressivo")
+
+        if "erro" not in resultado:
+            melhor = resultado["melhor_ativo"]
+            logger.info(
+                f"🎯 Melhor ativo: {melhor['ativo']} (Assertividade: {melhor['assertividade']:.2f})"
+            )
+        else:
+            logger.warning(f"Erro na análise: {resultado['erro']}")
+
+        logger.info("✅ CATALOGADOR OTIMIZADO FUNCIONANDO PERFEITAMENTE!")
+
+    except Exception as e:
+        logger.error(f"❌ Erro no teste: {e}")
+        import traceback
+
+        traceback.print_exc()

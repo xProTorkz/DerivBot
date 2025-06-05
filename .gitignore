@@ -1,3 +1,5 @@
+# ===== DERIVBOT GITIGNORE =====
+
 # Python
 __pycache__/
 *.py[cod]
@@ -19,83 +21,64 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
 # Virtual Environment
 venv/
-ENV/
 env/
+ENV/
+.venv/
+.env/
 
-# IDE
-.idea/
+# IDEs
 .vscode/
+.idea/
 *.swp
 *.swo
-.project
-.pydevproject
-.settings/
+*~
 
 # Logs
 *.log
-logs/
-trading.log
+logs/*.log
+!logs/.gitkeep
 
-# Data
-data/
-*.db
-*.sqlite3
+# Data files sensíveis (mantém estrutura)
+data/flask_session/
+data/*.db
+data/*.sqlite
+data/*.json.bak
+data/temp/
 
-# Environment
+# Configurações sensíveis
 .env
-.env.local
-.env.*.local
+!.env.example
 
-# OS
+# Mantém arquivos importantes do projeto
+!README.md
+!LICENSE
+!requirements.txt
+!data/licencas.json
+!data/admin_licencas.json
+
+# Sistema
 .DS_Store
 Thumbs.db
-desktop.ini
-
-# Temporary files
 *.tmp
+*.temp
+
+# Backups
 *.bak
-*.swp
-*~.nib
-local.properties
-.settings/
-.loadpath
-.recommenders
+*.backup
+*~
 
-node_modules
-
-*.log
-*.log.*
-*.log.*.*
-*.log.*.*.*
-*.log.*.*.*.*
-*.log.*.*.*.*.* 
-*.log.*.*.*.*.*.*
-
-planejamento.txt
-
-*.txt
-*.md
-*.pdf
-*.doc
-*.docx
-*.xls
-*.xlsx
-
+# Arquivos temporários do projeto
+temp/
+tmp/
 *.zip
 *.rar
-*.7z
-*.tar
-*.gz
-*.bz2
-*.json.bak
-*.json.bak.bak
-*.json.bak.bak.bak
-*.json.bak.bak.bak.bak
-*.json.bak.bak.bak.bak.bak
-*.json.bak.bak.bak.bak.bak.bak
-*.json.bak.bak.bak.bak.bak.bak.bak
-*.json.bak.bak.bak.bak.bak.bak.bak.bak
-*.json
+*.tar.gz
+
+# Arquivos de teste
+test_*.py
+*_test.py
+tests/temp/
