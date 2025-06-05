@@ -1,9 +1,11 @@
 {
   "email": {
-    "smtp_server": "",
+    "smtp_server": "smtp.gmail.com",
     "smtp_port": 587,
-    "email_user": "",
-    "email_pass": ""
+    "email_user": "pglucas7@gmail.com",
+    "email_pass": "qsmm joig oopa uuwa"
   },
-  "api_key": "hsgCU6pMMb38fvehOyfSJpmEWePJKZAFAdr3_e1WiHE"
+  "api_key": "hsgCU6pMMb38fvehOyfSJpmEWePJKZAFAdr3_e1WiHE",
+  "admin_licenses": ["DERIVBOT-82YM-E0VX"],
+  "auto_send_email": true
 }

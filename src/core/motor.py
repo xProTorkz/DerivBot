@@ -611,6 +611,7 @@ class Motor:
         self.conectado = False
         self.token = None
         self.saldo = 0.0
+        self.id_conta_real = None  # ID real da conta obtido da API
         self.operacoes_abertas = {}
         self.historico_operacoes = []
         self.callback_tick = None
@@ -633,7 +634,7 @@ class Motor:
         )
         self.scanner_ativo = True  # Ativa o scanner de ativos
         self.ultimo_scan_ativo = 0  # Timestamp do último scan
-        self.modo_real = getattr(config, "MODO_REAL", True)
+        self.modo_real = getattr(config, "MODO_REAL_PADRAO", True)
         self.catalogador = Catalogador()  # Inicializa catalogador
         # Define o ativo atual no catalogador
         self.catalogador.ativo_atual = self.par_atual
@@ -818,6 +819,19 @@ class Motor:
                 self.conectado = True
                 self.saldo = data["authorize"].get("balance", 0)
                 self.saldo_inicial = self.saldo
+
+                # Captura o ID real da conta
+                auth_data = data["authorize"]
+                if "loginid" in auth_data:
+                    self.id_conta_real = auth_data["loginid"]
+                    self.logger.info(
+                        f"✅ ID real da conta capturado: {self.id_conta_real}"
+                    )
+                else:
+                    self.logger.warning(
+                        "⚠️ ID da conta não encontrado na resposta de autorização"
+                    )
+
                 self.logger.info(f"Autenticado com sucesso. Saldo: {self.saldo}")
 
                 # Agora inscreve nos ticks
@@ -1650,6 +1664,81 @@ class Motor:
         except Exception as e:
             self.logger.error(f"Erro ao obter saldo: {str(e)}")
             return 0.0
+
+    def obter_id_conta(self):
+        """Retorna o ID da conta autenticada."""
+        try:
+            # Primeiro verifica se já temos o ID capturado automaticamente
+            if self.id_conta_real:
+                self.logger.info(f"✅ ID da conta já disponível: {self.id_conta_real}")
+                return self.id_conta_real
+
+            # Fallback: tenta obter da última resposta
+            if self.ultima_resposta and "authorize" in self.ultima_resposta:
+                auth_data = self.ultima_resposta["authorize"]
+                loginid = auth_data.get("loginid", None)
+                if loginid:
+                    self.id_conta_real = loginid  # Armazena para uso futuro
+                    self.logger.info(f"✅ ID real da conta obtido: {loginid}")
+                    return loginid
+                else:
+                    self.logger.warning(
+                        "⚠️ LoginID não encontrado na resposta de autorização"
+                    )
+            else:
+                self.logger.warning("⚠️ Resposta de autorização não disponível")
+            return None
+        except Exception as e:
+            self.logger.error(f"Erro ao obter ID da conta: {str(e)}")
+            return None
+
+    def obter_id_conta_forcado(self):
+        """Força a obtenção do ID real da conta fazendo uma nova requisição."""
+        try:
+            import time
+
+            if not self.ws or self.ws.sock is None:
+                self.logger.error("WebSocket não conectado")
+                return None
+
+            # Envia uma nova requisição de autorização para forçar resposta
+            auth_request = {"authorize": self.token, "req_id": int(time.time() * 1000)}
+
+            self.logger.info(
+                "🔄 Forçando nova requisição de autorização para obter ID real..."
+            )
+            self.ws.send(json.dumps(auth_request))
+
+            # Aguarda resposta por até 10 segundos
+            timeout = 10
+            start_time = time.time()
+
+            while time.time() - start_time < timeout:
+                time.sleep(0.5)
+                # Verifica se o ID foi capturado automaticamente
+                if self.id_conta_real:
+                    self.logger.info(
+                        f"✅ ID real da conta obtido forçadamente: {self.id_conta_real}"
+                    )
+                    return self.id_conta_real
+
+                # Fallback: verifica resposta manual
+                if self.ultima_resposta and "authorize" in self.ultima_resposta:
+                    auth_data = self.ultima_resposta["authorize"]
+                    loginid = auth_data.get("loginid", None)
+                    if loginid:
+                        self.id_conta_real = loginid  # Armazena para uso futuro
+                        self.logger.info(
+                            f"✅ ID real da conta obtido forçadamente: {loginid}"
+                        )
+                        return loginid
+
+            self.logger.error("❌ Timeout ao tentar obter ID real da conta")
+            return None
+
+        except Exception as e:
+            self.logger.error(f"Erro ao forçar obtenção do ID da conta: {str(e)}")
+            return None
 
     def definir_par(self, par: str) -> bool:
         """Altera o par de negociação atual."""

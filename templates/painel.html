@@ -52,7 +52,7 @@
                 {{ "Conta Demo" if tipo_conta == "demo" else "Conta Real" }}
               </div>
               <div class="numero-conta">
-                {{ session.get("deriv_account", "VRTCxxxxxxx") }}
+                {{ session.get("deriv_account") or "Carregando..." }}
               </div>
             </div>
             <button
@@ -117,17 +117,6 @@
             title="Configurações"
           >
             <span class="config-icon">⚙️</span>
-          </button>
-
-          <!-- Botão Admin -->
-          <button
-            class="config-btn"
-            onclick="window.location.href='/admin'"
-            aria-label="Painel Admin"
-            title="Painel Administrativo"
-            style="background: linear-gradient(45deg, #ff6b6b, #ee5a24)"
-          >
-            <span class="config-icon">🔧</span>
           </button>
 
           <!-- Botão de Desconectar -->
@@ -262,25 +251,7 @@
           Iniciar Robô
         </button>
 
-        <!-- Log temporário (uma linha) -->
-        <div
-          class="log-temp"
-          id="log-temporario"
-          role="log"
-          aria-live="polite"
-          style="
-            margin: 10px 0;
-            padding: 8px;
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 4px;
-            font-size: 13px;
-          "
-        >
-          <span class="log-emoji">⏳</span>
-          <span class="log-texto">Aguardando início das operações...</span>
-        </div>
-
-        <!-- Logs em Tempo Real (compactos) -->
+        <!-- Logs em Tempo Real (unificados) -->
         <div
           class="logs-tempo-real"
           id="logs-tempo-real"
@@ -289,37 +260,26 @@
             background: rgba(255, 255, 255, 0.03);
             border-radius: 6px;
             border: 1px solid rgba(255, 255, 255, 0.1);
+            width: 100%;
+            max-width: 100%;
           "
         >
           <div
-            class="logs-header"
-            style="
-              display: flex;
-              justify-content: space-between;
-              align-items: center;
-              padding: 6px 10px;
-              border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-              background: rgba(255, 255, 255, 0.02);
-            "
-          >
-            <span style="font-size: 12px; color: #fff; font-weight: bold"
-              >📊 Logs em Tempo Real</span
-            >
-            <div
-              class="logs-stats"
-              style="display: flex; gap: 10px; font-size: 10px; color: #888"
-            >
-              <span id="win-rate-display">Win Rate: --</span>
-              <span id="operacoes-count">Ops: 0</span>
-            </div>
-          </div>
-          <div
             class="logs-content"
             id="container-logs"
-            style="max-height: 100px; overflow-y: auto; padding: 4px 8px"
+            style="max-height: 100px; overflow-y: auto; padding: 8px 12px"
           >
             <div id="lista-logs">
-              <!-- Os logs serão inseridos aqui via JavaScript -->
+              <!-- Status inicial do robô -->
+              <div
+                class="log-item"
+                style="padding: 4px 0; font-size: 12px; color: #ccc"
+              >
+                <span class="log-emoji">⏳</span>
+                <span class="log-texto"
+                  >Aguardando início das operações...</span
+                >
+              </div>
             </div>
           </div>
         </div>
@@ -447,7 +407,8 @@
               <span>📊 Gestão de Riscos</span>
               <span class="risk-summary" id="risk-summary">
                 Drawdown: <span id="drawdown-atual">0%</span> | Win Rate:
-                <span id="win-rate-sessao">0%</span>
+                <span id="win-rate-sessao">0%</span> | Ops:
+                <span id="operacoes-count">0</span>
               </span>
               <span class="risk-toggle">▼</span>
             </div>
@@ -1407,12 +1368,8 @@
           const tabelaBody = document.getElementById("historico-tabela-body");
           if (tabelaBody) tabelaBody.innerHTML = "";
 
-          // Atualiza log temporário
-          const logTemp = document.getElementById("log-temporario");
-          if (logTemp) {
-            logTemp.innerHTML =
-              '<span class="log-emoji">🚀</span><span class="log-texto">Robô iniciado!</span>';
-          }
+          // Atualiza logs unificados
+          adicionarLogInformativo("🚀 Robô iniciado!");
 
           // Adiciona logs informativos
           setTimeout(() => {

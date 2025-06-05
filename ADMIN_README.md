@@ -7,6 +7,7 @@ O painel administrativo do DerivBot permite gerenciar licenças, configurar emai
 ## 🚀 Acesso ao Admin
 
 ### URL de Acesso
+
 ```
 http://localhost:5000/admin
 ```
@@ -16,6 +17,7 @@ http://localhost:5000/admin
 ## 🎯 Funcionalidades
 
 ### 📊 Dashboard
+
 - **Estatísticas em tempo real:**
   - Total de licenças
   - Licenças ativas
@@ -24,6 +26,7 @@ http://localhost:5000/admin
 - **Licenças recentes:** Lista das 5 licenças mais recentes
 
 ### ➕ Gerar Licença
+
 - **Tipos disponíveis:**
   - Vitalício
   - Anual (365 dias)
@@ -36,6 +39,7 @@ http://localhost:5000/admin
   - Envio automático de email (checkbox)
 
 ### 📋 Gerenciar Licenças
+
 - **Visualizar todas as licenças**
 - **Ações disponíveis:**
   - ✏️ Editar (em desenvolvimento)
@@ -44,6 +48,7 @@ http://localhost:5000/admin
 - **Exportar para CSV**
 
 ### 📧 Configuração de Email
+
 - **Configurações SMTP:**
   - Servidor SMTP (ex: smtp.gmail.com)
   - Porta (ex: 587)
@@ -54,6 +59,7 @@ http://localhost:5000/admin
   - Preview do template de email
 
 ### 🔌 API para Integração
+
 - **Endpoint público para sistemas de venda**
 - **Chave API para autenticação**
 - **Documentação completa da API**
@@ -61,6 +67,7 @@ http://localhost:5000/admin
 ## 📧 Sistema de Email
 
 ### Configuração Recomendada (Gmail)
+
 ```
 Servidor SMTP: smtp.gmail.com
 Porta: 587
@@ -69,7 +76,9 @@ Senha: senha_do_app_google
 ```
 
 ### Template de Email
+
 O sistema envia automaticamente um email profissional com:
+
 - ✅ Código da licença destacado
 - ✅ Instruções passo a passo
 - ✅ Links diretos para obter tokens
@@ -79,6 +88,7 @@ O sistema envia automaticamente um email profissional com:
 ## 🔌 API Pública
 
 ### Endpoint para Gerar Licença
+
 ```http
 POST /api/public/generate-license
 Content-Type: application/json
@@ -94,16 +104,18 @@ Content-Type: application/json
 ```
 
 ### Resposta de Sucesso
+
 ```json
 {
-    "success": true,
-    "codigo_licenca": "DERIVBOT-A1B2-C3D4",
-    "message": "Licença gerada com sucesso",
-    "email_enviado": true
+  "success": true,
+  "codigo_licenca": "DERIVBOT-A1B2-C3D4",
+  "message": "Licença gerada com sucesso",
+  "email_enviado": true
 }
 ```
 
 ### Códigos de Erro
+
 - `401`: Chave API inválida
 - `400`: Email obrigatório não fornecido
 - `500`: Erro interno do servidor
@@ -111,11 +123,13 @@ Content-Type: application/json
 ## 🔐 Segurança
 
 ### Chave API
+
 - Gerada automaticamente no primeiro acesso
 - Pode ser regenerada a qualquer momento
 - Necessária para usar a API pública
 
 ### Acesso Restrito
+
 - Apenas usuários logados podem acessar o admin
 - Senhas de email não são exibidas por segurança
 - Logs detalhados de todas as operações
@@ -123,44 +137,47 @@ Content-Type: application/json
 ## 📁 Arquivos de Configuração
 
 ### `data/admin_config.json`
+
 ```json
 {
-    "email": {
-        "smtp_server": "smtp.gmail.com",
-        "smtp_port": 587,
-        "email_user": "seu@email.com",
-        "email_pass": "senha_do_app"
-    },
-    "api_key": "chave_api_gerada_automaticamente"
+  "email": {
+    "smtp_server": "smtp.gmail.com",
+    "smtp_port": 587,
+    "email_user": "seu@email.com",
+    "email_pass": "senha_do_app"
+  },
+  "api_key": "chave_api_gerada_automaticamente"
 }
 ```
 
 ### `data/licencas.json`
+
 ```json
 {
-    "licenca_001": {
-        "codigo_licenca": "DERIVBOT-A1B2-C3D4",
-        "status": "ativa",
-        "plano": "vitalicio",
-        "validade": "VITALICIO",
-        "hwid": "",
-        "ip": "",
-        "deriv_real": "",
-        "deriv_demo": "",
-        "token_deriv_real": "",
-        "token_deriv_demo": "",
-        "data_criacao": "2024-06-05 14:30:00",
-        "data_vinculacao": "",
-        "cliente_email": "cliente@email.com",
-        "cliente_nome": "Nome do Cliente",
-        "observacoes": "Licença gerada via admin"
-    }
+  "licenca_001": {
+    "codigo_licenca": "DERIVBOT-A1B2-C3D4",
+    "status": "ativa",
+    "plano": "vitalicio",
+    "validade": "VITALICIO",
+    "hwid": "",
+    "ip": "",
+    "deriv_real": "",
+    "deriv_demo": "",
+    "token_deriv_real": "",
+    "token_deriv_demo": "",
+    "data_criacao": "2024-06-05 14:30:00",
+    "data_vinculacao": "",
+    "cliente_email": "cliente@email.com",
+    "cliente_nome": "Nome do Cliente",
+    "observacoes": "Licença gerada via admin"
+  }
 }
 ```
 
 ## 🔄 Fluxo de Trabalho
 
 ### 1. Venda Manual
+
 1. Cliente compra o produto
 2. Acesse `/admin`
 3. Vá em "Gerar Licença"
@@ -170,14 +187,16 @@ Content-Type: application/json
 7. Cliente recebe email com instruções
 
 ### 2. Venda Automática (API)
+
 1. Sistema de vendas faz POST para `/api/public/generate-license`
 2. Licença é gerada automaticamente
 3. Email é enviado automaticamente
 4. Cliente recebe instruções por email
 
 ### 3. Ativação pelo Cliente
+
 1. Cliente recebe email com código
-2. Cliente executa `executar_derivbot.bat`
+2. Cliente acessa o sistema via domínio
 3. Cliente acessa tela de login
 4. Cliente insere código + tokens da Deriv
 5. Sistema valida e vincula dispositivo
@@ -186,16 +205,19 @@ Content-Type: application/json
 ## 🛠️ Manutenção
 
 ### Logs
+
 - Todos os eventos são logados
 - Geração de licenças
 - Envios de email
 - Erros e exceções
 
 ### Backup
+
 - Faça backup regular de `data/licencas.json`
 - Faça backup de `data/admin_config.json`
 
 ### Monitoramento
+
 - Verifique estatísticas no dashboard
 - Monitore licenças expiradas
 - Acompanhe emails não enviados
@@ -203,17 +225,20 @@ Content-Type: application/json
 ## 🆘 Solução de Problemas
 
 ### Email não está sendo enviado
+
 1. Verifique configurações SMTP
 2. Use "Testar Email" no admin
 3. Verifique se a senha do app está correta
 4. Confirme que 2FA está ativado no Gmail
 
 ### API retorna erro 401
+
 1. Verifique se a chave API está correta
 2. Regenere a chave API se necessário
 3. Confirme que está usando o endpoint correto
 
 ### Licença não está sendo criada
+
 1. Verifique logs no terminal
 2. Confirme que `data/` tem permissões de escrita
 3. Verifique se há espaço em disco
@@ -221,6 +246,7 @@ Content-Type: application/json
 ## 📞 Suporte
 
 Para suporte técnico ou dúvidas sobre o painel admin:
+
 - 📧 Email: admin@derivbot.com
 - 💬 WhatsApp: +55 11 99999-9999
 - 🌐 Documentação: www.derivbot.com/docs

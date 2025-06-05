@@ -56,7 +56,7 @@ class Config:
     PASSWORD_MIN_LENGTH = 8
 
     # Configurações de trading
-    MODO_REAL_PADRAO = False  # Sempre inicia em demo por segurança
+    MODO_REAL_PADRAO = True  # Sempre inicia em real por padrão
     TIMEFRAME_PADRAO = 1  # segundos
     MAX_OPERACOES_SIMULTANEAS = 10
     ATIVO_PADRAO = "1HZ75V"  # VIX75 para scalping

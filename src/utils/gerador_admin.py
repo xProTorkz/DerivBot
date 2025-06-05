@@ -72,10 +72,22 @@ class GeradorLicencasAdmin:
             return "VITALICIO"
 
     def create_license(
-        self, tipo: str, email: str = "", nome: str = "", observacoes: str = ""
+        self,
+        tipo: str,
+        email: str = "",
+        nome: str = "",
+        observacoes: str = "",
+        enviar_email: bool = True,
     ) -> Tuple[bool, str, str]:
         """
-        Cria uma nova licença
+        Cria uma nova licença e envia email automaticamente
+
+        Args:
+            tipo: Tipo da licença (vitalicio, mensal, etc.)
+            email: Email do cliente
+            nome: Nome do cliente
+            observacoes: Observações adicionais
+            enviar_email: Se deve enviar email automaticamente (padrão: True)
 
         Returns:
             Tuple[bool, str, str]: (sucesso, codigo_licenca, mensagem)
@@ -119,7 +131,41 @@ class GeradorLicencasAdmin:
             self.save_licenses(licencas)
 
             logger.info(f"Nova licença criada: {codigo_licenca} - Tipo: {tipo}")
-            return True, codigo_licenca, "Licença criada com sucesso"
+
+            # Enviar email automaticamente se solicitado e email fornecido
+            email_enviado = False
+            email_mensagem = ""
+
+            if enviar_email and email:
+                try:
+                    sucesso_email, msg_email = self.send_email(
+                        codigo_licenca, email, nome
+                    )
+                    email_enviado = sucesso_email
+                    email_mensagem = msg_email
+
+                    if sucesso_email:
+                        logger.info(
+                            f"Email enviado automaticamente para {email} - Licença: {codigo_licenca}"
+                        )
+                    else:
+                        logger.warning(
+                            f"Falha ao enviar email para {email}: {msg_email}"
+                        )
+
+                except Exception as e:
+                    logger.error(f"Erro ao enviar email automático: {e}")
+                    email_mensagem = f"Erro ao enviar email: {str(e)}"
+
+            # Preparar mensagem de retorno
+            mensagem_base = "Licença criada com sucesso"
+            if enviar_email and email:
+                if email_enviado:
+                    mensagem_base += " e email enviado automaticamente"
+                else:
+                    mensagem_base += f" (email não enviado: {email_mensagem})"
+
+            return True, codigo_licenca, mensagem_base
 
         except Exception as e:
             logger.error(f"Erro ao criar licença: {e}")
@@ -317,12 +363,12 @@ class GeradorLicencasAdmin:
             <div class="step">
                 <span class="step-number">2</span>
                 <div style="display: inline-block; vertical-align: top; width: calc(100% - 50px);">
-                    <h4>Execute o DerivBot</h4>
-                    <p>Clique duas vezes no arquivo <code>executar_derivbot.bat</code></p>
-                    <p>O sistema abrirá automaticamente no seu navegador.</p>
+                    <h4>Acesse o Sistema</h4>
+                    <p>Acesse o DerivBot através do link que será fornecido em breve.</p>
+                    <p>O sistema abrirá diretamente no seu navegador.</p>
                 </div>
             </div>
-            
+
             <div class="step">
                 <span class="step-number">3</span>
                 <div style="display: inline-block; vertical-align: top; width: calc(100% - 50px);">
@@ -386,25 +432,38 @@ class GeradorLicencasAdmin:
             config = self.load_config()
             email_config = config.get("email", {})
 
-            if not all(
-                [
-                    email_config.get("smtp_server"),
-                    email_config.get("email_user"),
-                    email_config.get("email_pass"),
-                ]
-            ):
-                return False, "Configuração de email não encontrada"
+            smtp_server = email_config.get("smtp_server", "")
+            email_user = email_config.get("email_user", "")
+            email_pass = email_config.get("email_pass", "")
 
-            # Importar classes de email dinamicamente
+            # Verificar se configuração existe
+            if not all([smtp_server, email_user, email_pass]):
+                return (
+                    False,
+                    "Configuração de email não encontrada. Configure no painel admin.",
+                )
+
+            # Verificar se não são valores de exemplo
+            if (
+                email_user == "SEU_EMAIL@gmail.com"
+                or email_pass == "SUA_SENHA_DE_APP"
+                or "SEU_EMAIL" in email_user
+                or "SUA_SENHA" in email_pass
+            ):
+                return (
+                    False,
+                    "Configure seu email real no painel admin (aba Email Config)",
+                )
+
+            # Importar classes de email
             try:
-                from email.mime.text import MimeText
-                from email.mime.multipart import MimeMultipart
+                from email.mime.text import MIMEText as MimeText
+                from email.mime.multipart import MIMEMultipart as MimeMultipart
             except ImportError:
-                try:
-                    from email.MIMEText import MIMEText as MimeText
-                    from email.MIMEMultipart import MIMEMultipart as MimeMultipart
-                except ImportError:
-                    return False, "Biblioteca de email não disponível"
+                return (
+                    False,
+                    "Biblioteca de email não disponível - Instale o Python com suporte completo",
+                )
 
             # Criar mensagem
             msg = MimeMultipart("alternative")
@@ -440,23 +499,37 @@ class GeradorLicencasAdmin:
             config = self.load_config()
             email_config = config.get("email", {})
 
-            if not all(
-                [
-                    email_config.get("smtp_server"),
-                    email_config.get("email_user"),
-                    email_config.get("email_pass"),
-                ]
-            ):
-                return False, "Configuração de email incompleta"
+            smtp_server = email_config.get("smtp_server", "")
+            email_user = email_config.get("email_user", "")
+            email_pass = email_config.get("email_pass", "")
 
-            # Importar classes de email dinamicamente
+            # Verificar se configuração existe
+            if not all([smtp_server, email_user, email_pass]):
+                return (
+                    False,
+                    "Configuração de email não encontrada. Configure no painel admin.",
+                )
+
+            # Verificar se não são valores de exemplo
+            if (
+                email_user == "SEU_EMAIL@gmail.com"
+                or email_pass == "SUA_SENHA_DE_APP"
+                or "SEU_EMAIL" in email_user
+                or "SUA_SENHA" in email_pass
+            ):
+                return (
+                    False,
+                    "Configure seu email real no painel admin (aba Email Config)",
+                )
+
+            # Importar classes de email
             try:
-                from email.mime.text import MimeText
+                from email.mime.text import MIMEText as MimeText
             except ImportError:
-                try:
-                    from email.MIMEText import MIMEText as MimeText
-                except ImportError:
-                    return False, "Biblioteca de email não disponível"
+                return (
+                    False,
+                    "Biblioteca de email não disponível - Instale o Python com suporte completo",
+                )
 
             # Criar mensagem de teste
             msg = MimeText(

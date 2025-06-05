@@ -2,12 +2,10 @@
 // Carrega mobile.js para funcionalidades específicas para dispositivos móveis
 // O mobile.js é responsável por detectar e ajustar a interface para dispositivos móveis
 
-// TESTE CRÍTICO - Se você não vir este alerta, o JavaScript não está carregando
-alert("🔥 TESTE: JavaScript carregado! Se você vê este alerta, o JS funciona.");
-console.log("🔥 TESTE: JavaScript carregado e executando!");
+// JavaScript carregado com sucesso
+console.log("✅ DerivBot JavaScript carregado e executando!");
 
 document.addEventListener("DOMContentLoaded", function () {
-  console.log("🔥 TESTE: DOMContentLoaded disparado!");
   // Código para garantir que a barra de progresso termine nas bolinhas
   (function fixProgressBar() {
     // Adicionar um estilo específico que force os limites da barra

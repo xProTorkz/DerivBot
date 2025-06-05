@@ -1,427 +1,511 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>DerivBot - Painel Admin</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='style.css') }}"
+    />
     <style>
-        .admin-container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-            min-height: 100vh;
-            color: white;
-        }
-        
-        .admin-header {
-            text-align: center;
-            margin-bottom: 30px;
-            padding: 20px;
-            background: rgba(255, 174, 66, 0.1);
-            border-radius: 15px;
-            border: 1px solid #ffae42;
-        }
-        
-        .admin-tabs {
-            display: flex;
-            margin-bottom: 30px;
-            background: rgba(0, 0, 0, 0.3);
-            border-radius: 10px;
-            overflow: hidden;
-        }
-        
-        .tab-button {
-            flex: 1;
-            padding: 15px;
-            background: transparent;
-            border: none;
-            color: #aaa;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            font-size: 14px;
-            font-weight: 500;
-        }
-        
-        .tab-button.active {
-            background: #ffae42;
-            color: #1a1a2e;
-        }
-        
-        .tab-content {
-            display: none;
-            background: rgba(0, 0, 0, 0.2);
-            border-radius: 15px;
-            padding: 25px;
-            border: 1px solid rgba(255, 174, 66, 0.3);
-        }
-        
-        .tab-content.active {
-            display: block;
-        }
-        
-        .form-group {
-            margin-bottom: 20px;
-        }
-        
-        .form-group label {
-            display: block;
-            margin-bottom: 8px;
-            color: #ffae42;
-            font-weight: 500;
-        }
-        
-        .form-group input, .form-group select, .form-group textarea {
-            width: 100%;
-            padding: 12px;
-            border: 1px solid #444;
-            border-radius: 8px;
-            background: rgba(0, 0, 0, 0.3);
-            color: white;
-            font-size: 14px;
-        }
-        
-        .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
-            outline: none;
-            border-color: #ffae42;
-            box-shadow: 0 0 10px rgba(255, 174, 66, 0.3);
-        }
-        
-        .btn-admin {
-            background: linear-gradient(45deg, #ffae42, #ff8c00);
-            color: white;
-            border: none;
-            padding: 12px 25px;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: 500;
-            transition: all 0.3s ease;
-            margin-right: 10px;
-            margin-bottom: 10px;
-        }
-        
-        .btn-admin:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(255, 174, 66, 0.4);
-        }
-        
-        .btn-danger {
-            background: linear-gradient(45deg, #ff4757, #ff3742);
-        }
-        
-        .btn-success {
-            background: linear-gradient(45deg, #2ed573, #1dd1a1);
-        }
-        
-        .licenses-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
-            background: rgba(0, 0, 0, 0.2);
-            border-radius: 10px;
-            overflow: hidden;
-        }
-        
-        .licenses-table th, .licenses-table td {
-            padding: 12px;
-            text-align: left;
-            border-bottom: 1px solid rgba(255, 174, 66, 0.2);
-        }
-        
-        .licenses-table th {
-            background: rgba(255, 174, 66, 0.2);
-            color: #ffae42;
-            font-weight: 600;
-        }
-        
-        .status-badge {
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: 500;
-        }
-        
-        .status-ativa {
-            background: #2ed573;
-            color: white;
-        }
-        
-        .status-inativa {
-            background: #ff4757;
-            color: white;
-        }
-        
-        .status-expirada {
-            background: #ffa502;
-            color: white;
-        }
-        
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-        
-        .stat-card {
-            background: rgba(0, 0, 0, 0.3);
-            padding: 20px;
-            border-radius: 15px;
-            border: 1px solid rgba(255, 174, 66, 0.3);
-            text-align: center;
-        }
-        
-        .stat-number {
-            font-size: 2.5em;
-            font-weight: bold;
-            color: #ffae42;
-            margin-bottom: 10px;
-        }
-        
-        .stat-label {
-            color: #aaa;
-            font-size: 14px;
-        }
-        
-        .alert {
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            border-left: 4px solid;
-        }
-        
-        .alert-success {
-            background: rgba(46, 213, 115, 0.1);
-            border-color: #2ed573;
-            color: #2ed573;
-        }
-        
-        .alert-error {
-            background: rgba(255, 71, 87, 0.1);
-            border-color: #ff4757;
-            color: #ff4757;
-        }
-        
-        .alert-info {
-            background: rgba(255, 174, 66, 0.1);
-            border-color: #ffae42;
-            color: #ffae42;
-        }
-        
-        .code-display {
-            background: rgba(0, 0, 0, 0.5);
-            padding: 15px;
-            border-radius: 8px;
-            font-family: 'Courier New', monospace;
-            font-size: 18px;
-            font-weight: bold;
-            color: #ffae42;
-            text-align: center;
-            margin: 15px 0;
-            border: 2px dashed #ffae42;
-        }
-        
-        .email-preview {
-            background: rgba(0, 0, 0, 0.3);
-            padding: 20px;
-            border-radius: 10px;
-            border: 1px solid #444;
-            margin-top: 20px;
-        }
-        
+      .admin-container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 20px;
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        min-height: 100vh;
+        color: white;
+      }
+
+      .admin-header {
+        text-align: center;
+        margin-bottom: 30px;
+        padding: 20px;
+        background: rgba(255, 174, 66, 0.1);
+        border-radius: 15px;
+        border: 1px solid #ffae42;
+      }
+
+      .admin-tabs {
+        display: flex;
+        margin-bottom: 30px;
+        background: rgba(0, 0, 0, 0.3);
+        border-radius: 10px;
+        overflow: hidden;
+      }
+
+      .tab-button {
+        flex: 1;
+        padding: 15px;
+        background: transparent;
+        border: none;
+        color: #aaa;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        font-size: 14px;
+        font-weight: 500;
+      }
+
+      .tab-button.active {
+        background: #ffae42;
+        color: #1a1a2e;
+      }
+
+      .tab-content {
+        display: none;
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 15px;
+        padding: 25px;
+        border: 1px solid rgba(255, 174, 66, 0.3);
+      }
+
+      .tab-content.active {
+        display: block;
+      }
+
+      .form-group {
+        margin-bottom: 20px;
+      }
+
+      .form-group label {
+        display: block;
+        margin-bottom: 8px;
+        color: #ffae42;
+        font-weight: 500;
+      }
+
+      .form-group input,
+      .form-group select,
+      .form-group textarea {
+        width: 100%;
+        padding: 12px;
+        border: 1px solid #444;
+        border-radius: 8px;
+        background: rgba(0, 0, 0, 0.3);
+        color: white;
+        font-size: 14px;
+      }
+
+      .form-group input:focus,
+      .form-group select:focus,
+      .form-group textarea:focus {
+        outline: none;
+        border-color: #ffae42;
+        box-shadow: 0 0 10px rgba(255, 174, 66, 0.3);
+      }
+
+      .btn-admin {
+        background: linear-gradient(45deg, #ffae42, #ff8c00);
+        color: white;
+        border: none;
+        padding: 12px 25px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-weight: 500;
+        transition: all 0.3s ease;
+        margin-right: 10px;
+        margin-bottom: 10px;
+      }
+
+      .btn-admin:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(255, 174, 66, 0.4);
+      }
+
+      .btn-danger {
+        background: linear-gradient(45deg, #ff4757, #ff3742);
+      }
+
+      .btn-success {
+        background: linear-gradient(45deg, #2ed573, #1dd1a1);
+      }
+
+      .licenses-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 20px;
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 10px;
+        overflow: hidden;
+      }
+
+      .licenses-table th,
+      .licenses-table td {
+        padding: 12px;
+        text-align: left;
+        border-bottom: 1px solid rgba(255, 174, 66, 0.2);
+      }
+
+      .licenses-table th {
+        background: rgba(255, 174, 66, 0.2);
+        color: #ffae42;
+        font-weight: 600;
+      }
+
+      .status-badge {
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 500;
+      }
+
+      .status-ativa {
+        background: #2ed573;
+        color: white;
+      }
+
+      .status-inativa {
+        background: #ff4757;
+        color: white;
+      }
+
+      .status-expirada {
+        background: #ffa502;
+        color: white;
+      }
+
+      .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 20px;
+        margin-bottom: 30px;
+      }
+
+      .stat-card {
+        background: rgba(0, 0, 0, 0.3);
+        padding: 20px;
+        border-radius: 15px;
+        border: 1px solid rgba(255, 174, 66, 0.3);
+        text-align: center;
+      }
+
+      .stat-number {
+        font-size: 2.5em;
+        font-weight: bold;
+        color: #ffae42;
+        margin-bottom: 10px;
+      }
+
+      .stat-label {
+        color: #aaa;
+        font-size: 14px;
+      }
+
+      .alert {
+        padding: 15px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+        border-left: 4px solid;
+      }
+
+      .alert-success {
+        background: rgba(46, 213, 115, 0.1);
+        border-color: #2ed573;
+        color: #2ed573;
+      }
+
+      .alert-error {
+        background: rgba(255, 71, 87, 0.1);
+        border-color: #ff4757;
+        color: #ff4757;
+      }
+
+      .alert-info {
+        background: rgba(255, 174, 66, 0.1);
+        border-color: #ffae42;
+        color: #ffae42;
+      }
+
+      .code-display {
+        background: rgba(0, 0, 0, 0.5);
+        padding: 15px;
+        border-radius: 8px;
+        font-family: "Courier New", monospace;
+        font-size: 18px;
+        font-weight: bold;
+        color: #ffae42;
+        text-align: center;
+        margin: 15px 0;
+        border: 2px dashed #ffae42;
+      }
+
+      .email-preview {
+        background: rgba(0, 0, 0, 0.3);
+        padding: 20px;
+        border-radius: 10px;
+        border: 1px solid #444;
+        margin-top: 20px;
+      }
+
+      .form-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+      }
+
+      @media (max-width: 768px) {
         .form-row {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
+          grid-template-columns: 1fr;
         }
-        
-        @media (max-width: 768px) {
-            .form-row {
-                grid-template-columns: 1fr;
-            }
-            
-            .admin-tabs {
-                flex-direction: column;
-            }
+
+        .admin-tabs {
+          flex-direction: column;
         }
+      }
     </style>
-</head>
-<body>
+  </head>
+  <body>
     <div class="admin-container">
-        <div class="admin-header">
-            <h1>🔧 DerivBot - Painel Administrativo</h1>
-            <p>Gerencie licenças e monitore o sistema</p>
-            <div style="margin-top: 15px;">
-                <button onclick="window.location.href='/painel'" class="btn-admin">🏠 Voltar ao Painel</button>
-                <button onclick="window.location.href='/logout'" class="btn-admin btn-danger">🚪 Sair</button>
-            </div>
+      <div class="admin-header">
+        <h1>🔧 DerivBot - Painel Administrativo</h1>
+        <p>Gerencie licenças e monitore o sistema</p>
+        <div style="margin-top: 15px">
+          <button onclick="window.location.href='/painel'" class="btn-admin">
+            🏠 Voltar ao Painel
+          </button>
+          <button
+            onclick="window.location.href='/logout'"
+            class="btn-admin btn-danger"
+          >
+            🚪 Sair
+          </button>
+        </div>
+      </div>
+
+      <!-- Alertas -->
+      <div id="alerts"></div>
+
+      <!-- Abas de Navegação -->
+      <div class="admin-tabs">
+        <button class="tab-button active" onclick="showTab('dashboard')">
+          📊 Dashboard
+        </button>
+        <button class="tab-button" onclick="showTab('generate')">
+          ➕ Gerar Licença
+        </button>
+        <button class="tab-button" onclick="showTab('manage')">
+          📋 Gerenciar
+        </button>
+        <button class="tab-button" onclick="showTab('email')">
+          📧 Email Config
+        </button>
+        <button class="tab-button" onclick="showTab('api')">🔌 API</button>
+      </div>
+
+      <!-- Dashboard -->
+      <div id="dashboard" class="tab-content active">
+        <h2>📊 Estatísticas do Sistema</h2>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-number" id="total-licenses">0</div>
+            <div class="stat-label">Total de Licenças</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-number" id="active-licenses">0</div>
+            <div class="stat-label">Licenças Ativas</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-number" id="expired-licenses">0</div>
+            <div class="stat-label">Licenças Expiradas</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-number" id="today-generated">0</div>
+            <div class="stat-label">Geradas Hoje</div>
+          </div>
         </div>
 
-        <!-- Alertas -->
-        <div id="alerts"></div>
+        <h3>📈 Licenças Recentes</h3>
+        <div id="recent-licenses"></div>
+      </div>
 
-        <!-- Abas de Navegação -->
-        <div class="admin-tabs">
-            <button class="tab-button active" onclick="showTab('dashboard')">📊 Dashboard</button>
-            <button class="tab-button" onclick="showTab('generate')">➕ Gerar Licença</button>
-            <button class="tab-button" onclick="showTab('manage')">📋 Gerenciar</button>
-            <button class="tab-button" onclick="showTab('email')">📧 Email Config</button>
-            <button class="tab-button" onclick="showTab('api')">🔌 API</button>
+      <!-- Gerar Licença -->
+      <div id="generate" class="tab-content">
+        <h2>➕ Gerar Nova Licença</h2>
+        <form id="generate-form">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="license-type">Tipo de Licença:</label>
+              <select id="license-type" name="tipo" required>
+                <option value="vitalicio">Vitalício</option>
+                <option value="anual">Anual</option>
+                <option value="mensal">Mensal</option>
+                <option value="teste">Teste (7 dias)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="client-email">Email do Cliente:</label>
+              <input
+                type="email"
+                id="client-email"
+                name="email"
+                placeholder="cliente@email.com"
+              />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="client-name">Nome do Cliente:</label>
+              <input
+                type="text"
+                id="client-name"
+                name="nome"
+                placeholder="Nome completo"
+              />
+            </div>
+            <div class="form-group">
+              <label for="license-notes">Observações:</label>
+              <input
+                type="text"
+                id="license-notes"
+                name="observacoes"
+                placeholder="Informações adicionais"
+              />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>
+              <input
+                type="checkbox"
+                id="send-email"
+                name="enviar_email"
+                checked
+              />
+              Enviar instruções por email automaticamente
+            </label>
+          </div>
+
+          <button type="submit" class="btn-admin">🎫 Gerar Licença</button>
+        </form>
+
+        <div id="generated-license" style="display: none">
+          <h3>✅ Licença Gerada com Sucesso!</h3>
+          <div class="code-display" id="license-code"></div>
+          <button onclick="copyLicenseCode()" class="btn-admin">
+            📋 Copiar Código
+          </button>
+          <button onclick="sendEmailManual()" class="btn-admin btn-success">
+            📧 Enviar Email
+          </button>
+        </div>
+      </div>
+
+      <!-- Gerenciar Licenças -->
+      <div id="manage" class="tab-content">
+        <h2>📋 Gerenciar Licenças</h2>
+        <div style="margin-bottom: 20px">
+          <button onclick="loadLicenses()" class="btn-admin">
+            🔄 Atualizar Lista
+          </button>
+          <button onclick="exportLicenses()" class="btn-admin">
+            📥 Exportar CSV
+          </button>
         </div>
 
-        <!-- Dashboard -->
-        <div id="dashboard" class="tab-content active">
-            <h2>📊 Estatísticas do Sistema</h2>
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <div class="stat-number" id="total-licenses">0</div>
-                    <div class="stat-label">Total de Licenças</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number" id="active-licenses">0</div>
-                    <div class="stat-label">Licenças Ativas</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number" id="expired-licenses">0</div>
-                    <div class="stat-label">Licenças Expiradas</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number" id="today-generated">0</div>
-                    <div class="stat-label">Geradas Hoje</div>
-                </div>
+        <div id="licenses-container">
+          <table class="licenses-table" id="licenses-table">
+            <thead>
+              <tr>
+                <th>Código</th>
+                <th>Tipo</th>
+                <th>Status</th>
+                <th>Cliente</th>
+                <th>Criação</th>
+                <th>Validade</th>
+                <th>Ações</th>
+              </tr>
+            </thead>
+            <tbody id="licenses-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Configuração de Email -->
+      <div id="email" class="tab-content">
+        <h2>📧 Configuração de Email</h2>
+        <form id="email-config-form">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="smtp-server">Servidor SMTP:</label>
+              <input
+                type="text"
+                id="smtp-server"
+                name="smtp_server"
+                placeholder="smtp.gmail.com"
+              />
             </div>
-            
-            <h3>📈 Licenças Recentes</h3>
-            <div id="recent-licenses"></div>
+            <div class="form-group">
+              <label for="smtp-port">Porta:</label>
+              <input
+                type="number"
+                id="smtp-port"
+                name="smtp_port"
+                placeholder="587"
+              />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="email-user">Email:</label>
+              <input
+                type="email"
+                id="email-user"
+                name="email_user"
+                placeholder="seu@email.com"
+              />
+            </div>
+            <div class="form-group">
+              <label for="email-pass">Senha:</label>
+              <input
+                type="password"
+                id="email-pass"
+                name="email_pass"
+                placeholder="senha_do_app"
+              />
+            </div>
+          </div>
+
+          <button type="submit" class="btn-admin">
+            💾 Salvar Configuração
+          </button>
+          <button
+            type="button"
+            onclick="testEmail()"
+            class="btn-admin btn-success"
+          >
+            📧 Testar Email
+          </button>
+        </form>
+
+        <h3>📝 Preview do Email</h3>
+        <div class="email-preview" id="email-preview">
+          <!-- Preview será carregado aqui -->
+        </div>
+      </div>
+
+      <!-- API -->
+      <div id="api" class="tab-content">
+        <h2>🔌 API para Integração</h2>
+        <div class="alert alert-info">
+          <strong>ℹ️ Informação:</strong> Use esta API para integrar com seu
+          sistema de vendas.
         </div>
 
-        <!-- Gerar Licença -->
-        <div id="generate" class="tab-content">
-            <h2>➕ Gerar Nova Licença</h2>
-            <form id="generate-form">
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="license-type">Tipo de Licença:</label>
-                        <select id="license-type" name="tipo" required>
-                            <option value="vitalicio">Vitalício</option>
-                            <option value="anual">Anual</option>
-                            <option value="mensal">Mensal</option>
-                            <option value="teste">Teste (7 dias)</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="client-email">Email do Cliente:</label>
-                        <input type="email" id="client-email" name="email" placeholder="cliente@email.com">
-                    </div>
-                </div>
-                
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="client-name">Nome do Cliente:</label>
-                        <input type="text" id="client-name" name="nome" placeholder="Nome completo">
-                    </div>
-                    <div class="form-group">
-                        <label for="license-notes">Observações:</label>
-                        <input type="text" id="license-notes" name="observacoes" placeholder="Informações adicionais">
-                    </div>
-                </div>
-                
-                <div class="form-group">
-                    <label>
-                        <input type="checkbox" id="send-email" name="enviar_email" checked>
-                        Enviar instruções por email automaticamente
-                    </label>
-                </div>
-                
-                <button type="submit" class="btn-admin">🎫 Gerar Licença</button>
-            </form>
-            
-            <div id="generated-license" style="display: none;">
-                <h3>✅ Licença Gerada com Sucesso!</h3>
-                <div class="code-display" id="license-code"></div>
-                <button onclick="copyLicenseCode()" class="btn-admin">📋 Copiar Código</button>
-                <button onclick="sendEmailManual()" class="btn-admin btn-success">📧 Enviar Email</button>
-            </div>
-        </div>
+        <h3>🔑 Endpoint para Gerar Licença</h3>
+        <div class="code-display">POST /api/admin/generate-license</div>
 
-        <!-- Gerenciar Licenças -->
-        <div id="manage" class="tab-content">
-            <h2>📋 Gerenciar Licenças</h2>
-            <div style="margin-bottom: 20px;">
-                <button onclick="loadLicenses()" class="btn-admin">🔄 Atualizar Lista</button>
-                <button onclick="exportLicenses()" class="btn-admin">📥 Exportar CSV</button>
-            </div>
-            
-            <div id="licenses-container">
-                <table class="licenses-table" id="licenses-table">
-                    <thead>
-                        <tr>
-                            <th>Código</th>
-                            <th>Tipo</th>
-                            <th>Status</th>
-                            <th>Cliente</th>
-                            <th>Criação</th>
-                            <th>Validade</th>
-                            <th>Ações</th>
-                        </tr>
-                    </thead>
-                    <tbody id="licenses-tbody">
-                    </tbody>
-                </table>
-            </div>
-        </div>
-
-        <!-- Configuração de Email -->
-        <div id="email" class="tab-content">
-            <h2>📧 Configuração de Email</h2>
-            <form id="email-config-form">
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="smtp-server">Servidor SMTP:</label>
-                        <input type="text" id="smtp-server" name="smtp_server" placeholder="smtp.gmail.com">
-                    </div>
-                    <div class="form-group">
-                        <label for="smtp-port">Porta:</label>
-                        <input type="number" id="smtp-port" name="smtp_port" placeholder="587">
-                    </div>
-                </div>
-                
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="email-user">Email:</label>
-                        <input type="email" id="email-user" name="email_user" placeholder="seu@email.com">
-                    </div>
-                    <div class="form-group">
-                        <label for="email-pass">Senha:</label>
-                        <input type="password" id="email-pass" name="email_pass" placeholder="senha_do_app">
-                    </div>
-                </div>
-                
-                <button type="submit" class="btn-admin">💾 Salvar Configuração</button>
-                <button type="button" onclick="testEmail()" class="btn-admin btn-success">📧 Testar Email</button>
-            </form>
-            
-            <h3>📝 Preview do Email</h3>
-            <div class="email-preview" id="email-preview">
-                <!-- Preview será carregado aqui -->
-            </div>
-        </div>
-
-        <!-- API -->
-        <div id="api" class="tab-content">
-            <h2>🔌 API para Integração</h2>
-            <div class="alert alert-info">
-                <strong>ℹ️ Informação:</strong> Use esta API para integrar com seu sistema de vendas.
-            </div>
-            
-            <h3>🔑 Endpoint para Gerar Licença</h3>
-            <div class="code-display">
-                POST /api/admin/generate-license
-            </div>
-            
-            <h4>📋 Parâmetros (JSON):</h4>
-            <pre style="background: rgba(0,0,0,0.3); padding: 15px; border-radius: 8px; color: #aaa;">
+        <h4>📋 Parâmetros (JSON):</h4>
+        <pre
+          style="
+            background: rgba(0, 0, 0, 0.3);
+            padding: 15px;
+            border-radius: 8px;
+            color: #aaa;
+          "
+        >
 {
     "tipo": "vitalicio|anual|mensal|teste",
     "email": "cliente@email.com",
@@ -430,118 +514,160 @@
     "enviar_email": true,
     "api_key": "SUA_CHAVE_API"
 }
-            </pre>
-            
-            <h4>📤 Resposta de Sucesso:</h4>
-            <pre style="background: rgba(0,0,0,0.3); padding: 15px; border-radius: 8px; color: #2ed573;">
+            </pre
+        >
+
+        <h4>📤 Resposta de Sucesso:</h4>
+        <pre
+          style="
+            background: rgba(0, 0, 0, 0.3);
+            padding: 15px;
+            border-radius: 8px;
+            color: #2ed573;
+          "
+        >
 {
     "success": true,
     "codigo_licenca": "DERIVBOT-XXXX-XXXX",
     "message": "Licença gerada com sucesso",
     "email_enviado": true
 }
-            </pre>
-            
-            <div class="form-group">
-                <label for="api-key">Chave API Atual:</label>
-                <input type="text" id="api-key" readonly>
-                <button onclick="generateApiKey()" class="btn-admin">🔄 Gerar Nova Chave</button>
-            </div>
+            </pre
+        >
+
+        <div class="form-group">
+          <label for="api-key">Chave API Atual:</label>
+          <input type="text" id="api-key" readonly />
+          <button onclick="generateApiKey()" class="btn-admin">
+            🔄 Gerar Nova Chave
+          </button>
         </div>
+      </div>
     </div>
 
     <script>
-        // Variáveis globais
-        let currentLicenseCode = '';
-        
-        // Função para mostrar abas
-        function showTab(tabName) {
-            // Esconder todas as abas
-            document.querySelectorAll('.tab-content').forEach(tab => {
-                tab.classList.remove('active');
-            });
-            
-            // Remover classe active de todos os botões
-            document.querySelectorAll('.tab-button').forEach(btn => {
-                btn.classList.remove('active');
-            });
-            
-            // Mostrar aba selecionada
-            document.getElementById(tabName).classList.add('active');
-            event.target.classList.add('active');
-            
-            // Carregar dados específicos da aba
-            if (tabName === 'dashboard') {
-                loadDashboard();
-            } else if (tabName === 'manage') {
-                loadLicenses();
-            } else if (tabName === 'email') {
-                loadEmailConfig();
-            } else if (tabName === 'api') {
-                loadApiKey();
-            }
-        }
-        
-        // Função para mostrar alertas
-        function showAlert(message, type = 'info') {
-            const alertsContainer = document.getElementById('alerts');
-            const alert = document.createElement('div');
-            alert.className = `alert alert-${type}`;
-            alert.innerHTML = message;
-            
-            alertsContainer.appendChild(alert);
-            
-            // Remover alerta após 5 segundos
-            setTimeout(() => {
-                alert.remove();
-            }, 5000);
-        }
-        
-        // Carregar dashboard
-        function loadDashboard() {
-            fetch('/api/admin/stats')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        document.getElementById('total-licenses').textContent = data.stats.total;
-                        document.getElementById('active-licenses').textContent = data.stats.ativas;
-                        document.getElementById('expired-licenses').textContent = data.stats.expiradas;
-                        document.getElementById('today-generated').textContent = data.stats.hoje;
-                        
-                        // Carregar licenças recentes
-                        const recentContainer = document.getElementById('recent-licenses');
-                        recentContainer.innerHTML = '';
-                        
-                        if (data.recentes && data.recentes.length > 0) {
-                            const table = createLicensesTable(data.recentes.slice(0, 5));
-                            recentContainer.appendChild(table);
-                        } else {
-                            recentContainer.innerHTML = '<p style="color: #aaa;">Nenhuma licença encontrada.</p>';
-                        }
-                    }
-                })
-                .catch(error => {
-                    console.error('Erro ao carregar dashboard:', error);
-                    showAlert('Erro ao carregar estatísticas', 'error');
-                });
-        }
-        
-        // Inicializar página
-        document.addEventListener('DOMContentLoaded', function() {
-            loadDashboard();
-            
-            // Event listener para formulário de geração
-            document.getElementById('generate-form').addEventListener('submit', function(e) {
-                e.preventDefault();
-                generateLicense();
-            });
-            
-            // Event listener para configuração de email
-            document.getElementById('email-config-form').addEventListener('submit', function(e) {
-                e.preventDefault();
-                saveEmailConfig();
-            });
+      // Função para mostrar abas
+      function showTab(tabName) {
+        console.log("showTab chamado para:", tabName);
+
+        // Esconder todas as abas
+        const tabs = document.querySelectorAll(".tab-content");
+        console.log("Abas encontradas:", tabs.length);
+        tabs.forEach((tab) => {
+          tab.classList.remove("active");
         });
+
+        // Remover classe active de todos os botões
+        const buttons = document.querySelectorAll(".tab-button");
+        console.log("Botões encontrados:", buttons.length);
+        buttons.forEach((btn) => {
+          btn.classList.remove("active");
+        });
+
+        // Mostrar aba selecionada
+        const selectedTab = document.getElementById(tabName);
+        console.log("Aba selecionada:", selectedTab);
+        if (selectedTab) {
+          selectedTab.classList.add("active");
+        }
+
+        // Adicionar classe active ao botão clicado
+        const selectedButton = document.querySelector(
+          `button[onclick="showTab('${tabName}')"]`
+        );
+        console.log("Botão selecionado:", selectedButton);
+        if (selectedButton) {
+          selectedButton.classList.add("active");
+        }
+
+        // Carregar dados específicos da aba
+        if (tabName === "dashboard") {
+          loadDashboard();
+        } else if (tabName === "manage") {
+          loadLicenses();
+        } else if (tabName === "email") {
+          loadEmailConfig();
+        } else if (tabName === "api") {
+          loadApiKey();
+        }
+      }
+
+      // Função para mostrar alertas
+      function showAlert(message, type = "info") {
+        console.log("showAlert chamado:", message, type);
+        const alertsContainer = document.getElementById("alerts");
+        if (!alertsContainer) {
+          console.error("Container de alertas não encontrado");
+          return;
+        }
+
+        const alert = document.createElement("div");
+        alert.className = `alert alert-${type}`;
+        alert.innerHTML = message;
+
+        alertsContainer.appendChild(alert);
+
+        // Remover alerta após 5 segundos
+        setTimeout(() => {
+          if (alert.parentNode) {
+            alert.remove();
+          }
+        }, 5000);
+      }
+
+      // Carregar dashboard
+      function loadDashboard() {
+        console.log("Iniciando loadDashboard...");
+        fetch("/api/admin/stats")
+          .then((response) => {
+            console.log("Resposta recebida:", response);
+            return response.json();
+          })
+          .then((data) => {
+            console.log("Dados recebidos:", data);
+            if (data.success) {
+              document.getElementById("total-licenses").textContent =
+                data.stats.total;
+              document.getElementById("active-licenses").textContent =
+                data.stats.ativas;
+              document.getElementById("expired-licenses").textContent =
+                data.stats.expiradas;
+              document.getElementById("today-generated").textContent =
+                data.stats.hoje;
+
+              // Carregar licenças recentes
+              const recentContainer =
+                document.getElementById("recent-licenses");
+              recentContainer.innerHTML = "";
+
+              if (data.recentes && data.recentes.length > 0) {
+                recentContainer.innerHTML =
+                  '<p style="color: #aaa;">Licenças encontradas: ' +
+                  data.recentes.length +
+                  "</p>";
+              } else {
+                recentContainer.innerHTML =
+                  '<p style="color: #aaa;">Nenhuma licença encontrada.</p>';
+              }
+            }
+          })
+          .catch((error) => {
+            console.error("Erro ao carregar dashboard:", error);
+            showAlert("Erro ao carregar estatísticas", "error");
+          });
+      }
+
+      // Inicializar página
+      document.addEventListener("DOMContentLoaded", function () {
+        console.log("Admin.js carregado com sucesso!");
+
+        // Carregar dashboard por padrão
+        console.log("Carregando dashboard...");
+        loadDashboard();
+      });
     </script>
-</body>
+
+    <!-- Carregar JavaScript adicional do admin -->
+    <script src="{{ url_for('static', filename='admin.js') }}"></script>
+  </body>
 </html>

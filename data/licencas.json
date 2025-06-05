@@ -1,1 +1,20 @@
-{}
+{
+  "licenca_001": {
+    "codigo_licenca": "DERIVBOT-82YM-E0VX",
+    "status": "ativa",
+    "plano": "vitalicio",
+    "validade": "VITALICIO",
+    "hwid": "0x030002000400",
+    "ip": "200.152.5.211",
+    "deriv_real": "CR8745847",
+    "deriv_demo": "",
+    "token_deriv_real": "Do7lyZOQhsITkvY",
+    "token_deriv_demo": "lAClG6Rqe5z0hux",
+    "data_criacao": "2025-06-05 15:00:00",
+    "data_vinculacao": "2025-06-05 18:00:00",
+    "cliente_email": "",
+    "cliente_nome": "Lucas Vinicius",
+    "observacoes": "Licença principal do desenvolvedor - TOKENS VINCULADOS - SISTEMA PRONTO",
+    "ultimo_acesso": "2025-06-05 18:13:36"
+  }
+}

@@ -420,9 +420,40 @@ def verificar_token(token):
                     saldo = 10000.0
                 break
 
-        # Se não encontrou nas licenças, retorna erro
+        # Se não encontrou nas licenças, tenta validar diretamente com a API
         if not conta_id:
-            return False, "Token não encontrado nas licenças"
+            # Tenta conectar diretamente com o token para validar
+            try:
+                # Cria uma instância temporária do motor para validar o token
+                from core.motor import Motor
+
+                motor_temp = Motor()
+                if motor_temp.conectar(token):
+                    # Aguarda um pouco para garantir que a autorização foi processada
+                    import time
+
+                    time.sleep(3)  # Aumentei para 3 segundos
+
+                    # Usa a nova função para obter o ID da conta
+                    conta_id = motor_temp.obter_id_conta()
+                    if conta_id:
+                        logger.info(f"✅ ID da conta obtido da API: {conta_id}")
+                        saldo = motor_temp.obter_saldo()
+                        logger.info(f"✅ Saldo obtido da API: {saldo}")
+                    else:
+                        conta_id = f"account_{token[:8]}"  # Fallback
+                        logger.warning("⚠️ ID da conta não obtido da API")
+                        saldo = 0.0
+
+                    tipo_conta = "real" if not token.startswith("demo") else "demo"
+                    if not saldo:
+                        saldo = 0.0
+                    motor_temp.desconectar()
+                else:
+                    return False, "Token inválido ou sem permissões adequadas"
+            except Exception as e:
+                logger.error(f"Erro ao validar token diretamente: {e}")
+                return False, "Token inválido"
 
         # Retorna dados da licença
         return True, {
@@ -714,73 +745,42 @@ def index():
     if "token" in session:
         return redirect(url_for("painel"))
 
-    # Tenta autenticação automática
+    # Tenta login automático com verificação 2/3 fatores
+    logger.info("Verificando possibilidade de login automático...")
     licenca_auto = verificar_autenticacao_automatica()
-    if licenca_auto:
-        logger.info("Realizando login automático...")
 
-        # Obtém os tokens da licença
+    if licenca_auto:
+        logger.info(
+            f"🎉 Login automático aprovado para licença {licenca_auto.get('codigo_licenca')}"
+        )
+
+        # Obtém tokens da licença
         token_real, token_demo = obter_tokens_da_licenca(licenca_auto)
 
-        # Usa token real como principal (obrigatório para login automático)
         if token_real:
-            token_principal = token_real
-            tipo_conta_preferido = "real"
-        else:
-            # Se não há token real, não faz login automático
-            logger.warning(
-                "Login automático cancelado: token real não encontrado na licença"
+            # Configura sessão automaticamente
+            session["token"] = token_real
+            session["tipo_conta"] = "real"
+            session["codigo_licenca"] = licenca_auto["codigo_licenca"]
+            session["deriv_account"] = licenca_auto.get(
+                "deriv_real", f"account_{token_real[:8]}"
             )
-            token_principal = None
+            session["token_real"] = token_real
+            session["token_demo"] = token_demo
+            session["saldo"] = 0
 
-        if token_principal:
-            # Verifica se o token ainda é válido
-            valido, resultado = verificar_token(token_principal)
+            # Inicializa a API
+            inicializar_api(token_real)
 
-            if valido:
-                # Configura a sessão automaticamente
-                session.permanent = True
-                session["codigo_licenca"] = licenca_auto.get("codigo_licenca")
-                session["token"] = token_principal
-
-                # Usa o tipo de conta baseado no token escolhido
-                session["tipo_conta"] = tipo_conta_preferido
-
-                # Salva ambos os tokens na sessão para permitir troca de conta
-                token_real, token_demo = obter_tokens_da_licenca(licenca_auto)
-                session["token_real"] = token_real
-                session["token_demo"] = token_demo
-
-                # Salva os tokens na sessão
-                if token_real:
-                    session["token_real"] = token_real
-                if token_demo:
-                    session["token_demo"] = token_demo
-
-                # Usa o ID da conta da licença se disponível
-                if tipo_conta_preferido == "real" and licenca_auto.get("deriv_real"):
-                    session["deriv_account"] = licenca_auto["deriv_real"]
-                elif tipo_conta_preferido == "demo" and licenca_auto.get("deriv_demo"):
-                    session["deriv_account"] = licenca_auto["deriv_demo"]
-                else:
-                    session["deriv_account"] = resultado.get("conta_id", "")
-
-                session["saldo"] = resultado.get("saldo", 0)
-
-                # Inicializa a API
-                inicializar_api(token_principal)
-
-                logger.info("Login automático realizado com sucesso")
-                return redirect(url_for("painel"))
-            else:
-                logger.warning(
-                    "Token da licença inválido, redirecionando para login manual"
-                )
-        else:
-            logger.warning(
-                "Nenhum token encontrado na licença, redirecionando para login manual"
+            logger.info(
+                f"✅ Login automático realizado com sucesso - Licença: {licenca_auto['codigo_licenca']}"
             )
+            return redirect(url_for("painel"))
+        else:
+            logger.warning("⚠️ Licença encontrada mas tokens não disponíveis")
 
+    # Se não conseguiu login automático, mostra tela de login
+    logger.info("Login automático não disponível - redirecionando para login manual")
     return render_template("login.html")
 
 
@@ -796,39 +796,40 @@ def validar_codigo_licenca(codigo_licenca):
 
 
 def obter_conta_id_do_token(token):
-    """Obtém o ID da conta a partir do token da Deriv usando verificar_token"""
+    """Obtém o ID da conta a partir do token da Deriv - versão simplificada para primeiro login"""
     try:
-        # Usa a função verificar_token existente que já funciona
-        valido, resultado = verificar_token(token)
-        if not valido:
-            return None
+        # Para primeiro login, retorna dados básicos que serão atualizados depois
+        # Isso permite que o usuário faça login e vincule a licença
 
-        # Extrai informações da conta do resultado
-        account_id = resultado.get("conta_id", "")
-        if not account_id:
-            return None
-
-        account_type = "real" if account_id.startswith("CR") else "demo"
+        # Determina tipo baseado no padrão do token (se possível)
+        account_type = "real"  # Assume real por padrão
 
         return {
-            "account_id": account_id,
+            "account_id": f"temp_{token[:8]}",  # ID temporário baseado no token
             "account_type": account_type,
-            "currency": resultado.get("moeda", "USD"),
-            "balance": resultado.get("saldo", 0),
+            "currency": "USD",
+            "balance": 0,
         }
     except Exception as e:
         logger.error(f"Erro ao obter ID da conta: {e}")
         return None
 
 
-@app.route("/login", methods=["POST"])
+@app.route("/login", methods=["GET", "POST"])
 def login():
     """Rota de login com validação de licença"""
+    if request.method == "GET":
+        # Limpa a sessão e mostra tela de login
+        session.clear()
+        return render_template("login.html")
+
     token_real = request.form.get("token_deriv_real", "").strip()
     token_demo = request.form.get("token_deriv_demo", "").strip()
     codigo_licenca = request.form.get("codigo_licenca", "").strip()
 
-    logger.info(f"Tentativa de login - Código: {codigo_licenca}")
+    logger.info(
+        f"🔐 TENTATIVA DE LOGIN - Código: {codigo_licenca}, Token: {token_real[:10]}..."
+    )
 
     # Verifica se o código de licença foi fornecido
     if not codigo_licenca:
@@ -842,100 +843,181 @@ def login():
     if not validar_codigo_licenca(codigo_licenca):
         return render_template("login.html", erro="Código de licença inválido")
 
-    # Verifica se o token real é válido
-    valido, resultado = verificar_token(token_real)
-    if not valido:
-        return render_template("login.html", erro=f"Token real inválido: {resultado}")
-
-    # Obtém informações da conta real
-    conta_info = obter_conta_id_do_token(token_real)
-    if not conta_info:
+    # Validação básica do formato do token
+    if len(token_real) < 10:
         return render_template(
-            "login.html", erro="Não foi possível validar a conta real"
+            "login.html", erro="Token real deve ter pelo menos 10 caracteres"
         )
 
     # Carrega licenças existentes
     licencas = carregar_licencas()
+    logger.info(f"🔍 DEBUG: Licenças carregadas: {list(licencas.keys())}")
+    logger.info(f"🔍 DEBUG: Procurando código: '{codigo_licenca}'")
+
     licenca = None
+    licenca_key = None
 
     # Procura licença existente pelo código
     for key, l in licencas.items():
-        if l.get("codigo_licenca") == codigo_licenca:
+        codigo_na_licenca = l.get("codigo_licenca")
+        logger.info(
+            f"🔍 DEBUG: Comparando '{codigo_licenca}' com '{codigo_na_licenca}'"
+        )
+        if codigo_na_licenca == codigo_licenca:
             licenca = l
             licenca_key = key
-            logger.info(f"Licença existente encontrada: {codigo_licenca}")
+            logger.info(f"✅ Licença existente encontrada: {codigo_licenca}")
             break
 
     if not licenca:
-        # Cria nova licença (primeira vinculação)
-        logger.info(f"Criando nova licença para código: {codigo_licenca}")
+        logger.error(
+            f"❌ DEBUG: Licença '{codigo_licenca}' não encontrada nas licenças: {list(licencas.keys())}"
+        )
+        return render_template(
+            "login.html", erro=f"Código de licença '{codigo_licenca}' não encontrado"
+        )
 
-        # Obtém HWID e IP atuais
-        hwid_atual = obter_hwid()
-        ip_atual = obter_ip()
+    # Licença existe - atualiza dados
+    logger.info(f"Licença encontrada: {codigo_licenca}")
 
-        # Cria nova licença
-        licenca_key = f"licenca_{len(licencas) + 1:03d}"
-        licenca = {
-            "codigo_licenca": codigo_licenca,
-            "status": "ativa",
-            "plano": "vitalicio",  # Por padrão, pode ser alterado
-            "validade": "VITALICIO",
-            "hwid": hwid_atual,
-            "ip": ip_atual,
-            "deriv_real": conta_info["account_id"],
-            "deriv_demo": "",  # Será preenchido se token demo for fornecido
-            "token_deriv_real": token_real,
-            "token_deriv_demo": token_demo if token_demo else "",
-            "data_criacao": datetime.now().strftime("%Y-%m-%d"),
-            "data_vinculacao": datetime.now().strftime("%Y-%m-%d"),
-            "observacoes": f"Licença criada automaticamente - Conta: {conta_info['account_id']}",
-        }
+    hwid_atual = obter_hwid()
+    ip_atual = obter_ip()
 
-        # Adiciona token demo se fornecido
-        if token_demo:
-            conta_demo_info = obter_conta_id_do_token(token_demo)
-            if conta_demo_info:
-                licenca["deriv_demo"] = conta_demo_info["account_id"]
+    # Atualiza HWID e IP se estiverem vazios (primeiro acesso)
+    if not licenca.get("hwid"):
+        licenca["hwid"] = hwid_atual
+        logger.info(f"HWID vinculado: {hwid_atual}")
 
-        # Salva a nova licença
-        licencas[licenca_key] = licenca
-        salvar_licencas(licencas)
+    if not licenca.get("ip"):
+        licenca["ip"] = ip_atual
+        logger.info(f"IP vinculado: {ip_atual}")
 
-        logger.info(f"Nova licença criada e salva: {licenca_key}")
-    else:
-        # Licença existente - verifica se dispositivo está autorizado
-        hwid_atual = obter_hwid()
-        ip_atual = obter_ip()
+    # Atualiza tokens (usuário pode trocar tokens livremente)
+    licenca["token_deriv_real"] = token_real
+    if token_demo:
+        licenca["token_deriv_demo"] = token_demo
 
-        # Verifica autorização (HWID ou IP deve conferir)
-        hwid_confere = hwid_atual and hwid_atual == licenca.get("hwid")
-        ip_confere = ip_atual and ip_atual == licenca.get("ip")
+    # Obtém o ID da conta real usando uma abordagem mais robusta
+    try:
+        logger.info(
+            f"🔍 Tentando obter ID da conta real para token: {token_real[:10]}..."
+        )
 
-        if not (hwid_confere or ip_confere):
-            logger.warning(
-                f"Dispositivo não autorizado - HWID: {hwid_atual}, IP: {ip_atual}"
+        # Usa a função verificar_token que já funciona
+        valido, resultado = verificar_token(token_real)
+        if valido and resultado:
+            conta_id = resultado.get("conta_id", "")
+            if (
+                conta_id and conta_id != f"account_{token_real[:8]}"
+            ):  # Verifica se não é ID temporário
+                licenca["deriv_real"] = conta_id
+                logger.info(f"✅ ID da conta real obtido e salvo: {conta_id}")
+
+                # Atualiza saldo se disponível
+                saldo = resultado.get("saldo", 0)
+                if saldo:
+                    logger.info(f"✅ Saldo da conta: {saldo}")
+            else:
+                # Se não conseguiu obter ID real, força uma nova tentativa
+                logger.warning(
+                    "⚠️ ID da conta não obtido ou é temporário, tentando novamente..."
+                )
+
+                # Tenta conectar diretamente para forçar obtenção do ID
+                from core.motor import Motor
+
+                motor_temp = Motor()
+                if motor_temp.conectar(token_real):
+                    import time
+
+                    time.sleep(5)  # Aguarda mais tempo
+
+                    # Primeiro tenta o método normal
+                    conta_id_real = motor_temp.obter_id_conta()
+                    if not conta_id_real:
+                        # Se não funcionou, força uma nova requisição
+                        logger.info("🔄 Tentando método forçado para obter ID real...")
+                        conta_id_real = motor_temp.obter_id_conta_forcado()
+
+                    if conta_id_real:
+                        licenca["deriv_real"] = conta_id_real
+                        logger.info(
+                            f"✅ ID da conta real obtido na segunda tentativa: {conta_id_real}"
+                        )
+
+                        # Obtém e salva o saldo da conta real
+                        try:
+                            saldo_real = motor_temp.obter_saldo()
+                            if saldo_real:
+                                licenca["saldo_real"] = saldo_real
+                                logger.info(f"💰 Saldo real salvo: {saldo_real}")
+                        except Exception as e:
+                            logger.error(f"Erro ao obter saldo real: {e}")
+                    else:
+                        logger.error(
+                            "❌ Não foi possível obter ID real da conta mesmo com método forçado"
+                        )
+
+                    motor_temp.desconectar()
+                else:
+                    logger.error("❌ Não foi possível conectar para obter ID da conta")
+        else:
+            logger.warning(f"⚠️ Não foi possível validar o token: {resultado}")
+    except Exception as e:
+        logger.error(f"❌ Erro ao obter ID da conta real: {e}")
+
+    # Obtém o ID da conta demo se token demo foi fornecido
+    if token_demo:
+        try:
+            logger.info(
+                f"🔍 Tentando obter ID da conta demo para token: {token_demo[:10]}..."
             )
-            return render_template(
-                "login.html", erro="Dispositivo não autorizado para esta licença"
-            )
 
-        # Atualiza tokens na licença existente
-        licenca["token_deriv_real"] = token_real
-        if token_demo:
-            licenca["token_deriv_demo"] = token_demo
-            conta_demo_info = obter_conta_id_do_token(token_demo)
-            if conta_demo_info:
-                licenca["deriv_demo"] = conta_demo_info["account_id"]
+            # Tenta conectar diretamente para obter o ID da conta demo
+            from core.motor import Motor
 
-        # Atualiza conta real se mudou
-        licenca["deriv_real"] = conta_info["account_id"]
+            motor_temp = Motor()
+            if motor_temp.conectar(token_demo):
+                import time
 
-        # Salva alterações
-        licencas[licenca_key] = licenca
-        salvar_licencas(licencas)
+                time.sleep(3)  # Aguarda conexão
 
-        logger.info(f"Licença atualizada: {codigo_licenca}")
+                # Primeiro tenta o método normal
+                conta_id_demo = motor_temp.obter_id_conta()
+                if not conta_id_demo:
+                    # Se não funcionou, força uma nova requisição
+                    logger.info("🔄 Tentando método forçado para obter ID demo...")
+                    conta_id_demo = motor_temp.obter_id_conta_forcado()
+
+                if conta_id_demo:
+                    licenca["deriv_demo"] = conta_id_demo
+                    logger.info(f"✅ ID da conta demo obtido e salvo: {conta_id_demo}")
+
+                    # Obtém e salva o saldo da conta demo
+                    try:
+                        saldo_demo = motor_temp.obter_saldo()
+                        if saldo_demo:
+                            licenca["saldo_demo"] = saldo_demo
+                            logger.info(f"💰 Saldo demo salvo: {saldo_demo}")
+                    except Exception as e:
+                        logger.error(f"Erro ao obter saldo demo: {e}")
+                else:
+                    logger.error("❌ Não foi possível obter ID da conta demo")
+
+                motor_temp.desconectar()
+            else:
+                logger.error("❌ Não foi possível conectar para obter ID da conta demo")
+        except Exception as e:
+            logger.error(f"❌ Erro ao obter ID da conta demo: {e}")
+
+    # Atualiza data de último acesso
+    licenca["ultimo_acesso"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # Salva alterações
+    licencas[licenca_key] = licenca
+    salvar_licencas(licencas)
+
+    logger.info(f"Licença atualizada: {codigo_licenca}")
 
     # Marca a sessão como permanente
     session.permanent = True
@@ -946,13 +1028,21 @@ def login():
     session["tipo_conta"] = "real"  # Sempre inicia com conta real
     session["token_real"] = token_real
     session["token_demo"] = token_demo if token_demo else ""
-    session["deriv_account"] = conta_info["account_id"]
-    session["saldo"] = conta_info.get("balance", 0)
+
+    # Usa o ID da conta real da licença se disponível
+    if licenca.get("deriv_real"):
+        session["deriv_account"] = licenca["deriv_real"]
+        logger.info(f"✅ Usando conta real: {licenca['deriv_real']}")
+    else:
+        session["deriv_account"] = f"account_{token_real[:8]}"  # ID temporário
+        logger.warning("⚠️ Usando ID temporário - conta real não identificada")
+
+    session["saldo"] = 0
 
     # Inicializa a API com o token real
     inicializar_api(token_real)
 
-    logger.info(f"Login realizado com sucesso - Conta: {conta_info['account_id']}")
+    logger.info(f"Login realizado com sucesso - Licença: {codigo_licenca}")
 
     # Redireciona para o painel
     return redirect(url_for("painel"))
@@ -961,8 +1051,10 @@ def login():
 @app.route("/painel")
 def painel():
     """Rota do painel"""
-    if "token" not in session:
-        return redirect(url_for("index"))
+    # Verifica autenticação e redireciona se necessário
+    redirect_response = redirecionar_se_nao_autenticado()
+    if redirect_response:
+        return redirect_response
 
     # Carrega o histórico
     carregar_historico()
@@ -980,18 +1072,26 @@ def painel():
                 break
 
     # Prepara dados para o template
-    tipo_conta = session.get("tipo_conta", "demo")
+    tipo_conta = session.get("tipo_conta", "real")  # Sempre real por padrão
     saldo = session.get("saldo", 0)
 
     # Informações da licença
     if licenca:
-        codigo_licenca = licenca.get("codigo_licenca")
-        plano = licenca.get("plano", "free")
-        validade = licenca.get("validade", "N/A")
+        codigo_licenca = licenca.get("codigo_licenca", "N/A")
+        plano = licenca.get("plano", "vitalicio")  # Usa o plano real da licença
+        validade = licenca.get(
+            "validade", "VITALICIO"
+        )  # Usa a validade real da licença
+        logger.info(
+            f"✅ Licença encontrada no painel: {codigo_licenca} - Plano: {plano} - Validade: {validade}"
+        )
     else:
-        codigo_licenca = "N/A"
-        plano = "free"
-        validade = "N/A"
+        # Se não encontrou a licença, há um problema - redireciona para login
+        logger.error(
+            f"❌ Licença não encontrada no painel para código: {session.get('codigo_licenca')}"
+        )
+        session.clear()
+        return redirect(url_for("index"))
 
     return render_template(
         "painel.html",
@@ -1013,20 +1113,55 @@ def logout():
 
 @app.route("/admin")
 def admin():
-    """Rota do painel administrativo"""
-    # Verificar se está logado
-    if "token" not in session:
-        return redirect(url_for("index"))
-
+    """Rota do painel administrativo - ACESSO TEMPORARIAMENTE LIBERADO"""
+    # TEMPORÁRIO: Liberando acesso para configuração inicial
+    logger.info("🔧 Acesso temporário ao admin liberado para configuração")
     return render_template("admin.html")
 
 
 # === ROTAS DA API ADMIN ===
 
 
+def verificar_autenticacao():
+    """Verifica se o usuário está autenticado"""
+    return "token" in session and session.get("codigo_licenca")
+
+
+def redirecionar_se_nao_autenticado():
+    """Redireciona para login se não estiver autenticado"""
+    if not verificar_autenticacao():
+        logger.warning("Usuário não autenticado - redirecionando para login")
+        return redirect(url_for("index"))
+    return None
+
+
+def verificar_acesso_admin():
+    """Função auxiliar para verificar acesso admin"""
+    # Verificar se está logado
+    if not verificar_autenticacao():
+        return False, "Não autenticado"
+
+    # Verificar licença autorizada
+    codigo_licenca = session.get("codigo_licenca")
+    LICENCAS_ADMIN_AUTORIZADAS = ["DERIVBOT-82YM-E0VX"]
+
+    if codigo_licenca not in LICENCAS_ADMIN_AUTORIZADAS:
+        logger.warning(
+            f"Tentativa de acesso API admin não autorizado - Licença: {codigo_licenca}"
+        )
+        return False, "Acesso negado"
+
+    return True, "Autorizado"
+
+
 @app.route("/api/admin/stats")
 def admin_stats():
     """API para estatísticas do dashboard"""
+    # Verificar acesso admin
+    autorizado, mensagem = verificar_acesso_admin()
+    if not autorizado:
+        return jsonify({"success": False, "message": mensagem}), 403
+
     try:
         stats = gerador_admin.get_license_stats()
         recentes = gerador_admin.get_recent_licenses(5)
@@ -1040,6 +1175,11 @@ def admin_stats():
 @app.route("/api/admin/generate-license", methods=["POST"])
 def admin_generate_license():
     """API para gerar nova licença"""
+    # Verificar acesso admin
+    autorizado, mensagem = verificar_acesso_admin()
+    if not autorizado:
+        return jsonify({"success": False, "message": mensagem}), 403
+
     try:
         data = request.get_json()
 
@@ -1050,23 +1190,20 @@ def admin_generate_license():
         observacoes = data.get("observacoes", "")
         enviar_email = data.get("enviar_email", False)
 
-        # Gerar licença
+        # Gerar licença (com envio automático de email)
         sucesso, codigo_licenca, mensagem = gerador_admin.create_license(
-            tipo=tipo, email=email, nome=nome, observacoes=observacoes
+            tipo=tipo,
+            email=email,
+            nome=nome,
+            observacoes=observacoes,
+            enviar_email=enviar_email,
         )
 
         if not sucesso:
             return jsonify({"success": False, "message": mensagem})
 
-        # Enviar email se solicitado
-        email_enviado = False
-        if enviar_email and email:
-            email_sucesso, email_msg = gerador_admin.send_email(
-                codigo_licenca, email, nome
-            )
-            email_enviado = email_sucesso
-            if not email_sucesso:
-                logger.warning(f"Falha ao enviar email: {email_msg}")
+        # Verificar se email foi enviado (informação já está na mensagem)
+        email_enviado = "email enviado automaticamente" in mensagem.lower()
 
         return jsonify(
             {
@@ -1085,6 +1222,11 @@ def admin_generate_license():
 @app.route("/api/admin/licenses")
 def admin_licenses():
     """API para listar todas as licenças"""
+    # Verificar acesso admin
+    autorizado, mensagem = verificar_acesso_admin()
+    if not autorizado:
+        return jsonify({"success": False, "message": mensagem}), 403
+
     try:
         licenses = gerador_admin.get_recent_licenses(100)  # Todas as licenças
         return jsonify({"success": True, "licenses": licenses})
@@ -1096,6 +1238,11 @@ def admin_licenses():
 @app.route("/api/admin/delete-license", methods=["POST"])
 def admin_delete_license():
     """API para excluir licença"""
+    # Verificar acesso admin
+    autorizado, mensagem = verificar_acesso_admin()
+    if not autorizado:
+        return jsonify({"success": False, "message": mensagem}), 403
+
     try:
         data = request.get_json()
         codigo_licenca = data.get("codigo_licenca")
@@ -1116,6 +1263,11 @@ def admin_delete_license():
 @app.route("/api/admin/send-email", methods=["POST"])
 def admin_send_email():
     """API para enviar email manual"""
+    # Verificar acesso admin
+    autorizado, mensagem = verificar_acesso_admin()
+    if not autorizado:
+        return jsonify({"success": False, "message": mensagem}), 403
+
     try:
         data = request.get_json()
         codigo_licenca = data.get("codigo_licenca")
@@ -1141,6 +1293,11 @@ def admin_send_email():
 @app.route("/api/admin/resend-email", methods=["POST"])
 def admin_resend_email():
     """API para reenviar email de uma licença"""
+    # Verificar acesso admin
+    autorizado, mensagem = verificar_acesso_admin()
+    if not autorizado:
+        return jsonify({"success": False, "message": mensagem}), 403
+
     try:
         data = request.get_json()
         codigo_licenca = data.get("codigo_licenca")
@@ -1183,6 +1340,11 @@ def admin_resend_email():
 @app.route("/api/admin/email-config")
 def admin_email_config():
     """API para obter configuração de email"""
+    # Verificar acesso admin
+    autorizado, mensagem = verificar_acesso_admin()
+    if not autorizado:
+        return jsonify({"success": False, "message": mensagem}), 403
+
     try:
         config = gerador_admin.load_config()
         email_config = config.get("email", {})
@@ -1203,6 +1365,11 @@ def admin_email_config():
 @app.route("/api/admin/save-email-config", methods=["POST"])
 def admin_save_email_config():
     """API para salvar configuração de email"""
+    # Verificar acesso admin
+    autorizado, mensagem = verificar_acesso_admin()
+    if not autorizado:
+        return jsonify({"success": False, "message": mensagem}), 403
+
     try:
         data = request.get_json()
 
@@ -1225,6 +1392,11 @@ def admin_save_email_config():
 @app.route("/api/admin/test-email", methods=["POST"])
 def admin_test_email():
     """API para testar configuração de email"""
+    # Verificar acesso admin
+    autorizado, mensagem = verificar_acesso_admin()
+    if not autorizado:
+        return jsonify({"success": False, "message": mensagem}), 403
+
     try:
         data = request.get_json()
         email_destino = data.get("email_destino")
@@ -1245,6 +1417,11 @@ def admin_test_email():
 @app.route("/api/admin/email-preview")
 def admin_email_preview():
     """API para preview do template de email"""
+    # Verificar acesso admin
+    autorizado, mensagem = verificar_acesso_admin()
+    if not autorizado:
+        return jsonify({"success": False, "message": mensagem}), 403
+
     try:
         template = gerador_admin.get_email_template(
             "DERIVBOT-XXXX-XXXX", "Cliente Exemplo"
@@ -1258,6 +1435,11 @@ def admin_email_preview():
 @app.route("/api/admin/api-key")
 def admin_api_key():
     """API para obter chave API atual"""
+    # Verificar acesso admin
+    autorizado, mensagem = verificar_acesso_admin()
+    if not autorizado:
+        return jsonify({"success": False, "message": mensagem}), 403
+
     try:
         config = gerador_admin.load_config()
         api_key = config.get("api_key", "")
@@ -1271,6 +1453,11 @@ def admin_api_key():
 @app.route("/api/admin/generate-api-key", methods=["POST"])
 def admin_generate_api_key():
     """API para gerar nova chave API"""
+    # Verificar acesso admin
+    autorizado, mensagem = verificar_acesso_admin()
+    if not autorizado:
+        return jsonify({"success": False, "message": mensagem}), 403
+
     try:
         new_key = gerador_admin.generate_new_api_key()
         return jsonify({"success": True, "api_key": new_key})
@@ -1282,6 +1469,11 @@ def admin_generate_api_key():
 @app.route("/api/admin/export-licenses")
 def admin_export_licenses():
     """API para exportar licenças em CSV"""
+    # Verificar acesso admin
+    autorizado, mensagem = verificar_acesso_admin()
+    if not autorizado:
+        return jsonify({"success": False, "message": mensagem}), 403
+
     try:
         import csv
         import io
@@ -1367,23 +1559,20 @@ def public_generate_license():
         if not email:
             return jsonify({"success": False, "message": "Email é obrigatório"}), 400
 
-        # Gerar licença
+        # Gerar licença (com envio automático de email)
         sucesso, codigo_licenca, mensagem = gerador_admin.create_license(
-            tipo=tipo, email=email, nome=nome, observacoes=observacoes
+            tipo=tipo,
+            email=email,
+            nome=nome,
+            observacoes=observacoes,
+            enviar_email=enviar_email,
         )
 
         if not sucesso:
             return jsonify({"success": False, "message": mensagem}), 500
 
-        # Enviar email se solicitado
-        email_enviado = False
-        if enviar_email:
-            email_sucesso, email_msg = gerador_admin.send_email(
-                codigo_licenca, email, nome
-            )
-            email_enviado = email_sucesso
-            if not email_sucesso:
-                logger.warning(f"Falha ao enviar email: {email_msg}")
+        # Verificar se email foi enviado (informação já está na mensagem)
+        email_enviado = "email enviado automaticamente" in mensagem.lower()
 
         logger.info(f"Licença gerada via API: {codigo_licenca} para {email}")
 
@@ -1391,7 +1580,7 @@ def public_generate_license():
             {
                 "success": True,
                 "codigo_licenca": codigo_licenca,
-                "message": "Licença gerada com sucesso",
+                "message": mensagem,
                 "email_enviado": email_enviado,
             }
         )
@@ -1661,6 +1850,134 @@ def status_robo():
         return jsonify(response_data)
     except Exception as e:
         logger.error(f"Erro ao obter status do robô: {e}")
+        return jsonify({"status": "erro", "mensagem": str(e)}), 500
+
+
+@app.route("/saldo_atual")
+def saldo_atual():
+    """Rota para obter saldo atual da conta"""
+    try:
+        # Verifica autenticação
+        if "token" not in session:
+            return jsonify({"status": "erro", "mensagem": "Não autenticado"}), 401
+
+        saldo = 0.0
+        tipo_conta = session.get("tipo_conta", "real")
+
+        # Obtém saldo do motor se conectado
+        if motor and motor.conectado:
+            try:
+                saldo = motor.obter_saldo()
+                logger.info(f"💰 Saldo obtido do motor: {saldo} ({tipo_conta})")
+            except Exception as e:
+                logger.error(f"Erro ao obter saldo do motor: {e}")
+
+        # Se não conseguiu obter do motor, tenta obter da licença
+        if saldo == 0.0:
+            try:
+                licencas = carregar_licencas()
+                codigo_licenca = session.get("codigo_licenca")
+
+                for licenca in licencas.values():
+                    if licenca.get("codigo_licenca") == codigo_licenca:
+                        # Obtém saldo salvo na licença (se houver)
+                        saldo_salvo = licenca.get("saldo_" + tipo_conta, 0.0)
+                        if saldo_salvo:
+                            saldo = saldo_salvo
+                            logger.info(
+                                f"💰 Saldo obtido da licença: {saldo} ({tipo_conta})"
+                            )
+                        break
+            except Exception as e:
+                logger.error(f"Erro ao obter saldo da licença: {e}")
+
+        return jsonify(
+            {
+                "status": "ok",
+                "saldo": saldo,
+                "tipo_conta": tipo_conta,
+                "formatado": f"${saldo:.2f}",
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Erro ao obter saldo atual: {e}")
+        return jsonify({"status": "erro", "mensagem": str(e)}), 500
+
+
+@app.route("/selecionar_conta", methods=["POST"])
+def selecionar_conta():
+    """Rota para alternar entre conta real e demo"""
+    try:
+        # Verifica autenticação
+        if "token" not in session:
+            return jsonify({"status": "erro", "mensagem": "Não autenticado"}), 401
+
+        data = request.get_json()
+        tipo_conta = data.get("tipo_conta", "real")
+
+        if tipo_conta not in ["real", "demo"]:
+            return (
+                jsonify({"status": "erro", "mensagem": "Tipo de conta inválido"}),
+                400,
+            )
+
+        # Obtém tokens da sessão
+        token_real = session.get("token_real", "")
+        token_demo = session.get("token_demo", "")
+
+        if tipo_conta == "real" and not token_real:
+            return (
+                jsonify({"status": "erro", "mensagem": "Token real não disponível"}),
+                400,
+            )
+
+        if tipo_conta == "demo" and not token_demo:
+            return (
+                jsonify({"status": "erro", "mensagem": "Token demo não disponível"}),
+                400,
+            )
+
+        # Atualiza sessão
+        session["tipo_conta"] = tipo_conta
+        token_ativo = token_real if tipo_conta == "real" else token_demo
+        session["token"] = token_ativo
+
+        # Obtém ID da conta da licença
+        licencas = carregar_licencas()
+        codigo_licenca = session.get("codigo_licenca")
+
+        for licenca in licencas.values():
+            if licenca.get("codigo_licenca") == codigo_licenca:
+                if tipo_conta == "real":
+                    session["deriv_account"] = licenca.get(
+                        "deriv_real", f"account_{token_real[:8]}"
+                    )
+                else:
+                    session["deriv_account"] = licenca.get(
+                        "deriv_demo", f"account_{token_demo[:8]}"
+                    )
+                break
+
+        # Reinicializa motor com novo token
+        if motor:
+            try:
+                motor.desconectar()
+                motor.conectar(token_ativo)
+                logger.info(f"🔄 Motor reconectado com conta {tipo_conta}")
+            except Exception as e:
+                logger.error(f"Erro ao reconectar motor: {e}")
+
+        return jsonify(
+            {
+                "status": "ok",
+                "tipo_conta": tipo_conta,
+                "mensagem": f"Conta {tipo_conta} selecionada com sucesso",
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Erro ao selecionar conta: {e}")
         return jsonify({"status": "erro", "mensagem": str(e)}), 500
 
 
