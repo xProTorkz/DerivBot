@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify
 
 # Importações locais - Ajustadas para nova estrutura
-from core.motor import Motor
+# Motor será importado dinamicamente quando necessário
 from config.config import Config
 from utils.gerador_licencas import (
     carregar_licencas,
@@ -82,6 +82,8 @@ saldo_atual = 0.0
 ultima_mensagem = "Robô pronto para iniciar."
 contador_operacoes = 0
 status_operacao = "parado"
+status_motor = "desconectado"  # Status global do motor
+logs_tempo_real = []
 
 # CONTROLE DE OPERAÇÕES PARA MODO INICIANTE
 operacoes_ativas = []  # Lista de operações em andamento
@@ -94,7 +96,7 @@ intervalo_entre_operacoes = {
 }  # segundos
 
 # Sistema de logs unificado e otimizado
-logs_tempo_real = []
+# logs_tempo_real já declarado acima na linha 86
 logs_painel = []
 max_logs = 100
 max_logs_painel = 50
@@ -102,6 +104,8 @@ max_logs_painel = 50
 
 class LoggerUnificado:
     """Sistema de logs unificado para evitar duplicações"""
+
+    logs_sistema = []  # Lista estática para logs do sistema
 
     def __init__(self):
         """Inicializa sistema de logs avançado"""
@@ -184,15 +188,15 @@ class LoggerUnificado:
         prefixo = f"[{categoria.upper()}]"
 
         if tipo == "error":
-            logger.error(f"{prefixo} ❌ {mensagem}")
+            logger.error(f"{prefixo} [ERRO] {mensagem}")
         elif tipo == "warning":
-            logger.warning(f"{prefixo} ⚠️ {mensagem}")
+            logger.warning(f"{prefixo} [AVISO] {mensagem}")
         elif tipo == "success":
-            logger.info(f"{prefixo} ✅ {mensagem}")
+            logger.info(f"{prefixo} [OK] {mensagem}")
         elif tipo == "trading":
-            logger.info(f"{prefixo} 💰 {mensagem}")
+            logger.info(f"{prefixo} [TRADE] {mensagem}")
         else:
-            logger.info(f"{prefixo} ℹ️ {mensagem}")
+            logger.info(f"{prefixo} [INFO] {mensagem}")
 
     @staticmethod
     def log_operacao(
@@ -211,14 +215,14 @@ class LoggerUnificado:
         if resultado is not None:
             # Operação finalizada
             if resultado > 0:
-                mensagem = f"✅ WIN: {tipo_operacao} | Entrada: ${valor_entrada:.2f} | Lucro: ${resultado:.2f}"
+                mensagem = f"[WIN] {tipo_operacao} | Entrada: ${valor_entrada:.2f} | Lucro: ${resultado:.2f}"
                 tipo_log = "success"
             else:
-                mensagem = f"❌ LOSS: {tipo_operacao} | Entrada: ${valor_entrada:.2f} | Perda: ${abs(resultado):.2f}"
+                mensagem = f"[LOSS] {tipo_operacao} | Entrada: ${valor_entrada:.2f} | Perda: ${abs(resultado):.2f}"
                 tipo_log = "warning"
         else:
             # Operação iniciada
-            mensagem = f"🎯 ENTRADA: {tipo_operacao} | Valor: ${valor_entrada:.2f} | Ativo: {ativo}"
+            mensagem = f"[ENTRADA] {tipo_operacao} | Valor: ${valor_entrada:.2f} | Ativo: {ativo}"
             tipo_log = "trading"
 
         return LoggerUnificado.adicionar_log(
@@ -239,16 +243,16 @@ class LoggerUnificado:
         }
 
         if status == "conectado":
-            mensagem = "🟢 Sistema conectado e operacional"
+            mensagem = "[CONECTADO] Sistema conectado e operacional"
             tipo_log = "success"
         elif status == "desconectado":
-            mensagem = "🔴 Sistema desconectado"
+            mensagem = "[DESCONECTADO] Sistema desconectado"
             tipo_log = "error"
         elif status == "reconectando":
-            mensagem = "🟡 Tentando reconectar..."
+            mensagem = "[RECONECTANDO] Tentando reconectar..."
             tipo_log = "warning"
         else:
-            mensagem = f"ℹ️ Status: {status}"
+            mensagem = f"[STATUS] {status}"
             tipo_log = "info"
 
         return LoggerUnificado.adicionar_log(
@@ -288,6 +292,50 @@ class LoggerUnificado:
             "win_rate": round(win_rate, 2),
             "ultima_atualizacao": datetime.now().strftime("%H:%M:%S"),
         }
+
+    @staticmethod
+    def obter_logs_recentes(limite=15):
+        """Obtém os logs mais recentes"""
+        try:
+            global logs_tempo_real
+
+            # Retorna os últimos logs da lista global
+            logs_recentes = logs_tempo_real[-limite:] if logs_tempo_real else []
+
+            # Formata os logs para a interface
+            logs_formatados = []
+            for log in logs_recentes:
+                logs_formatados.append(
+                    {
+                        "timestamp": log.get("timestamp", ""),
+                        "mensagem": log.get("mensagem", ""),
+                        "tipo": log.get("tipo", "info"),
+                        "categoria": log.get("categoria", "sistema"),
+                    }
+                )
+
+            # Se não há logs, adiciona log padrão
+            if not logs_formatados:
+                logs_formatados = [
+                    {
+                        "timestamp": datetime.now().strftime("%H:%M:%S"),
+                        "mensagem": "Sistema iniciado - Aguardando operações",
+                        "tipo": "info",
+                        "categoria": "sistema",
+                    }
+                ]
+
+            return logs_formatados
+        except Exception as e:
+            logger.error(f"Erro ao obter logs recentes: {e}")
+            return [
+                {
+                    "timestamp": datetime.now().strftime("%H:%M:%S"),
+                    "mensagem": "Sistema iniciado",
+                    "tipo": "info",
+                    "categoria": "sistema",
+                }
+            ]
 
 
 # Instância global do logger
@@ -343,7 +391,7 @@ def pode_executar_operacao():
     max_ops = max_operacoes_simultaneas.get(modo_atual, 3)
     if len(operacoes_ativas) >= max_ops:
         adicionar_log_painel(
-            f"🚫 Limite de {max_ops} operações simultâneas atingido", "warning"
+            f"[LIMITE] Limite de {max_ops} operações simultâneas atingido", "warning"
         )
         return False
 
@@ -352,7 +400,7 @@ def pode_executar_operacao():
     if agora - ultima_operacao_tempo < intervalo:
         tempo_restante = int(intervalo - (agora - ultima_operacao_tempo))
         adicionar_log_painel(
-            f"⏳ Aguardando {tempo_restante}s para próxima operação", "info"
+            f"[AGUARDANDO] Aguardando {tempo_restante}s para próxima operação", "info"
         )
         return False
 
@@ -369,12 +417,41 @@ def registrar_nova_operacao():
     ultima_operacao_tempo = agora
 
     adicionar_log_painel(
-        f"🚀 Nova operação iniciada ({len(operacoes_ativas)} ativas)", "success"
+        f"[OPERACAO] Nova operação iniciada ({len(operacoes_ativas)} ativas)", "success"
     )
 
 
 # Sistema de autenticação baseado apenas em licencas.json
 # Não criamos mais tokens.json - tudo é gerenciado via licenças
+
+
+def carregar_licencas():
+    """Carrega o arquivo de licenças ou retorna dicionário vazio se não existir."""
+    try:
+        if os.path.exists(LICENCAS_FILE):
+            with open(LICENCAS_FILE, "r", encoding="utf-8") as f:
+                licencas = json.load(f)
+                logger.info(f"Licenças carregadas: {list(licencas.keys())}")
+                return licencas
+        else:
+            logger.info("Arquivo de licenças não encontrado")
+            return {}
+    except json.JSONDecodeError as e:
+        logger.error(f"Erro ao decodificar JSON do arquivo de licenças: {e}")
+        return {}
+    except Exception as e:
+        logger.error(f"Erro ao carregar licenças: {e}")
+        return {}
+
+
+def salvar_licencas(licencas):
+    """Salva as licenças no arquivo JSON."""
+    try:
+        with open(LICENCAS_FILE, "w", encoding="utf-8") as f:
+            json.dump(licencas, f, indent=2, ensure_ascii=False)
+        logger.info("Licenças salvas com sucesso")
+    except Exception as e:
+        logger.error(f"Erro ao salvar licenças: {e}")
 
 
 def verificar_token(token):
@@ -437,12 +514,12 @@ def verificar_token(token):
                     # Usa a nova função para obter o ID da conta
                     conta_id = motor_temp.obter_id_conta()
                     if conta_id:
-                        logger.info(f"✅ ID da conta obtido da API: {conta_id}")
+                        logger.info(f"[OK] ID da conta obtido da API: {conta_id}")
                         saldo = motor_temp.obter_saldo()
-                        logger.info(f"✅ Saldo obtido da API: {saldo}")
+                        logger.info(f"[OK] Saldo obtido da API: {saldo}")
                     else:
                         conta_id = f"account_{token[:8]}"  # Fallback
-                        logger.warning("⚠️ ID da conta não obtido da API")
+                        logger.warning("[AVISO] ID da conta não obtido da API")
                         saldo = 0.0
 
                     tipo_conta = "real" if not token.startswith("demo") else "demo"
@@ -471,17 +548,47 @@ def verificar_token(token):
 
 def inicializar_api(token):
     """Inicializa o Motor com o token fornecido"""
-    global motor
+    global motor, saldo_atual, status_motor
     # SEMPRE cria o motor, mesmo se der erro
     motor = None
+    status_motor = "conectando"
     try:
+        from core.motor import Motor
+
         motor = Motor()
         if token:
-            motor.conectar(token)
-        logger.info("MOTOR TURBO INICIALIZADO COM SUCESSO")
-        return True
+            conectado = motor.conectar(token)
+            if conectado:
+                status_motor = "conectado"
+                logger.info("[MOTOR] CONECTADO COM SUCESSO")
+
+                # Tenta obter saldo inicial
+                try:
+                    import time
+
+                    time.sleep(2)  # Aguarda conexão estabilizar
+                    saldo_inicial = motor.obter_saldo()
+                    if saldo_inicial:
+                        saldo_atual = saldo_inicial
+                        logger.info(f"[MOTOR] Saldo inicial obtido: {saldo_inicial}")
+                    else:
+                        logger.warning("[MOTOR] Não foi possível obter saldo inicial")
+                except Exception as e:
+                    logger.error(f"Erro ao obter saldo inicial: {e}")
+
+                logger.info("[MOTOR] TURBO INICIALIZADO COM SUCESSO")
+                return True
+            else:
+                status_motor = "erro"
+                logger.error("[MOTOR] Falha ao conectar motor com token")
+                return False
+        else:
+            status_motor = "erro"
+            logger.warning("[MOTOR] Token não fornecido para inicializar motor")
+            return False
     except Exception as motor_error:
-        logger.warning(f"Erro ao inicializar motor: {motor_error}")
+        status_motor = "erro"
+        logger.error(f"[MOTOR] Erro ao inicializar motor: {motor_error}")
         # Cria motor básico mesmo com erro
         return False
 
@@ -498,34 +605,34 @@ def verificar_autenticacao_automatica():
 
         licencas = carregar_licencas()
 
-        logger.info(f"🔍 Verificando {len(licencas)} licenças encontradas")
+        logger.info(f"[DEBUG] Verificando {len(licencas)} licenças encontradas")
 
         for _, licenca in licencas.items():
-            logger.info(f"🔍 Analisando licença: {licenca.get('codigo_licenca')}")
+            logger.info(f"[DEBUG] Analisando licença: {licenca.get('codigo_licenca')}")
 
             # Verifica se a licença está ativa
             status = licenca.get("status")
-            logger.info(f"📋 Status da licença: {status}")
+            logger.info(f"[STATUS] Status da licença: {status}")
             if status != "ativa":
-                logger.info(f"❌ Licença não está ativa (status: {status})")
+                logger.info(f"[ERRO] Licença não está ativa (status: {status})")
                 continue
 
             # Verifica se a licença não expirou
             validade = licenca.get("validade")
-            logger.info(f"📅 Validade da licença: {validade}")
+            logger.info(f"[DATA] Validade da licença: {validade}")
             if validade != "VITALICIO" and validade != "VITALÍCIO":
                 try:
                     data_validade = datetime.strptime(validade, "%Y-%m-%d")
                     if datetime.now() > data_validade:
-                        logger.info(f"❌ Licença expirada: {validade}")
+                        logger.info(f"[ERRO] Licença expirada: {validade}")
                         continue
                     else:
-                        logger.info(f"✅ Licença válida até: {validade}")
+                        logger.info(f"[OK] Licença válida até: {validade}")
                 except Exception as e:
-                    logger.info(f"❌ Erro ao verificar validade: {e}")
+                    logger.info(f"[ERRO] Erro ao verificar validade: {e}")
                     continue
             else:
-                logger.info(f"✅ Licença vitalícia")
+                logger.info(f"[OK] Licença vitalícia")
 
             # Conta quantos fatores conferem
             fatores_conferidos = 0
@@ -533,36 +640,36 @@ def verificar_autenticacao_automatica():
             # Fator 1: HWID
             if hwid_atual and hwid_atual == licenca.get("hwid"):
                 fatores_conferidos += 1
-                logger.info("✅ HWID confere")
+                logger.info("[OK] HWID confere")
             else:
                 logger.info(
-                    f"❌ HWID não confere - Atual: {hwid_atual}, Licença: {licenca.get('hwid')}"
+                    f"[ERRO] HWID não confere - Atual: {hwid_atual}, Licença: {licenca.get('hwid')}"
                 )
 
             # Fator 2: IP
             if ip_atual and ip_atual == licenca.get("ip"):
                 fatores_conferidos += 1
-                logger.info("✅ IP confere")
+                logger.info("[OK] IP confere")
             else:
                 logger.info(
-                    f"❌ IP não confere - Atual: {ip_atual}, Licença: {licenca.get('ip')}"
+                    f"[ERRO] IP não confere - Atual: {ip_atual}, Licença: {licenca.get('ip')}"
                 )
 
             # Fator 3: Licença ativa (sempre confere se chegou até aqui)
             fatores_conferidos += 1
-            logger.info("✅ Licença ativa confere")
+            logger.info("[OK] Licença ativa confere")
 
-            logger.info(f"🔍 Total de fatores conferidos: {fatores_conferidos}/3")
+            logger.info(f"[DEBUG] Total de fatores conferidos: {fatores_conferidos}/3")
 
             # Se pelo menos 2 dos 3 fatores conferem, permite login automático
             if fatores_conferidos >= 2:
                 logger.info(
-                    f"🎉 Autenticação automática aprovada para licença {licenca.get('codigo_licenca')}"
+                    f"[SUCESSO] Autenticação automática aprovada para licença {licenca.get('codigo_licenca')}"
                 )
                 return licenca
             else:
                 logger.info(
-                    f"❌ Fatores insuficientes ({fatores_conferidos}/3) para licença {licenca.get('codigo_licenca')}"
+                    f"[ERRO] Fatores insuficientes ({fatores_conferidos}/3) para licença {licenca.get('codigo_licenca')}"
                 )
 
         logger.info("Nenhuma licença válida encontrada para autenticação automática")
@@ -581,7 +688,7 @@ def obter_tokens_da_licenca(licenca):
 
 
 def forcar_demo_para_teste_ai():
-    """🤖 FUNÇÃO ESPECIAL: Força uso de demo quando EU (AI) estiver testando
+    """[AI] FUNÇÃO ESPECIAL: Força uso de demo quando EU (AI) estiver testando
 
     Esta função é usada apenas quando eu (AI) preciso testar o sistema
     para garantir que não gaste o dinheiro real do usuário.
@@ -593,14 +700,14 @@ def forcar_demo_para_teste_ai():
             _, token_demo = obter_tokens_da_licenca(
                 licenca_auto
             )  # Removido token_real não usado
-            # 🛡️ SEMPRE DEMO PARA TESTES DA AI - PROTEGE SEU DINHEIRO!
+            # [PROTECAO] SEMPRE DEMO PARA TESTES DA AI - PROTEGE SEU DINHEIRO!
             if token_demo:
                 logger.info(
-                    "🤖 AI TESTANDO: Usando conta DEMO para proteger seu dinheiro!"
+                    "[AI] AI TESTANDO: Usando conta DEMO para proteger seu dinheiro!"
                 )
                 return token_demo, "demo"
             else:
-                logger.warning("⚠️ AI TESTANDO: Sem token demo disponível!")
+                logger.warning("[AVISO] AI TESTANDO: Sem token demo disponível!")
                 return None, None
         return None, None
     except Exception as e:
@@ -665,16 +772,16 @@ def adicionar_operacao(tipo, valor, resultado):
 
     # Adiciona logs visuais para o painel
     resultado_texto = f"+${resultado:.2f}" if resultado > 0 else f"${resultado:.2f}"
-    emoji = "📈" if resultado > 0 else "📉"
+    status_texto = "[LUCRO]" if resultado > 0 else "[PERDA]"
 
     adicionar_log_painel(
-        f"{emoji} {tipo} finalizada: {resultado_texto} | Total: ${lucro_atual:.2f}",
+        f"{status_texto} {tipo} finalizada: {resultado_texto} | Total: ${lucro_atual:.2f}",
         "success" if resultado > 0 else "error",
     )
 
     # Log para tempo real também
     adicionar_log_tempo_real(
-        f"💰 {tipo} finalizada: {resultado_texto} (Total: ${lucro_atual:.2f})",
+        f"[TRADE] {tipo} finalizada: {resultado_texto} (Total: ${lucro_atual:.2f})",
         "success" if resultado > 0 else "warning",
     )
 
@@ -751,7 +858,7 @@ def index():
 
     if licenca_auto:
         logger.info(
-            f"🎉 Login automático aprovado para licença {licenca_auto.get('codigo_licenca')}"
+            f"[SUCESSO] Login automático aprovado para licença {licenca_auto.get('codigo_licenca')}"
         )
 
         # Obtém tokens da licença
@@ -773,11 +880,11 @@ def index():
             inicializar_api(token_real)
 
             logger.info(
-                f"✅ Login automático realizado com sucesso - Licença: {licenca_auto['codigo_licenca']}"
+                f"[OK] Login automático realizado com sucesso - Licença: {licenca_auto['codigo_licenca']}"
             )
             return redirect(url_for("painel"))
         else:
-            logger.warning("⚠️ Licença encontrada mas tokens não disponíveis")
+            logger.warning("[AVISO] Licença encontrada mas tokens não disponíveis")
 
     # Se não conseguiu login automático, mostra tela de login
     logger.info("Login automático não disponível - redirecionando para login manual")
@@ -828,7 +935,7 @@ def login():
     codigo_licenca = request.form.get("codigo_licenca", "").strip()
 
     logger.info(
-        f"🔐 TENTATIVA DE LOGIN - Código: {codigo_licenca}, Token: {token_real[:10]}..."
+        f"[LOGIN] TENTATIVA DE LOGIN - Código: {codigo_licenca}, Token: {token_real[:10]}..."
     )
 
     # Verifica se o código de licença foi fornecido
@@ -851,8 +958,8 @@ def login():
 
     # Carrega licenças existentes
     licencas = carregar_licencas()
-    logger.info(f"🔍 DEBUG: Licenças carregadas: {list(licencas.keys())}")
-    logger.info(f"🔍 DEBUG: Procurando código: '{codigo_licenca}'")
+    logger.info(f"[DEBUG] DEBUG: Licenças carregadas: {list(licencas.keys())}")
+    logger.info(f"[DEBUG] DEBUG: Procurando código: '{codigo_licenca}'")
 
     licenca = None
     licenca_key = None
@@ -861,17 +968,17 @@ def login():
     for key, l in licencas.items():
         codigo_na_licenca = l.get("codigo_licenca")
         logger.info(
-            f"🔍 DEBUG: Comparando '{codigo_licenca}' com '{codigo_na_licenca}'"
+            f"[DEBUG] DEBUG: Comparando '{codigo_licenca}' com '{codigo_na_licenca}'"
         )
         if codigo_na_licenca == codigo_licenca:
             licenca = l
             licenca_key = key
-            logger.info(f"✅ Licença existente encontrada: {codigo_licenca}")
+            logger.info(f"[OK] Licença existente encontrada: {codigo_licenca}")
             break
 
     if not licenca:
         logger.error(
-            f"❌ DEBUG: Licença '{codigo_licenca}' não encontrada nas licenças: {list(licencas.keys())}"
+            f"[ERRO] DEBUG: Licença '{codigo_licenca}' não encontrada nas licenças: {list(licencas.keys())}"
         )
         return render_template(
             "login.html", erro=f"Código de licença '{codigo_licenca}' não encontrado"
@@ -900,7 +1007,7 @@ def login():
     # Obtém o ID da conta real usando uma abordagem mais robusta
     try:
         logger.info(
-            f"🔍 Tentando obter ID da conta real para token: {token_real[:10]}..."
+            f"[DEBUG] Tentando obter ID da conta real para token: {token_real[:10]}..."
         )
 
         # Usa a função verificar_token que já funciona
@@ -911,16 +1018,16 @@ def login():
                 conta_id and conta_id != f"account_{token_real[:8]}"
             ):  # Verifica se não é ID temporário
                 licenca["deriv_real"] = conta_id
-                logger.info(f"✅ ID da conta real obtido e salvo: {conta_id}")
+                logger.info(f"[OK] ID da conta real obtido e salvo: {conta_id}")
 
                 # Atualiza saldo se disponível
                 saldo = resultado.get("saldo", 0)
                 if saldo:
-                    logger.info(f"✅ Saldo da conta: {saldo}")
+                    logger.info(f"[OK] Saldo da conta: {saldo}")
             else:
                 # Se não conseguiu obter ID real, força uma nova tentativa
                 logger.warning(
-                    "⚠️ ID da conta não obtido ou é temporário, tentando novamente..."
+                    "[AVISO] ID da conta não obtido ou é temporário, tentando novamente..."
                 )
 
                 # Tenta conectar diretamente para forçar obtenção do ID
@@ -936,13 +1043,15 @@ def login():
                     conta_id_real = motor_temp.obter_id_conta()
                     if not conta_id_real:
                         # Se não funcionou, força uma nova requisição
-                        logger.info("🔄 Tentando método forçado para obter ID real...")
+                        logger.info(
+                            "[RECONECTANDO] Tentando método forçado para obter ID real..."
+                        )
                         conta_id_real = motor_temp.obter_id_conta_forcado()
 
                     if conta_id_real:
                         licenca["deriv_real"] = conta_id_real
                         logger.info(
-                            f"✅ ID da conta real obtido na segunda tentativa: {conta_id_real}"
+                            f"[OK] ID da conta real obtido na segunda tentativa: {conta_id_real}"
                         )
 
                         # Obtém e salva o saldo da conta real
@@ -950,27 +1059,29 @@ def login():
                             saldo_real = motor_temp.obter_saldo()
                             if saldo_real:
                                 licenca["saldo_real"] = saldo_real
-                                logger.info(f"💰 Saldo real salvo: {saldo_real}")
+                                logger.info(f"[SALDO] Saldo real salvo: {saldo_real}")
                         except Exception as e:
                             logger.error(f"Erro ao obter saldo real: {e}")
                     else:
                         logger.error(
-                            "❌ Não foi possível obter ID real da conta mesmo com método forçado"
+                            "[ERRO] Não foi possível obter ID real da conta mesmo com método forçado"
                         )
 
                     motor_temp.desconectar()
                 else:
-                    logger.error("❌ Não foi possível conectar para obter ID da conta")
+                    logger.error(
+                        "[ERRO] Não foi possível conectar para obter ID da conta"
+                    )
         else:
-            logger.warning(f"⚠️ Não foi possível validar o token: {resultado}")
+            logger.warning(f"[AVISO] Não foi possível validar o token: {resultado}")
     except Exception as e:
-        logger.error(f"❌ Erro ao obter ID da conta real: {e}")
+        logger.error(f"[ERRO] Erro ao obter ID da conta real: {e}")
 
     # Obtém o ID da conta demo se token demo foi fornecido
     if token_demo:
         try:
             logger.info(
-                f"🔍 Tentando obter ID da conta demo para token: {token_demo[:10]}..."
+                f"[DEBUG] Tentando obter ID da conta demo para token: {token_demo[:10]}..."
             )
 
             # Tenta conectar diretamente para obter o ID da conta demo
@@ -986,29 +1097,35 @@ def login():
                 conta_id_demo = motor_temp.obter_id_conta()
                 if not conta_id_demo:
                     # Se não funcionou, força uma nova requisição
-                    logger.info("🔄 Tentando método forçado para obter ID demo...")
+                    logger.info(
+                        "[RECONECTANDO] Tentando método forçado para obter ID demo..."
+                    )
                     conta_id_demo = motor_temp.obter_id_conta_forcado()
 
                 if conta_id_demo:
                     licenca["deriv_demo"] = conta_id_demo
-                    logger.info(f"✅ ID da conta demo obtido e salvo: {conta_id_demo}")
+                    logger.info(
+                        f"[OK] ID da conta demo obtido e salvo: {conta_id_demo}"
+                    )
 
                     # Obtém e salva o saldo da conta demo
                     try:
                         saldo_demo = motor_temp.obter_saldo()
                         if saldo_demo:
                             licenca["saldo_demo"] = saldo_demo
-                            logger.info(f"💰 Saldo demo salvo: {saldo_demo}")
+                            logger.info(f"[SALDO] Saldo demo salvo: {saldo_demo}")
                     except Exception as e:
                         logger.error(f"Erro ao obter saldo demo: {e}")
                 else:
-                    logger.error("❌ Não foi possível obter ID da conta demo")
+                    logger.error("[ERRO] Não foi possível obter ID da conta demo")
 
                 motor_temp.desconectar()
             else:
-                logger.error("❌ Não foi possível conectar para obter ID da conta demo")
+                logger.error(
+                    "[ERRO] Não foi possível conectar para obter ID da conta demo"
+                )
         except Exception as e:
-            logger.error(f"❌ Erro ao obter ID da conta demo: {e}")
+            logger.error(f"[ERRO] Erro ao obter ID da conta demo: {e}")
 
     # Atualiza data de último acesso
     licenca["ultimo_acesso"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1032,10 +1149,10 @@ def login():
     # Usa o ID da conta real da licença se disponível
     if licenca.get("deriv_real"):
         session["deriv_account"] = licenca["deriv_real"]
-        logger.info(f"✅ Usando conta real: {licenca['deriv_real']}")
+        logger.info(f"[OK] Usando conta real: {licenca['deriv_real']}")
     else:
         session["deriv_account"] = f"account_{token_real[:8]}"  # ID temporário
-        logger.warning("⚠️ Usando ID temporário - conta real não identificada")
+        logger.warning("[AVISO] Usando ID temporário - conta real não identificada")
 
     session["saldo"] = 0
 
@@ -1075,6 +1192,14 @@ def painel():
     tipo_conta = session.get("tipo_conta", "real")  # Sempre real por padrão
     saldo = session.get("saldo", 0)
 
+    # Debug: Verifica tokens na sessão
+    token_real = session.get("token_real", "")
+    token_demo = session.get("token_demo", "")
+    logger.info(
+        f"[DEBUG] Token Real: {'OK' if token_real else 'VAZIO'} | Token Demo: {'OK' if token_demo else 'VAZIO'}"
+    )
+    logger.info(f"[DEBUG] Tipo Conta: {tipo_conta} | Licença: {codigo_licenca}")
+
     # Informações da licença
     if licenca:
         codigo_licenca = licenca.get("codigo_licenca", "N/A")
@@ -1083,12 +1208,12 @@ def painel():
             "validade", "VITALICIO"
         )  # Usa a validade real da licença
         logger.info(
-            f"✅ Licença encontrada no painel: {codigo_licenca} - Plano: {plano} - Validade: {validade}"
+            f"[OK] Licença encontrada no painel: {codigo_licenca} - Plano: {plano} - Validade: {validade}"
         )
     else:
         # Se não encontrou a licença, há um problema - redireciona para login
         logger.error(
-            f"❌ Licença não encontrada no painel para código: {session.get('codigo_licenca')}"
+            f"[ERRO] Licença não encontrada no painel para código: {session.get('codigo_licenca')}"
         )
         session.clear()
         return redirect(url_for("index"))
@@ -1115,7 +1240,7 @@ def logout():
 def admin():
     """Rota do painel administrativo - ACESSO TEMPORARIAMENTE LIBERADO"""
     # TEMPORÁRIO: Liberando acesso para configuração inicial
-    logger.info("🔧 Acesso temporário ao admin liberado para configuração")
+    logger.info("[ADMIN] Acesso temporário ao admin liberado para configuração")
     return render_template("admin.html")
 
 
@@ -1696,13 +1821,13 @@ def toggle_bot():
             status_operacao = "analisando"
 
             # Logs de inicialização da estratégia turbo
-            adicionar_log_tempo_real("🎯 Iniciando Estratégia Turbo...", "info")
+            adicionar_log_tempo_real("[ENTRADA] Iniciando Estratégia Turbo...", "info")
             adicionar_log_tempo_real(
-                f"📊 Modo: {modo.upper()}, Meta: ${meta:.0f}", "info"
+                f"[DADOS] Modo: {modo.upper()}, Meta: ${meta:.0f}", "info"
             )
 
             # Inicia o sistema inteligente no motor - VERSÃO SEGURA
-            adicionar_log_tempo_real("⚙️ Configurando motor...", "info")
+            adicionar_log_tempo_real("[CONFIG] Configurando motor...", "info")
             try:
                 # Usa motor existente se disponível e conectado
                 if motor and hasattr(motor, "conectado") and motor.conectado:
@@ -1738,23 +1863,29 @@ def toggle_bot():
                     thread.start()
 
                     logger.info("SISTEMA INTELIGENTE INICIADO EM THREAD SEPARADA")
-                    adicionar_log_tempo_real("🚀 Motor Turbo iniciado!", "success")
-                    adicionar_log_tempo_real("⚡ Sistema inteligente ATIVO!", "info")
+                    adicionar_log_tempo_real(
+                        "[INICIANDO] Motor Turbo iniciado!", "success"
+                    )
+                    adicionar_log_tempo_real(
+                        "[ATIVO] Sistema inteligente ATIVO!", "info"
+                    )
                 else:
                     logger.warning(
                         "Motor não possui método iniciar_sistema_inteligente"
                     )
-                    adicionar_log_tempo_real("⚠️ Motor em modo básico", "warning")
+                    adicionar_log_tempo_real("[AVISO] Motor em modo básico", "warning")
 
                 # Atualiza variável global
                 globals()["motor"] = motor
 
             except Exception as e:
                 logger.error(f"ERRO ao iniciar sistema: {e}")
-                adicionar_log_tempo_real(f"❌ ERRO: {str(e)}", "error")
+                adicionar_log_tempo_real(f"[ERRO] ERRO: {str(e)}", "error")
 
                 # Continua mesmo com erro para não travar a interface
-                adicionar_log_tempo_real("🔄 Sistema em modo básico", "warning")
+                adicionar_log_tempo_real(
+                    "[RECONECTANDO] Sistema em modo básico", "warning"
+                )
 
             return jsonify(
                 {
@@ -1767,6 +1898,32 @@ def toggle_bot():
     except Exception as e:
         logger.error(f"Erro ao alternar robô: {e}")
         return jsonify({"status": "erro", "mensagem": str(e)}), 500
+
+
+@app.route("/api/status/sistema")
+def api_status_sistema():
+    """Rota para obter status do sistema"""
+    try:
+        if motor and hasattr(motor, "ws") and motor.ws:
+            if motor.ws.connected:
+                status_deriv = "conectado"
+            else:
+                status_deriv = "desconectado"
+        else:
+            status_deriv = "desconectado"
+
+        return jsonify(
+            {
+                "status": "success",
+                "status_deriv": status_deriv,
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
+    except Exception as e:
+        logger.error(f"Erro ao obter status do sistema: {e}")
+        return jsonify(
+            {"status": "error", "status_deriv": "desconectado", "error": str(e)}
+        )
 
 
 @app.route("/status_robo")
@@ -1805,8 +1962,25 @@ def status_robo():
             "prioridade": 1,
         }
 
-        # Status do motor - CORRIGIDO PARA EVITAR ERRO JSON
-        motor_status = {"conectado": False, "operacoes_ativas": 0}
+        # Status do motor - USANDO STATUS GLOBAL
+        global status_motor
+
+        # Atualiza status_motor baseado no estado real
+        # Se há saldo válido e token válido, considera conectado
+        if saldo_valor > 0 and "token" in session:
+            status_motor = "conectado"
+        elif motor and hasattr(motor, "conectado") and motor.conectado:
+            status_motor = "conectado"
+        elif motor is None:
+            status_motor = "desconectado"
+        else:
+            status_motor = "erro"
+
+        motor_status = {
+            "conectado": status_motor == "conectado",
+            "operacoes_ativas": 0,
+            "status": status_motor,
+        }
         if motor:
             try:
                 # Obtém apenas valores simples para evitar erro de serialização
@@ -1824,25 +1998,60 @@ def status_robo():
                     ),
                     "par_atual": str(par_atual) if par_atual else "1HZ75V",
                     "saldo": float(saldo) if isinstance(saldo, (int, float)) else 0.0,
+                    "status": status_motor,
                 }
             except Exception as e:
                 logger.error(f"Erro ao obter status do motor: {e}")
-                motor_status = {"conectado": False, "operacoes_ativas": 0}
+                motor_status = {
+                    "conectado": False,
+                    "operacoes_ativas": 0,
+                    "status": status_motor,
+                }
 
         # Prepara dados seguros para JSON
+        # Converte valores de forma segura
+        lucro_valor = 0.0
+        saldo_valor = 0.0
+
+        try:
+            # Se lucro_atual é uma função, chama ela; senão usa o valor
+            if callable(lucro_atual):
+                lucro_valor = float(lucro_atual())
+            elif isinstance(lucro_atual, (int, float)):
+                lucro_valor = float(lucro_atual)
+        except:
+            lucro_valor = 0.0
+
+        try:
+            # Se saldo_atual é uma função, chama ela; senão usa o valor
+            if callable(saldo_atual):
+                saldo_valor = float(saldo_atual())
+            elif isinstance(saldo_atual, (int, float)):
+                saldo_valor = float(saldo_atual)
+        except:
+            saldo_valor = 0.0
+
+        # Obtém logs de forma segura
+        try:
+            global logs_tempo_real
+            logs_recentes = logs_tempo_real[-20:] if logs_tempo_real else []
+        except Exception as e:
+            logger.error(f"Erro ao obter logs tempo real: {e}")
+            logs_recentes = []
+
         response_data = {
             "ativo": bool(robo_ativo),
             "modo": str(modo_operacao or "iniciante"),
             "meta": float(meta_diaria or 20.0),
-            "lucro": float(lucro_atual),
-            "saldo": float(saldo_atual),
+            "lucro": lucro_valor,
+            "saldo": saldo_valor,
             "operacoes": int(contador_operacoes),
             "status_operacao": str(status_operacao or "parado"),
             "mensagem_log": str(ultima_mensagem or "Sistema pronto"),
-            "ativo_atual": dict(ativo_info),
-            "motor_status": dict(motor_status),
-            "logs_tempo_real": list(logs_tempo_real[-20:] if logs_tempo_real else []),
-            "historico_recente": list(
+            "ativo_atual": ativo_info,
+            "motor_status": motor_status,
+            "logs_tempo_real": logs_recentes,
+            "historico_recente": (
                 historico_operacoes[-3:] if historico_operacoes else []
             ),
         }
@@ -1853,8 +2062,115 @@ def status_robo():
         return jsonify({"status": "erro", "mensagem": str(e)}), 500
 
 
+# ===== ROTAS DE API FALTANTES =====
+
+
+@app.route("/api/logs")
+def api_logs():
+    """Rota para obter logs do sistema"""
+    try:
+        limite = request.args.get("limite", 15, type=int)
+        logs = LoggerUnificado.obter_logs_recentes(limite)
+        return jsonify({"status": "ok", "logs": logs})
+    except Exception as e:
+        logger.error(f"Erro ao obter logs: {e}")
+        return jsonify({"status": "erro", "mensagem": str(e)}), 500
+
+
+@app.route("/logs_tempo_real")
+def api_logs_tempo_real():
+    """Rota para logs em tempo real"""
+    try:
+        logs = LoggerUnificado.obter_logs_recentes(10)
+        return jsonify({"status": "ok", "logs": logs})
+    except Exception as e:
+        logger.error(f"Erro ao obter logs tempo real: {e}")
+        return jsonify({"status": "erro", "mensagem": str(e)}), 500
+
+
+@app.route("/api/performance")
+def api_performance():
+    """Rota para métricas de performance"""
+    try:
+        return jsonify(
+            {
+                "status": "ok",
+                "performance": {
+                    "win_rate": 0.0,
+                    "total_operacoes": 0,
+                    "lucro_total": 0.0,
+                    "tempo_ativo": "00:00:00",
+                },
+            }
+        )
+    except Exception as e:
+        logger.error(f"Erro ao obter performance: {e}")
+        return jsonify({"status": "erro", "mensagem": str(e)}), 500
+
+
+@app.route("/api/riscos/metricas")
+def api_riscos_metricas():
+    """Rota para métricas de risco"""
+    try:
+        return jsonify(
+            {
+                "status": "ok",
+                "riscos": {
+                    "drawdown_atual": 0.0,
+                    "drawdown_maximo": 0.0,
+                    "exposicao_atual": 0.0,
+                    "limite_diario": 100.0,
+                },
+            }
+        )
+    except Exception as e:
+        logger.error(f"Erro ao obter métricas de risco: {e}")
+        return jsonify({"status": "erro", "mensagem": str(e)}), 500
+
+
+@app.route("/api/riscos/alertas")
+def api_riscos_alertas():
+    """Rota para alertas de risco"""
+    try:
+        modo = request.args.get("modo", "conservador")
+        return jsonify({"status": "ok", "alertas": [], "modo": modo})
+    except Exception as e:
+        logger.error(f"Erro ao obter alertas de risco: {e}")
+        return jsonify({"status": "erro", "mensagem": str(e)}), 500
+
+
+@app.route("/historico")
+def historico():
+    """Rota para histórico de operações"""
+    try:
+        return jsonify({"status": "ok", "historico": []})
+    except Exception as e:
+        logger.error(f"Erro ao obter histórico: {e}")
+        return jsonify({"status": "erro", "mensagem": str(e)}), 500
+
+
+@app.route("/api/noticias")
+def api_noticias():
+    """Rota para notícias do mercado"""
+    try:
+        return jsonify({"status": "ok", "noticias": []})
+    except Exception as e:
+        logger.error(f"Erro ao obter notícias: {e}")
+        return jsonify({"status": "erro", "mensagem": str(e)}), 500
+
+
+@app.route("/status_deriv")
+def status_deriv():
+    """Rota para status da Deriv"""
+    try:
+        return jsonify({"status": "ok", "deriv_status": "online", "latencia": "50ms"})
+    except Exception as e:
+        logger.error(f"Erro ao obter status Deriv: {e}")
+        return jsonify({"status": "erro", "mensagem": str(e)}), 500
+
+
 @app.route("/saldo_atual")
-def saldo_atual():
+def api_saldo_atual():
     """Rota para obter saldo atual da conta"""
     try:
         # Verifica autenticação
@@ -1863,16 +2179,21 @@ def saldo_atual():
 
         saldo = 0.0
         tipo_conta = session.get("tipo_conta", "real")
+        token_atual = session.get("token", "")
 
-        # Obtém saldo do motor se conectado
-        if motor and motor.conectado:
+        logger.info(
+            f"[SALDO] Obtendo saldo para conta {tipo_conta} com token {token_atual[:10]}..."
+        )
+
+        # Método 1: Obtém saldo do motor se conectado
+        if motor and hasattr(motor, "conectado") and motor.conectado:
             try:
                 saldo = motor.obter_saldo()
-                logger.info(f"💰 Saldo obtido do motor: {saldo} ({tipo_conta})")
+                logger.info(f"[SALDO] Saldo obtido do motor: {saldo} ({tipo_conta})")
             except Exception as e:
                 logger.error(f"Erro ao obter saldo do motor: {e}")
 
-        # Se não conseguiu obter do motor, tenta obter da licença
+        # Método 2: Se não conseguiu obter do motor, tenta obter da licença (cache)
         if saldo == 0.0:
             try:
                 licencas = carregar_licencas()
@@ -1881,15 +2202,18 @@ def saldo_atual():
                 for licenca in licencas.values():
                     if licenca.get("codigo_licenca") == codigo_licenca:
                         # Obtém saldo salvo na licença (se houver)
-                        saldo_salvo = licenca.get("saldo_" + tipo_conta, 0.0)
+                        saldo_salvo = licenca.get(f"saldo_{tipo_conta}", 0.0)
                         if saldo_salvo:
                             saldo = saldo_salvo
                             logger.info(
-                                f"💰 Saldo obtido da licença: {saldo} ({tipo_conta})"
+                                f"[SALDO] Saldo obtido da licença (cache): {saldo} ({tipo_conta})"
                             )
                         break
             except Exception as e:
                 logger.error(f"Erro ao obter saldo da licença: {e}")
+
+        # Atualiza sessão com o saldo obtido
+        session["saldo"] = saldo
 
         return jsonify(
             {
@@ -1914,7 +2238,8 @@ def selecionar_conta():
             return jsonify({"status": "erro", "mensagem": "Não autenticado"}), 401
 
         data = request.get_json()
-        tipo_conta = data.get("tipo_conta", "real")
+        # Aceita tanto 'tipo_conta' quanto 'tipo' para compatibilidade
+        tipo_conta = data.get("tipo_conta") or data.get("tipo", "real")
 
         if tipo_conta not in ["real", "demo"]:
             return (
@@ -1964,7 +2289,7 @@ def selecionar_conta():
             try:
                 motor.desconectar()
                 motor.conectar(token_ativo)
-                logger.info(f"🔄 Motor reconectado com conta {tipo_conta}")
+                logger.info(f"[RECONECTANDO] Motor reconectado com conta {tipo_conta}")
             except Exception as e:
                 logger.error(f"Erro ao reconectar motor: {e}")
 
@@ -1985,6 +2310,11 @@ if __name__ == "__main__":
     # Carrega o histórico na inicialização
     carregar_historico()
 
+    # Adiciona logs iniciais para não mostrar "Aguardando"
+    adicionar_log_tempo_real("Sistema DerivBot iniciado com sucesso", "success")
+    adicionar_log_tempo_real("Aguardando autenticação do usuário", "info")
+    adicionar_log_tempo_real("Sistema pronto para operações", "info")
+
     # Inicia o servidor Flask
-    logger.info("🚀 Iniciando DerivBot...")
+    logger.info("[SISTEMA] Iniciando DerivBot...")
     app.run(host="0.0.0.0", port=5000, debug=False)

@@ -1320,68 +1320,6 @@ document.addEventListener("DOMContentLoaded", function () {
     setInterval(atualizarSaldo, 10000); // Atualiza saldo a cada 10 segundos
   }
 
-  // Função para selecionar conta
-  window.selecionarConta = function (tipo) {
-    fetch("/selecionar_conta", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ tipo }),
-    })
-      .then((response) => response.json())
-      .then((data) => {
-        if (data.status === "ok") {
-          // Atualiza o saldo imediatamente
-          if (data.saldo !== undefined) {
-            const saldoElement = document.getElementById("saldo-valor");
-            if (saldoElement) {
-              saldoElement.textContent = parseFloat(data.saldo || 0).toFixed(2);
-            }
-          }
-
-          // Reset do lucro ao trocar conta
-          lucroAtual = 0;
-          if (lucroValor) {
-            lucroValor.textContent = "0.00";
-            lucroValor.className = "";
-          }
-
-          // Atualiza o tipo de conta na interface
-          const tipoConta = document.querySelector(".tipo-conta");
-          const numeroConta = document.querySelector(".numero-conta");
-
-          if (tipoConta) {
-            tipoConta.textContent =
-              tipo === "demo" ? "Conta Demo" : "Conta Real";
-          }
-
-          if (numeroConta && data.conta_id) {
-            numeroConta.textContent = data.conta_id;
-          }
-
-          // Força atualização do saldo e status
-          atualizarSaldo();
-          atualizarStatusRobo();
-
-          // Mostra mensagem de sucesso
-          atualizarLog(data.mensagem || `Trocado para conta ${tipo}`);
-
-          // Fecha o dropdown
-          const dropdownMenu = document.getElementById("dropdown-conta");
-          if (dropdownMenu) {
-            dropdownMenu.style.display = "none";
-          }
-        } else {
-          alert(data.mensagem || "Erro ao trocar conta");
-        }
-      })
-      .catch((error) => {
-        console.error("Erro:", error);
-        alert("Erro ao trocar conta");
-      });
-  };
-
   // Função para atualizar logs da estratégia turbo
   function atualizarLogsTempoReal() {
     fetch("/logs_tempo_real")

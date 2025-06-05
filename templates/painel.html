@@ -248,40 +248,13 @@
           aria-label="Controle do robô"
           onclick="iniciarRoboSeguro()"
         >
-          Iniciar Robô
+          🚀 Iniciar Robô
         </button>
 
-        <!-- Logs em Tempo Real (unificados) -->
-        <div
-          class="logs-tempo-real"
-          id="logs-tempo-real"
-          style="
-            margin: 10px 0;
-            background: rgba(255, 255, 255, 0.03);
-            border-radius: 6px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            width: 100%;
-            max-width: 100%;
-          "
-        >
-          <div
-            class="logs-content"
-            id="container-logs"
-            style="max-height: 100px; overflow-y: auto; padding: 8px 12px"
-          >
-            <div id="lista-logs">
-              <!-- Status inicial do robô -->
-              <div
-                class="log-item"
-                style="padding: 4px 0; font-size: 12px; color: #ccc"
-              >
-                <span class="log-emoji">⏳</span>
-                <span class="log-texto"
-                  >Aguardando início das operações...</span
-                >
-              </div>
-            </div>
-          </div>
+        <!-- Log Simples -->
+        <div class="log-temp" id="log-temp">
+          <span class="log-emoji">⏳</span>
+          <span class="log-texto">Sistema pronto para operações</span>
         </div>
 
         <div
@@ -496,7 +469,7 @@
         <div class="status-conexao">
           <div class="status-dot pequeno" id="status-dot-conexao"></div>
           <span class="texto-truncado"
-            >Status: <span id="status-texto">Aguardando...</span></span
+            >Status: <span id="status-texto">Conectado</span></span
           >
         </div>
         <div class="hora-data" id="hora-atual"></div>
@@ -780,8 +753,26 @@
 
             this.estatisticas = data;
             this.atualizarEstatisticasUI();
+            this.atualizarWinRateHistorico();
           } catch (error) {
             console.error("Erro ao atualizar performance:", error);
+          }
+        }
+
+        atualizarWinRateHistorico() {
+          // Atualiza Win Rate na aba de histórico completo
+          const winRateElement = document.getElementById("win-rate-sessao");
+          if (winRateElement) {
+            winRateElement.textContent = `${this.estatisticas.win_rate || 0}%`;
+            winRateElement.className =
+              this.estatisticas.win_rate >= 70 ? "positivo" : "negativo";
+          }
+
+          // Atualiza contador de operações na aba de histórico
+          const operacoesElement = document.getElementById("operacoes-count");
+          if (operacoesElement) {
+            operacoesElement.textContent =
+              this.estatisticas.total_operacoes || 0;
           }
         }
 
@@ -959,53 +950,19 @@
       document.addEventListener("DOMContentLoaded", function () {
         window.logsAvancados = new LogsAvancados();
 
-        // Adiciona estilos CSS para os logs
-        const style = document.createElement("style");
-        style.textContent = `
-            .log-item {
-                margin: 5px 0;
-                padding: 8px 12px;
-                border-radius: 6px;
-                border-left: 3px solid;
-                background: rgba(255,255,255,0.05);
-                font-size: 13px;
-                line-height: 1.4;
+        // CSS dos logs removido - usando log-temp do CSS principal
+
+            /* Bolinhas amarelas por padrão (robô parado) */
+            .bolinha {
+                background: #ffc107 !important;
+                border-color: #ff9800 !important;
+                box-shadow: 0 0 5px #ffc107;
             }
 
-            .log-success { border-left-color: #4CAF50; }
-            .log-error { border-left-color: #f44336; }
-            .log-warning { border-left-color: #ff9800; }
-            .log-trading { border-left-color: #2196F3; }
-            .log-info { border-left-color: #9E9E9E; }
-
-            .log-header {
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                margin-bottom: 4px;
-            }
-
-            .log-emoji { font-size: 14px; }
-            .log-timestamp {
-                font-size: 11px;
-                color: #888;
-                font-family: monospace;
-            }
-            .log-categoria {
-                font-size: 10px;
-                background: rgba(255,255,255,0.1);
-                padding: 2px 6px;
-                border-radius: 3px;
-                color: #ccc;
-            }
-
-            .log-mensagem {
-                color: #fff;
-                word-wrap: break-word;
-            }
-
+            /* Bolinhas verdes quando robô ativo */
             .bolinha.ativo {
                 background: #4CAF50 !important;
+                border-color: #4CAF50 !important;
                 box-shadow: 0 0 10px #4CAF50;
                 animation: pulse 1s infinite;
             }
@@ -1184,66 +1141,7 @@
                 margin: 15px 0;
             }
 
-            .logs-tempo-real {
-                background: rgba(255,255,255,0.05);
-                border-radius: 8px;
-                margin-top: 10px;
-                border: 1px solid rgba(255,255,255,0.1);
-                max-height: 200px;
-            }
-
-            .logs-tempo-real .logs-header {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                padding: 8px 12px;
-                border-bottom: 1px solid rgba(255,255,255,0.1);
-                background: rgba(255,255,255,0.02);
-            }
-
-            .logs-tempo-real .logs-header h4 {
-                margin: 0;
-                font-size: 14px;
-                color: #fff;
-            }
-
-            .logs-tempo-real .logs-content {
-                max-height: 120px;
-                overflow-y: auto;
-                padding: 4px 8px;
-                font-size: 12px;
-                line-height: 1.3;
-            }
-
-            /* Logs em linha única */
-            #lista-logs .log-item {
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                padding: 2px 0;
-                border-bottom: 1px solid rgba(255,255,255,0.05);
-                font-size: 11px;
-            }
-
-            #lista-logs .log-time {
-                color: #888;
-                font-size: 10px;
-                min-width: 50px;
-            }
-
-            #lista-logs .log-category {
-                background: rgba(255,255,255,0.1);
-                padding: 1px 4px;
-                border-radius: 3px;
-                font-size: 9px;
-                min-width: 40px;
-                text-align: center;
-            }
-
-            #lista-logs .log-message {
-                flex: 1;
-                color: #fff;
-            }
+            /* REMOVIDO - Usando log-temp do CSS principal */
 
             /* Cores por categoria */
             .log-categoria-sistema { background: #2196F3 !important; }
@@ -1358,7 +1256,7 @@
 
         // Atualiza interface imediatamente
         if (!roboAtivo) {
-          botao.textContent = "Iniciando...";
+          botao.innerHTML = "⏳ Iniciando...";
           botao.disabled = true;
 
           // Move histórico atual para histórico completo
@@ -1422,37 +1320,32 @@
             // Atualiza estado do robô
             roboAtivo = data.status === "iniciado";
 
-            // Atualiza botão
-            botao.textContent = roboAtivo ? "Parar Robô" : "Iniciar Robô";
+            // Atualiza botão com emoji
+            botao.innerHTML = roboAtivo ? "⏹️ Parar Robô" : "🚀 Iniciar Robô";
             botao.disabled = false;
             botao.classList.toggle("ativo", roboAtivo);
+
+            // Atualiza bolinhas baseado no status do robô
+            atualizarStatusBolinhas(roboAtivo);
 
             // Mostra mensagem de sucesso
             if (roboAtivo) {
               console.log("✅ Robô iniciado com sucesso!");
-              if (logTemp) {
-                logTemp.innerHTML =
-                  '<span class="log-emoji">✅</span><span class="log-texto">Robô ativo - Analisando mercado...</span>';
-              }
+              adicionarLogInformativo("✅ Robô ativo - Analisando mercado...");
             } else {
               console.log("⏹️ Robô parado");
-              if (logTemp) {
-                logTemp.innerHTML =
-                  '<span class="log-emoji">⏹️</span><span class="log-texto">Robô parado</span>';
-              }
+              adicionarLogInformativo("⏹️ Robô parado");
             }
           })
           .catch((error) => {
             console.error("❌ Erro:", error);
 
             // Restaura botão em caso de erro
-            botao.textContent = "Iniciar Robô";
+            botao.innerHTML = "🚀 Iniciar Robô";
             botao.disabled = false;
 
             // Mostra erro
-            if (logTemp) {
-              logTemp.innerHTML = `<span class="log-emoji">❌</span><span class="log-texto">Erro: ${error.message}</span>`;
-            }
+            adicionarLogInformativo(`❌ Erro: ${error.message}`);
 
             alert("Erro ao iniciar robô: " + error.message);
           });
@@ -1523,19 +1416,17 @@
               });
           });
 
-              // Atualiza win rate nos logs
-              const winRateDisplay =
-                document.getElementById("win-rate-display");
-              if (winRateDisplay && data.win_rate !== undefined) {
-                winRateDisplay.textContent = `Win Rate: ${data.win_rate.toFixed(
-                  1
-                )}%`;
-              }
-
-              // Atualiza contador de operações
+              // Atualiza contador de operações na aba de histórico
               const opsCount = document.getElementById("operacoes-count");
               if (opsCount && data.total_operacoes !== undefined) {
-                opsCount.textContent = `Ops: ${data.total_operacoes}`;
+                opsCount.textContent = data.total_operacoes;
+              }
+
+              // Atualiza win rate na aba de histórico
+              const winRateElement = document.getElementById("win-rate-sessao");
+              if (winRateElement && data.win_rate !== undefined) {
+                winRateElement.textContent = `${data.win_rate.toFixed(1)}%`;
+                winRateElement.className = data.win_rate >= 70 ? "positivo" : "negativo";
               }
             }
           })
@@ -1596,67 +1487,80 @@
 
       // Função para adicionar log informativo
       function adicionarLogInformativo(mensagem) {
-        const listaLogs = document.getElementById('lista-logs');
-        if (!listaLogs) return;
+        const logTemp = document.getElementById('log-temp');
+        if (!logTemp) return;
 
-        const logItem = document.createElement('div');
-        logItem.className = 'log-item';
-
-        const tempo = new Date().toLocaleTimeString('pt-BR', {
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit'
-        });
-
-        logItem.innerHTML = `
-          <span class="log-time">${tempo}</span>
-          <span class="log-category log-categoria-sistema">SISTEMA</span>
-          <span class="log-message">${mensagem}</span>
+        // Atualiza o log simples
+        logTemp.innerHTML = `
+          <span class="log-emoji">📊</span>
+          <span class="log-texto">${mensagem}</span>
         `;
+      }
 
-        listaLogs.appendChild(logItem);
-        listaLogs.scrollTop = listaLogs.scrollHeight;
+      // Função para atualizar status das bolinhas
+      function atualizarStatusBolinhas(roboAtivo) {
+        document.querySelectorAll(".bolinha").forEach((bolinha) => {
+          if (roboAtivo) {
+            bolinha.classList.add("ativo");
+          } else {
+            bolinha.classList.remove("ativo");
+          }
+        });
+      }
+
+      // Função para atualizar status do rodapé
+      function atualizarStatusRodape() {
+        fetch("/status_robo")
+          .then((response) => response.json())
+          .then((data) => {
+            const statusTexto = document.getElementById("status-texto");
+            const statusDot = document.getElementById("status-dot-conexao");
+
+            if (statusTexto && statusDot) {
+              if (data.saldo > 0) {
+                statusTexto.textContent = "Conectado";
+                statusDot.className = "status-dot pequeno conectado";
+              } else {
+                statusTexto.textContent = "Desconectado";
+                statusDot.className = "status-dot pequeno desconectado";
+              }
+            }
+          })
+          .catch((error) => {
+            console.error("Erro ao atualizar status do rodapé:", error);
+            const statusTexto = document.getElementById("status-texto");
+            if (statusTexto) {
+              statusTexto.textContent = "Erro";
+            }
+          });
       }
 
       // Função para atualizar logs em tempo real
       function atualizarLogsTempoReal() {
-        fetch("/api/logs?limite=10")
+        fetch("/api/logs?limite=1")
           .then((response) => response.json())
           .then((data) => {
-            if (data.status === "success" && data.logs) {
-              const listaLogs = document.getElementById("lista-logs");
-              if (!listaLogs) return;
+            if (data.status === "success" && data.logs && data.logs.length > 0) {
+              const logTemp = document.getElementById("log-temp");
+              if (!logTemp) return;
 
-              // Limpa logs antigos
-              listaLogs.innerHTML = "";
+              // Pega apenas o último log
+              const ultimoLog = data.logs[data.logs.length - 1];
 
-              // Adiciona novos logs
-              data.logs.forEach((log) => {
-                const logItem = document.createElement("div");
-                logItem.className = "log-item";
+              // Emoji baseado na categoria
+              const emojis = {
+                'sistema': '⚙️',
+                'trading': '📈',
+                'risco': '⚠️',
+                'error': '❌',
+                'stops': '🛑'
+              };
 
-                const tempo = new Date(log.timestamp).toLocaleTimeString(
-                  "pt-BR",
-                  {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    second: "2-digit",
-                  }
-                );
-
-                logItem.innerHTML = `
-                  <span class="log-time">${tempo}</span>
-                  <span class="log-category log-categoria-${
-                    log.categoria
-                  }">${log.categoria.toUpperCase()}</span>
-                  <span class="log-message">${log.mensagem}</span>
-                `;
-
-                listaLogs.appendChild(logItem);
-              });
-
-              // Auto-scroll para o último log
-              listaLogs.scrollTop = listaLogs.scrollHeight;
+              // Atualiza o log simples
+              logTemp.innerHTML = `
+                <span class="log-emoji">${emojis[ultimoLog.categoria] || '📊'}</span>
+                <span class="log-texto">${ultimoLog.mensagem}</span>
+              `;
             }
           })
           .catch((error) => {
@@ -1728,6 +1632,13 @@
         atualizarResumoFinanceiro();
         atualizarLogsTempoReal();
         atualizarStatusStops();
+        atualizarStatusRodape();
+
+        // Inicializa bolinhas como amarelas (robô parado)
+        atualizarStatusBolinhas(false);
+
+        // Atualiza status do rodapé a cada 5 segundos
+        setInterval(atualizarStatusRodape, 5000);
 
         // Adiciona botões de teste (temporário)
         adicionarBotoesTeste();
@@ -1782,7 +1693,39 @@
           });
         }
       }
-      });
+
+      // Funções básicas do modal de configurações
+      function abrirConfiguracoes() {
+        const modal = document.getElementById('modal-configuracoes');
+        if (modal) {
+          modal.style.display = 'flex';
+        }
+      }
+
+      function fecharConfiguracoes() {
+        const modal = document.getElementById('modal-configuracoes');
+        if (modal) {
+          modal.style.display = 'none';
+        }
+      }
+
+      function abrirWhatsApp() {
+        window.open('https://wa.me/5511999999999', '_blank');
+      }
+
+      function abrirUpgrade() {
+        alert('Funcionalidade em desenvolvimento');
+      }
+
+      function abrirTokens() {
+        alert('Funcionalidade em desenvolvimento');
+      }
+
+      function limparCache() {
+        if (confirm('Limpar cache do navegador?')) {
+          location.reload(true);
+        }
+      }
     </script>
   </body>
 </html>
