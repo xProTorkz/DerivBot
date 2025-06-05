@@ -616,7 +616,7 @@ class LicencaManager:
 
 
 # Instância global do gerenciador de licenças
-licenca_manager = LicencaManager()
+# licenca_manager = LicencaManager()  # Desabilitado para usar sistema simples
 
 
 def obter_hwid():

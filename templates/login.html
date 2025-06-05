@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0d0d0d" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
+    <meta
+      name="description"
+      content="Login do DerivBot - Sistema de Trading Automatizado"
+    />
+
+    <!-- Meta tags para evitar caching -->
+    <meta
+      http-equiv="Cache-Control"
+      content="no-cache, no-store, must-revalidate"
+    />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+
+    <title>DerivBot - Login</title>
+    <link
+      rel="stylesheet"
+      href="/static/style.css?v={{ range(1, 999999) | random }}"
+    />
+    <link
+      rel="stylesheet"
+      href="/static/mobile.css?v={{ range(1, 999999) | random }}"
+      media="screen and (max-width: 768px)"
+    />
+  </head>
+  <body>
+    <!-- Fundo decorativo -->
+    <div class="bg-mapa-mundi-svg" aria-hidden="true"></div>
+
+    <!-- Container principal de login -->
+    <div class="container">
+      <h2>🚀 DerivBot</h2>
+      <p
+        style="
+          text-align: center;
+          color: #aaa;
+          margin-bottom: 20px;
+          font-size: 14px;
+        "
+      >
+        Sistema de Trading Automatizado
+      </p>
+
+      {% if erro %}
+      <div
+        style="
+          background: rgba(255, 68, 79, 0.1);
+          border: 1px solid #ff444f;
+          border-radius: 6px;
+          padding: 10px;
+          margin-bottom: 15px;
+          color: #ff444f;
+          font-size: 14px;
+          text-align: center;
+        "
+      >
+        ❌ {{ erro }}
+      </div>
+      {% endif %}
+
+      <form method="POST" action="/login">
+        <div class="form-group">
+          <label for="codigo_licenca">Código da Licença</label>
+          <input
+            type="text"
+            id="codigo_licenca"
+            name="codigo_licenca"
+            placeholder="Digite seu código de licença"
+            required
+            autocomplete="off"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="token_deriv_real">Token Deriv Real (Obrigatório)</label>
+          <input
+            type="text"
+            id="token_deriv_real"
+            name="token_deriv_real"
+            placeholder="Token da conta real (para operações reais)"
+            autocomplete="off"
+            required
+          />
+          <small style="color: #4caf50; font-size: 12px">
+            💰 Token principal para operações com dinheiro real
+          </small>
+        </div>
+
+        <div class="form-group">
+          <label for="token_deriv_demo">Token Deriv Demo (Opcional)</label>
+          <input
+            type="text"
+            id="token_deriv_demo"
+            name="token_deriv_demo"
+            placeholder="Token da conta demo (backup para testes)"
+            autocomplete="off"
+          />
+          <small style="color: #888; font-size: 12px">
+            🧪 Opcional: Para testes e backup
+          </small>
+        </div>
+
+        <div class="termos">
+          <input type="checkbox" id="aceito_termos" required />
+          <label for="aceito_termos">
+            Aceito os
+            <a
+              href="#"
+              onclick="alert('Termos: Use por sua conta e risco. Trading envolve riscos.')"
+              >termos de uso</a
+            >
+            e entendo os riscos do trading
+          </label>
+        </div>
+
+        <button type="submit" class="btn-ativar">🔐 Fazer Login</button>
+      </form>
+
+      <div
+        style="
+          margin-top: 20px;
+          padding-top: 15px;
+          border-top: 1px solid #333;
+          text-align: center;
+        "
+      >
+        <p style="color: #888; font-size: 13px; margin-bottom: 10px">
+          📋 Como obter seus tokens:
+        </p>
+        <ol
+          style="
+            color: #aaa;
+            font-size: 12px;
+            text-align: left;
+            padding-left: 20px;
+          "
+        >
+          <li>
+            Acesse
+            <a href="https://deriv.com" target="_blank" style="color: #ffae42"
+              >deriv.com</a
+            >
+            → Criar conta (se não tiver)
+          </li>
+          <li>Faça login na sua conta</li>
+          <li>Vá em "Configurações de Conta" → "Token de API"</li>
+          <li>
+            Ou acesse diretamente:
+            <a
+              href="https://app.deriv.com/account/api-token?lang=PT"
+              target="_blank"
+              style="color: #ffae42"
+              >app.deriv.com/account/api-token</a
+            >
+          </li>
+          <li>Crie um novo token com permissões de trading</li>
+          <li>Copie e cole aqui</li>
+        </ol>
+      </div>
+
+      <div style="margin-top: 15px; text-align: center">
+        <p style="color: #4caf50; font-size: 12px; margin-bottom: 8px">
+          💰 <strong>Foco em Lucro Real:</strong> Este sistema foi desenvolvido
+          para operações com dinheiro real.
+        </p>
+        <p style="color: #666; font-size: 11px">
+          ⚠️ <strong>Aviso:</strong> Trading envolve riscos. Nunca invista mais
+          do que pode perder.
+        </p>
+      </div>
+    </div>
+
+    <script>
+      // Validação do formulário
+      document.querySelector("form").addEventListener("submit", function (e) {
+        const tokenDemo = document
+          .getElementById("token_deriv_demo")
+          .value.trim();
+        const tokenReal = document
+          .getElementById("token_deriv_real")
+          .value.trim();
+        const codigoLicenca = document
+          .getElementById("codigo_licenca")
+          .value.trim();
+        const aceitoTermos = document.getElementById("aceito_termos").checked;
+
+        if (!codigoLicenca) {
+          e.preventDefault();
+          alert("❌ Por favor, digite o código da licença.");
+          return;
+        }
+
+        if (!tokenReal) {
+          e.preventDefault();
+          alert("❌ Por favor, forneça o token da conta REAL (obrigatório).");
+          return;
+        }
+
+        if (!aceitoTermos) {
+          e.preventDefault();
+          alert("❌ Você deve aceitar os termos de uso para continuar.");
+          return;
+        }
+
+        // Se tudo estiver OK, mostra loading
+        const btn = document.querySelector(".btn-ativar");
+        btn.innerHTML = "🔄 Conectando...";
+        btn.disabled = true;
+      });
+
+      // Foco automático no primeiro campo
+      document.getElementById("codigo_licenca").focus();
+
+      // Formatação automática dos tokens (remove espaços)
+      document
+        .getElementById("token_deriv_demo")
+        .addEventListener("input", function (e) {
+          e.target.value = e.target.value.replace(/\s/g, "");
+        });
+
+      document
+        .getElementById("token_deriv_real")
+        .addEventListener("input", function (e) {
+          e.target.value = e.target.value.replace(/\s/g, "");
+        });
+    </script>
+  </body>
+</html>

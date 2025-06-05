@@ -6,6 +6,11 @@ Contém constantes e configurações globais
 import os
 import json
 import logging
+from dotenv import load_dotenv
+
+# Carrega variáveis de ambiente do arquivo .env na pasta config
+env_path = os.path.join(os.path.dirname(__file__), ".env")
+load_dotenv(env_path)
 
 
 class Config:
@@ -41,9 +46,9 @@ class Config:
     # Configurações do servidor Flask
     FLASK_HOST = "0.0.0.0"
     FLASK_PORT = 5000
-    FLASK_DEBUG = False  # Sempre False em produção
-    FLASK_ENV = "production"
-    SECRET_KEY = "derivbot-secret-key-2024-production"  # Chave fixa para produção
+    FLASK_DEBUG = os.getenv("DEBUG", "False").lower() == "true"
+    FLASK_ENV = os.getenv("FLASK_ENV", "production")
+    SECRET_KEY = os.getenv("SECRET_KEY", "derivbot-secret-key-2024-production")
 
     # Configurações de segurança
     MAX_LOGIN_ATTEMPTS = 5
@@ -72,7 +77,7 @@ class Config:
     }
 
     # API Key do DeepSeek (opcional - configure aqui se necessário)
-    DEEPSEEK_API_KEY = ""  # Configure aqui sua chave da API DeepSeek se necessário
+    DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 
     # Configurações de conexão e reconexão
     CONEXAO = {

@@ -1,0 +1,9 @@
+{
+  "email": {
+    "smtp_server": "",
+    "smtp_port": 587,
+    "email_user": "",
+    "email_pass": ""
+  },
+  "api_key": "UA-uFTz6rGqC8_Hbl280rvQljOD3TAiFNWTqSIbVKyI"
+}

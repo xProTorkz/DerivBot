@@ -1,7 +1,0 @@
-{
-  "admin@derivbot.com": {
-    "senha_hash": "pbkdf2:sha256:600000$V9gK3sL8JpX7wR2N$c7f3e3a1c2b4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8",
-    "nome": "Administrador Principal",
-    "permissoes": ["todas"]
-  }
-}

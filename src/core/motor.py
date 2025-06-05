@@ -36,8 +36,8 @@ except ImportError:
             return key in self.data
 
 
-from src import config
-from src.core.catalogador import Catalogador, ATIVOS_TURBO_INTEGRADOS
+from config import config
+from core.catalogador import Catalogador, ATIVOS_TURBO_INTEGRADOS
 
 
 class SistemaStops:
@@ -63,7 +63,7 @@ class SistemaStops:
 
         # Logger específico para stops
         try:
-            from src.utils.logger_unificado import log_stops, log_erro_critico
+            from utils.logger_unificado import log_stops, log_erro_critico
 
             self.log_stops = log_stops
             self.log_erro_critico = log_erro_critico
@@ -1583,7 +1583,33 @@ class Motor:
 
     def _obter_config_ativo(self, ativo: str) -> dict:
         """Obtém a configuração específica do ativo"""
-        from src.core.config import ATIVOS_SCALPING
+        # Configuração local de ativos para evitar problemas de importação
+        ATIVOS_SCALPING = {
+            "1HZ75V": {
+                "min_stake": 0.35,
+                "multipliers": [10, 100, 200, 300, 400],
+                "contract_types": ["CALL", "PUT"],
+                "basis": "stake",
+                "duracao_padrao": 15,
+                "tipo_contrato": "turbo",
+            },
+            "1HZ100V": {
+                "min_stake": 0.35,
+                "multipliers": [10, 100, 200, 300, 400],
+                "contract_types": ["CALL", "PUT"],
+                "basis": "stake",
+                "duracao_padrao": 15,
+                "tipo_contrato": "turbo",
+            },
+            "R_10": {
+                "min_stake": 0.35,
+                "multipliers": [1, 2, 3, 4, 5, 10],
+                "contract_types": ["MULTUP", "MULTDOWN"],
+                "basis": "stake",
+                "duracao_padrao": 1,
+                "tipo_contrato": "multiplier",
+            },
+        }
 
         return ATIVOS_SCALPING.get(
             ativo,
@@ -1628,19 +1654,17 @@ class Motor:
     def definir_par(self, par: str) -> bool:
         """Altera o par de negociação atual."""
         try:
-            # Importa a lista completa de ativos de scalping
-            try:
-                from src.core.config import ATIVOS_SCALPING
-
-                pares_validos = list(ATIVOS_SCALPING.keys())
-                self.logger.debug(
-                    f"Lista de ativos carregada: {len(pares_validos)} ativos"
-                )
-            except ImportError:
-                pares_validos = getattr(
-                    config, "PARES", ["R_10", "R_25", "R_50", "R_75", "R_100"]
-                )
-                self.logger.warning("Usando lista de ativos padrão (fallback)")
+            # Lista de ativos válidos para scalping
+            pares_validos = [
+                "1HZ75V",
+                "1HZ100V",
+                "R_10",
+                "R_25",
+                "R_50",
+                "R_75",
+                "R_100",
+            ]
+            self.logger.debug(f"Lista de ativos carregada: {len(pares_validos)} ativos")
             if par not in pares_validos:
                 self.logger.error(
                     f"Par inválido: {par}. Deve ser um dos: {pares_validos}"

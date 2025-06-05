@@ -28,39 +28,73 @@ logging.basicConfig(
 )
 logger = logging.getLogger("catalogador_otimizado")
 
-# Carregamento de configurações centralizadas
-try:
-    # Tenta usar as configurações do core/config.py
-    from src.core.config import (
-        CONFIG_CATALOGADOR_OTIMIZADO,
-        CONFIG_INDICADORES_TECNICOS,
-    )
+# Configurações locais (fallback)
+CONFIG_CATALOGADOR = {
+    "analise": {
+        "max_velas_memoria": 2000,
+        "max_ticks_memoria": 20000,
+        "timeframe_padrao_s": 15,
+        "min_velas_analise": 25,
+    },
+    "limpeza": {
+        "intervalo_s": 1800,
+        "max_idade_velas_s": 21600,
+        "max_idade_ticks_s": 3600,
+    },
+    "operacoes": {"intervalo_min_ops_s": 5},
+    "sistema": {"nivel_log": "INFO", "cache_ttl": 60, "arquivo_memoria": "data"},
+    "volatilitys": {"lista_ativos": ["1HZ75V", "1HZ100V", "R_10", "R_25", "R_50"]},
+}
 
-    CONFIG_CATALOGADOR = CONFIG_CATALOGADOR_OTIMIZADO
-    CONFIG_INDICADORES = CONFIG_INDICADORES_TECNICOS
-    CONFIG_ASSERTIVIDADE = {}
-    CONFIG_VOLATILITYS = {}
-except (AttributeError, ImportError) as e:
-    logger.warning(f"Erro ao carregar configurações: {e}")
-    # Configurações padrão como fallback
-    CONFIG_CATALOGADOR = {
-        "analise": {
-            "max_velas_memoria": 2000,
-            "max_ticks_memoria": 20000,
-            "timeframe_padrao_s": 15,
-            "min_velas_analise": 25,
-        },
-        "limpeza": {
-            "intervalo_s": 1800,
-            "max_idade_velas_s": 21600,
-            "max_idade_ticks_s": 3600,
-        },
-        "operacoes": {"intervalo_min_ops_s": 5},
-        "sistema": {"nivel_log": "INFO", "cache_ttl": 60, "arquivo_memoria": "memoria"},
-    }
-    CONFIG_INDICADORES = {}
-    CONFIG_ASSERTIVIDADE = {}
-    CONFIG_VOLATILITYS = {}
+CONFIG_INDICADORES = {
+    "periodos": {
+        "ema_rapida": 8,
+        "ema_lenta": 21,
+        "rsi": 14,
+        "bollinger": 20,
+    },
+    "parametros": {
+        "rsi_sobrevenda": 30,
+        "rsi_sobrecompra": 70,
+        "rsi_zona_ideal_min": 40,
+        "rsi_zona_ideal_max": 60,
+        "bollinger_desvio": 2.0,
+    },
+    "cache": {"max_size": 128},
+}
+
+CONFIG_ASSERTIVIDADE = {
+    "pesos": {
+        "tendencia_ema": 0.3,
+        "rsi_zona": 0.25,
+        "bollinger_posicao": 0.2,
+    },
+    "volatilidade_scores": {
+        "baixa": 0.1,
+        "media": 0.15,
+        "alta": 0.2,
+    },
+    "tipo_contrato": {
+        "assertividade_alta_threshold": 0.7,
+        "multiplicadores_min_variedade": 3,
+    },
+}
+
+CONFIG_VOLATILITYS = {
+    "selecao": {
+        "min_velas_necessarias": 20,
+    },
+    "modos_preferencia": {
+        "iniciante": {"prefere_turbo": True, "score_turbo_bonus": 0.3},
+        "conservador": {"prefere_turbo": False, "score_multiplier_bonus": 0.2},
+        "agressivo": {"prefere_turbo": False, "score_multiplier_bonus": 0.1},
+    },
+    "fallback": {
+        "ativo_padrao": "1HZ75V",
+        "tipo_contrato_padrao": "turbo",
+        "multiplicador_padrao": 10,
+    },
+}
 
 # Diretório para memória usando configuração centralizada
 MEMORIA_DIR = CONFIG_CATALOGADOR["sistema"]["arquivo_memoria"]
@@ -68,12 +102,64 @@ if not os.path.exists(MEMORIA_DIR):
     os.makedirs(MEMORIA_DIR)
 
 # API Key - usando configuração centralizada
-from src.config.config import Config
+try:
+    from config.config import Config
 
-DEEPSEEK_API_KEY = Config.DEEPSEEK_API_KEY
+    DEEPSEEK_API_KEY = Config.DEEPSEEK_API_KEY
+except ImportError:
+    DEEPSEEK_API_KEY = ""
+
 if not DEEPSEEK_API_KEY:
     logger.warning("DEEPSEEK_API_KEY não configurada. Funcionalidade de IA limitada.")
 
+
+# Configurações locais de ativos para substituir bot_config
+ATIVOS_SCALPING = {
+    "1HZ75V": {
+        "nome": "Volatility 75 Index",
+        "volatilidade": "alta",
+        "multiplicadores_disponiveis": [10, 100, 200, 300, 400],
+        "min_stake": 0.35,
+        "max_stake": 100.0,
+        "prioridade": 1,
+    },
+    "1HZ100V": {
+        "nome": "Volatility 100 Index",
+        "volatilidade": "alta",
+        "multiplicadores_disponiveis": [10, 100, 200, 300, 400],
+        "min_stake": 0.35,
+        "max_stake": 100.0,
+        "prioridade": 2,
+    },
+    "R_10": {
+        "nome": "Volatility 10 Index",
+        "volatilidade": "baixa",
+        "multiplicadores_disponiveis": [1, 2, 3, 4, 5, 10],
+        "min_stake": 0.35,
+        "max_stake": 50.0,
+        "prioridade": 3,
+    },
+}
+
+MODOS_OPERACAO_SCALPING = {
+    "iniciante": {
+        "multiplicador_nivel": "baixo",
+        "max_stake": 20.0,
+        "max_operacoes_simultaneas": 3,
+    },
+    "conservador": {
+        "multiplicador_nivel": "medio",
+        "max_stake": 50.0,
+        "max_operacoes_simultaneas": 5,
+    },
+    "agressivo": {
+        "multiplicador_nivel": "alto",
+        "max_stake": 100.0,
+        "max_operacoes_simultaneas": 10,
+    },
+}
+
+PAR_PADRAO_OPERACAO = "1HZ75V"
 
 # Configuração de ativos para estratégia turbo integrada
 ATIVOS_TURBO_INTEGRADOS = {
@@ -273,7 +359,7 @@ class CalculadorAssertividade:
                     assertividade += pesos["bollinger_posicao"] * 0.6
 
             # 4. Volatilidade do ativo
-            config_ativo = bot_config.ATIVOS_SCALPING.get(ativo, {})
+            config_ativo = ATIVOS_SCALPING.get(ativo, {})
             volatilidade = config_ativo.get("volatilidade", "media")
             volatilidade_scores = CONFIG_ASSERTIVIDADE["volatilidade_scores"]
             assertividade += volatilidade_scores.get(volatilidade, 0.12)
@@ -288,7 +374,7 @@ class CalculadorAssertividade:
     def determinar_tipo_contrato(ativo: str, assertividade: float, modo: str) -> str:
         """Determina tipo de contrato usando configurações"""
         try:
-            config_ativo = bot_config.ATIVOS_SCALPING.get(ativo, {})
+            config_ativo = ATIVOS_SCALPING.get(ativo, {})
             preferencias = CONFIG_VOLATILITYS["modos_preferencia"].get(modo.lower(), {})
 
             score_multiplier = 0.0
@@ -353,7 +439,7 @@ class CatalogadorOtimizado:
         self._inicio_vela_atual_s: Optional[int] = None
 
         # Estado
-        self.ativo_selecionado = getattr(bot_config, "PAR_PADRAO_OPERACAO", "1HZ75V")
+        self.ativo_selecionado = PAR_PADRAO_OPERACAO
         self.ultima_operacao_ts = 0.0
         self.operacoes_ativas_ts: List[float] = []
         self.lucro_total_sessao = 0.0
@@ -369,8 +455,8 @@ class CatalogadorOtimizado:
     def obter_multiplicador_otimizado(self, ativo: str, modo: str = "agressivo") -> int:
         """Obtém multiplicador otimizado usando configurações centralizadas"""
         try:
-            config_ativo = bot_config.ATIVOS_SCALPING.get(ativo)
-            config_modo = bot_config.MODOS_OPERACAO_SCALPING.get(modo.lower())
+            config_ativo = ATIVOS_SCALPING.get(ativo)
+            config_modo = MODOS_OPERACAO_SCALPING.get(modo.lower())
 
             if not config_ativo or not config_modo:
                 fallback = CONFIG_VOLATILITYS["fallback"]["multiplicador_padrao"]
@@ -409,7 +495,7 @@ class CatalogadorOtimizado:
 
             for ativo in lista_ativos:
                 try:
-                    config_ativo = bot_config.ATIVOS_SCALPING.get(ativo)
+                    config_ativo = ATIVOS_SCALPING.get(ativo)
                     if not config_ativo:
                         continue
 
@@ -530,8 +616,8 @@ class CatalogadorOtimizado:
     def validar_operacao_otimizada(self, ativo: str, modo: str, saldo: float) -> tuple:
         """Valida operação usando configurações centralizadas"""
         try:
-            config_ativo = bot_config.ATIVOS_SCALPING.get(ativo)
-            config_modo = bot_config.MODOS_OPERACAO_SCALPING.get(modo.lower())
+            config_ativo = ATIVOS_SCALPING.get(ativo)
+            config_modo = MODOS_OPERACAO_SCALPING.get(modo.lower())
 
             if not config_ativo:
                 return False, f"Ativo {ativo} não configurado"
@@ -572,8 +658,8 @@ class CatalogadorOtimizado:
     ) -> dict:
         """Obtém configuração completa usando configurações centralizadas"""
         try:
-            config_ativo = bot_config.ATIVOS_SCALPING.get(ativo, {})
-            config_modo = bot_config.MODOS_OPERACAO_SCALPING.get(modo.lower(), {})
+            config_ativo = ATIVOS_SCALPING.get(ativo, {})
+            config_modo = MODOS_OPERACAO_SCALPING.get(modo.lower(), {})
 
             return {
                 "ativo": ativo,
