@@ -908,9 +908,28 @@ def index():
         else:
             logger.warning("[AVISO] Licença encontrada mas tokens não disponíveis")
 
-    # Se não conseguiu login automático, mostra tela de login
+    # Se não conseguiu login automático, mostra tela de login pré-preenchida com dados locais
     logger.info("Login automático não disponível - redirecionando para login manual")
-    return render_template("login.html")
+    dados_salvos = obter_dados_login_salvos()
+    return render_template(
+        "login.html",
+        codigo_licenca=dados_salvos["codigo_licenca"],
+        token_deriv_demo=dados_salvos["token_deriv_demo"],
+        token_deriv_real=dados_salvos["token_deriv_real"],
+    )
+
+
+def obter_dados_login_salvos():
+    """Retorna código de licença e tokens salvos localmente para pré-preenchimento facilitado"""
+    licencas = carregar_licencas()
+    for l in licencas.values():
+        if l.get("status") == "ativa" or l.get("codigo_licenca"):
+            return {
+                "codigo_licenca": l.get("codigo_licenca", ""),
+                "token_deriv_demo": l.get("token_deriv_demo", ""),
+                "token_deriv_real": l.get("token_deriv_real", ""),
+            }
+    return {"codigo_licenca": "", "token_deriv_demo": "", "token_deriv_real": ""}
 
 
 def validar_codigo_licenca(codigo_licenca):
@@ -948,13 +967,28 @@ def obter_conta_id_do_token(token):
 def login():
     """Rota de login com validação de licença"""
     if request.method == "GET":
-        # Limpa a sessão e mostra tela de login
+        # Limpa a sessão e mostra tela de login pré-preenchida com dados salvos
         session.clear()
-        return render_template("login.html")
+        dados_salvos = obter_dados_login_salvos()
+        return render_template(
+            "login.html",
+            codigo_licenca=dados_salvos["codigo_licenca"],
+            token_deriv_demo=dados_salvos["token_deriv_demo"],
+            token_deriv_real=dados_salvos["token_deriv_real"],
+        )
 
     token_real = request.form.get("token_deriv_real", "").strip()
     token_demo = request.form.get("token_deriv_demo", "").strip()
     codigo_licenca = request.form.get("codigo_licenca", "").strip()
+
+    def render_login_erro(msg):
+        return render_template(
+            "login.html",
+            erro=msg,
+            codigo_licenca=codigo_licenca,
+            token_deriv_demo=token_demo,
+            token_deriv_real=token_real,
+        )
 
     logger.info(
         f"[LOGIN] TENTATIVA DE LOGIN - Código: {codigo_licenca}, Token: {token_real[:10]}..."
@@ -962,26 +996,26 @@ def login():
 
     # Verifica se o código de licença foi fornecido
     if not codigo_licenca:
-        return render_template("login.html", erro="Código de licença é obrigatório")
+        return render_login_erro("Código de licença é obrigatório")
 
     # Verifica se pelo menos um token foi fornecido
     if not token_real and not token_demo:
-        return render_template(
-            "login.html", erro="Informe pelo menos um Token da Deriv (Demo ou Real)"
+        return render_login_erro(
+            "Informe pelo menos um Token da Deriv (Demo ou Real)"
         )
 
     # Valida o formato do código de licença
     if not validar_codigo_licenca(codigo_licenca):
-        return render_template("login.html", erro="Código de licença inválido")
+        return render_login_erro("Código de licença inválido")
 
     # Validação básica do formato dos tokens fornecidos
     if token_real and len(token_real) < 10:
-        return render_template(
-            "login.html", erro="Token real deve ter pelo menos 10 caracteres"
+        return render_login_erro(
+            "Token real deve ter pelo menos 10 caracteres"
         )
     if token_demo and len(token_demo) < 10:
-        return render_template(
-            "login.html", erro="Token demo deve ter pelo menos 10 caracteres"
+        return render_login_erro(
+            "Token demo deve ter pelo menos 10 caracteres"
         )
 
     # Carrega licenças existentes

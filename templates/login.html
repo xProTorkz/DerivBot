@@ -76,6 +76,7 @@
             id="codigo_licenca"
             name="codigo_licenca"
             placeholder="Digite seu código de licença"
+            value="{{ codigo_licenca or '' }}"
             required
             autocomplete="off"
           />
@@ -88,6 +89,7 @@
             id="token_deriv_demo"
             name="token_deriv_demo"
             placeholder="Token da conta demo para testes"
+            value="{{ token_deriv_demo or '' }}"
             autocomplete="off"
           />
           <small style="color: #4caf50; font-size: 12px">
@@ -102,6 +104,7 @@
             id="token_deriv_real"
             name="token_deriv_real"
             placeholder="Token da conta real (opcional)"
+            value="{{ token_deriv_real or '' }}"
             autocomplete="off"
           />
           <small style="color: #888; font-size: 12px">
@@ -110,7 +113,7 @@
         </div>
 
         <div class="termos">
-          <input type="checkbox" id="aceito_termos" required />
+          <input type="checkbox" id="aceito_termos" checked required />
           <label for="aceito_termos">
             Aceito os
             <a
