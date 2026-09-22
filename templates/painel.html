@@ -1305,14 +1305,14 @@
           },
           body: JSON.stringify({ modo, meta }),
         })
-          .then((response) => {
+          .then(async (response) => {
             console.log("Resposta:", response.status, response.statusText);
+            const data = await response.json().catch(() => ({}));
             if (!response.ok) {
-              throw new Error(
-                `HTTP ${response.status}: ${response.statusText}`
-              );
+              const msg = data.mensagem || `HTTP ${response.status}: ${response.statusText}`;
+              throw new Error(msg);
             }
-            return response.json();
+            return data;
           })
           .then((data) => {
             console.log("Dados recebidos:", data);

@@ -1304,15 +1304,18 @@ def painel():
         session.clear()
         return redirect(url_for("index"))
 
-    # Se motor não foi inicializado nesta instância mas o usuário está autenticado, inicializa
-    global motor
+    # Se motor não foi inicializado nesta instância mas o usuário tem token válido, tenta inicializar com controle de frequência
+    global motor, ultimo_reconnect_ts
     token_sessao = session.get("token")
-    if (motor is None or not getattr(motor, "conectado", False)) and token_sessao:
-        logger.info("[PAINEL] Inicializando motor para sessão existente...")
-        try:
-            inicializar_api(token_sessao)
-        except Exception as e:
-            logger.error(f"[PAINEL] Falha ao inicializar motor automaticamente: {e}")
+    agora = time.time()
+    if token_sessao and token_sessao != "a1b2c3d4e5f6g7h8":
+        if (motor is None or not getattr(motor, "conectado", False)) and (agora - globals().get("ultimo_reconnect_ts", 0.0) > 30):
+            globals()["ultimo_reconnect_ts"] = agora
+            logger.info("[PAINEL] Inicializando motor para sessão existente...")
+            try:
+                inicializar_api(token_sessao)
+            except Exception as e:
+                logger.error(f"[PAINEL] Falha ao inicializar motor: {e}")
 
     return render_template(
         "painel.html",
@@ -1893,22 +1896,39 @@ def toggle_bot():
                 {"status": "parado", "mensagem": "Robô parado com segurança"}
             )
         else:
-            # Verifica se o motor está conectado; se não, tenta inicializar com o token da sessão
-            if not motor or not getattr(motor, "conectado", False):
-                token_sessao = session.get("token")
-                if token_sessao:
-                    logger.info("[MOTOR] Motor desconectado ao iniciar robô. Inicializando com token da sessão...")
-                    try:
-                        inicializar_api(token_sessao)
-                    except Exception as e:
-                        logger.error(f"[MOTOR] Erro ao reconectar motor para toggle_bot: {e}")
-
-            if not motor or not getattr(motor, "conectado", False):
+            token_sessao = session.get("token", "")
+            if not token_sessao or token_sessao == "a1b2c3d4e5f6g7h8":
                 return (
                     jsonify(
                         {
                             "status": "erro",
-                            "mensagem": "Motor não conectado. Verifique sua conexão.",
+                            "mensagem": "Token da Deriv não configurado ou placeholder de teste ('a1b2c3d4...'). Por favor, informe um token de API válido da Deriv (Demo ou Real) nas configurações para iniciar o robô.",
+                        }
+                    ),
+                    400,
+                )
+
+            # Verifica se o motor está conectado; se não, tenta inicializar com o token da sessão
+            if not motor or not getattr(motor, "conectado", False):
+                logger.info("[MOTOR] Motor desconectado ao iniciar robô. Inicializando com token da sessão...")
+                try:
+                    inicializar_api(token_sessao)
+                    time.sleep(1.0)
+                except Exception as e:
+                    logger.error(f"[MOTOR] Erro ao reconectar motor para toggle_bot: {e}")
+
+            if not motor or not getattr(motor, "conectado", False):
+                erro_detalhe = getattr(motor, "ultimo_erro", "") if motor else ""
+                mensagem_erro = "Motor não conectado à Deriv."
+                if erro_detalhe:
+                    mensagem_erro += f" Motivo: {erro_detalhe}."
+                else:
+                    mensagem_erro += " Verifique se o token informado é válido na Deriv e tem permissões de Leitura e Operação."
+                return (
+                    jsonify(
+                        {
+                            "status": "erro",
+                            "mensagem": mensagem_erro,
                         }
                     ),
                     400,
@@ -2012,13 +2032,8 @@ def toggle_bot():
 def api_status_sistema():
     """Rota para obter status do sistema"""
     try:
-        if motor and hasattr(motor, "ws") and motor.ws:
-            if motor.ws.connected:
-                status_deriv = "conectado"
-            else:
-                status_deriv = "desconectado"
-        else:
-            status_deriv = "desconectado"
+        conectado = bool(motor and getattr(motor, "conectado", False))
+        status_deriv = "conectado" if conectado else "desconectado"
 
         return jsonify(
             {
@@ -2106,16 +2121,13 @@ def status_robo():
         # Status do motor - USANDO STATUS GLOBAL
         global status_motor
 
-        # Atualiza status_motor baseado no estado real
-        # Se há saldo válido e token válido, considera conectado
-        if saldo_valor > 0 and "token" in session:
-            status_motor = "conectado"
-        elif motor and hasattr(motor, "conectado") and motor.conectado:
+        # Atualiza status_motor baseado no estado real da conexão WebSocket
+        if motor and hasattr(motor, "conectado") and motor.conectado:
             status_motor = "conectado"
         elif motor is None:
             status_motor = "desconectado"
         else:
-            status_motor = "erro"
+            status_motor = "desconectado"
 
         motor_status = {
             "conectado": status_motor == "conectado",
@@ -2354,7 +2366,12 @@ def api_noticias():
 def status_deriv():
     """Rota para status da Deriv"""
     try:
-        return jsonify({"status": "ok", "deriv_status": "online", "latencia": "50ms"})
+        conectado = bool(motor and getattr(motor, "conectado", False))
+        return jsonify({
+            "status": "ok",
+            "deriv_status": "online" if conectado else "offline",
+            "latencia": "50ms" if conectado else "N/A"
+        })
     except Exception as e:
         logger.error(f"Erro ao obter status Deriv: {e}")
         return jsonify({"status": "erro", "mensagem": str(e)}), 500

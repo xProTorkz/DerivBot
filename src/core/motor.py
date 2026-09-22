@@ -1137,9 +1137,13 @@ class Motor:
                 if (
                     "AuthorizationRequired" in self.ultimo_erro
                     or "token" in self.ultimo_erro.lower()
+                    or "invalid" in self.ultimo_erro.lower()
                 ):
                     self.conectado = False
-                    self.logger.error("Erro de autorização. Tentando reconectar...")
+                    self.logger.error(
+                        f"[AUTH ERROR] Token inválido ou não autorizado: {self.ultimo_erro}. Reconexão automática desativada."
+                    )
+                else:
                     self._agendar_reconexao()
 
         except json.JSONDecodeError as e:
