@@ -950,8 +950,9 @@
       document.addEventListener("DOMContentLoaded", function () {
         window.logsAvancados = new LogsAvancados();
 
-        // CSS dos logs removido - usando log-temp do CSS principal
-
+        // CSS dos logs
+        const style = document.createElement("style");
+        style.textContent = `
             /* Bolinhas amarelas por padrão (robô parado) */
             .bolinha {
                 background: #ffc107 !important;
@@ -1236,7 +1237,6 @@
 
     <script src="{{ url_for('static', filename='mobile.js') }}"></script>
     <script src="{{ url_for('static', filename='scripts.js') }}"></script>
-    <script src="/static/persistencia.js"></script>
 
     <!-- Script de teste direto -->
     <script>
@@ -1365,7 +1365,6 @@
               if (saldoElement && (data.saldo_atual !== undefined || data.saldo !== undefined)) {
                 const saldo = data.saldo_atual || data.saldo || 0;
                 saldoElement.textContent = saldo.toFixed(2);
-                // NÃO aplica classe saldo-valor para manter fonte normal
               }
 
               // Atualiza lucro usando ID correto
@@ -1383,6 +1382,19 @@
               const metaInput = document.getElementById("meta");
               if (metaElement && metaInput) {
                 metaElement.textContent = `/${metaInput.value || 0}`;
+              }
+
+              // Atualiza contador de operações na aba de histórico
+              const opsCount = document.getElementById("operacoes-count");
+              if (opsCount && data.total_operacoes !== undefined) {
+                opsCount.textContent = data.total_operacoes;
+              }
+
+              // Atualiza win rate na aba de histórico
+              const winRateElement = document.getElementById("win-rate-sessao");
+              if (winRateElement && data.win_rate !== undefined) {
+                winRateElement.textContent = `${data.win_rate.toFixed(1)}%`;
+                winRateElement.className = data.win_rate >= 70 ? "positivo" : "negativo";
               }
             }
           })
@@ -1414,24 +1426,6 @@
               .catch((error2) => {
                 console.error("Erro também no status_robo:", error2);
               });
-          });
-
-              // Atualiza contador de operações na aba de histórico
-              const opsCount = document.getElementById("operacoes-count");
-              if (opsCount && data.total_operacoes !== undefined) {
-                opsCount.textContent = data.total_operacoes;
-              }
-
-              // Atualiza win rate na aba de histórico
-              const winRateElement = document.getElementById("win-rate-sessao");
-              if (winRateElement && data.win_rate !== undefined) {
-                winRateElement.textContent = `${data.win_rate.toFixed(1)}%`;
-                winRateElement.className = data.win_rate >= 70 ? "positivo" : "negativo";
-              }
-            }
-          })
-          .catch((error) => {
-            console.error("Erro ao atualizar resumo financeiro:", error);
           });
       }
 

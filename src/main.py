@@ -1304,6 +1304,16 @@ def painel():
         session.clear()
         return redirect(url_for("index"))
 
+    # Se motor não foi inicializado nesta instância mas o usuário está autenticado, inicializa
+    global motor
+    token_sessao = session.get("token")
+    if (motor is None or not getattr(motor, "conectado", False)) and token_sessao:
+        logger.info("[PAINEL] Inicializando motor para sessão existente...")
+        try:
+            inicializar_api(token_sessao)
+        except Exception as e:
+            logger.error(f"[PAINEL] Falha ao inicializar motor automaticamente: {e}")
+
     return render_template(
         "painel.html",
         tipo_conta=tipo_conta,
@@ -1883,7 +1893,16 @@ def toggle_bot():
                 {"status": "parado", "mensagem": "Robô parado com segurança"}
             )
         else:
-            # Verifica se o motor está conectado (não a deriv_api)
+            # Verifica se o motor está conectado; se não, tenta inicializar com o token da sessão
+            if not motor or not getattr(motor, "conectado", False):
+                token_sessao = session.get("token")
+                if token_sessao:
+                    logger.info("[MOTOR] Motor desconectado ao iniciar robô. Inicializando com token da sessão...")
+                    try:
+                        inicializar_api(token_sessao)
+                    except Exception as e:
+                        logger.error(f"[MOTOR] Erro ao reconectar motor para toggle_bot: {e}")
+
             if not motor or not getattr(motor, "conectado", False):
                 return (
                     jsonify(
@@ -2260,6 +2279,54 @@ def api_riscos_alertas():
         return jsonify({"status": "ok", "alertas": [], "modo": modo})
     except Exception as e:
         logger.error(f"Erro ao obter alertas de risco: {e}")
+        return jsonify({"status": "erro", "mensagem": str(e)}), 500
+
+
+@app.route("/api/stops/configurar", methods=["POST"])
+def api_stops_configurar():
+    """Configura os limites do sistema de stops por modo"""
+    try:
+        data = request.get_json() or {}
+        modo = data.get("modo", "iniciante")
+        global motor
+        if motor and hasattr(motor, "sistema_stops"):
+            motor.sistema_stops.configurar_stops_por_modo(modo)
+        return jsonify({"status": "success", "mensagem": f"Stops configurados para modo {modo}"})
+    except Exception as e:
+        logger.error(f"Erro ao configurar stops: {e}")
+        return jsonify({"status": "erro", "mensagem": str(e)}), 500
+
+
+@app.route("/api/stops/status")
+def api_stops_status():
+    """Retorna o status dos stops ativos e verificações globais"""
+    try:
+        global motor, saldo_atual
+        stops_status = {
+            "stops_ativos": 0,
+            "configuracoes": {
+                "stop_loss_global_percent": 10.0,
+                "take_profit_global_percent": 20.0,
+            },
+        }
+        verificacao_global = {"acao": "continuar", "razao": "Dentro dos limites"}
+        if motor and hasattr(motor, "sistema_stops"):
+            stops_status["stops_ativos"] = len(motor.sistema_stops.stops_ativos)
+            stops_status["configuracoes"] = motor.sistema_stops.configuracoes
+            saldo_val = 0.0
+            try:
+                saldo_val = float(motor.obter_saldo() if hasattr(motor, "obter_saldo") else 0.0)
+            except Exception:
+                saldo_val = float(saldo_atual) if isinstance(saldo_atual, (int, float)) else 0.0
+            verificacao_global = motor.sistema_stops.verificar_stops_globais(saldo_val)
+
+        return jsonify({
+            "status": "success",
+            "stops_status": stops_status,
+            "verificacao_global": verificacao_global,
+        })
+    except Exception as e:
+        logger.error(f"Erro ao obter status de stops: {e}")
         return jsonify({"status": "erro", "mensagem": str(e)}), 500
 
 

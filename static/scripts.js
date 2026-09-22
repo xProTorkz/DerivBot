@@ -178,26 +178,25 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     // ✅ Garante que a aba da tabela esteja visível
-    trocarAba("tabela");
+    if (typeof trocarAba === "function") {
+      trocarAba("tabela");
+    } else if (typeof window.trocarAba === "function") {
+      window.trocarAba("tabela");
+    }
 
     // ✅ Limpa somente o corpo da tabela
     const tabelaBody = document.getElementById("historico-tabela-body");
     if (tabelaBody) tabelaBody.innerHTML = "";
 
-    // ✅ Limpa os campos de resumo
-    document.getElementById("resumo-total").innerText = "--";
-    document.getElementById("resumo-lucros").innerText = "--";
-    document.getElementById("resumo-prejuizos").innerText = "--";
-    document.getElementById("resumo-assertividade").innerText = "--";
-    document.getElementById("resumo-lucro-total").innerText = "--";
+    // ✅ Limpa os campos de resumo com verificação
+    ["resumo-total", "resumo-lucros", "resumo-prejuizos", "resumo-assertividade", "resumo-lucro-total"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.innerText = "--";
+    });
 
     // ✅ Atualiza texto temporário
-    document.getElementById("log-temporario").textContent = "Robô iniciado!";
-
-    // ✅ Troca pra aba "Histórico 📄" automaticamente
-    if (typeof trocarAba === "function") {
-      trocarAba("tabela");
-    }
+    const elLog = document.getElementById("log-temporario") || document.getElementById("log-temp");
+    if (elLog) elLog.textContent = "Robô iniciado!";
 
     try {
       console.log("🚀 Enviando requisição para /toggle_bot...");
@@ -255,7 +254,9 @@ document.addEventListener("DOMContentLoaded", function () {
   });
 
   function atualizarLog(mensagem, tipo = "info") {
-    const logElement = document.getElementById("log-temporario");
+    const logElement = document.getElementById("log-temporario") || document.getElementById("log-temp");
+    if (!logElement) return;
+
     const emojis = {
       info: "🔍",
       aviso: "⚠️",
