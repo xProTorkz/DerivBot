@@ -41,8 +41,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger("DerivBot")
 
+try:
+    from config.config import Config
+except ImportError:
+    from src.config.config import Config
+
 # Configurações
-LICENCAS_FILE = "data/licencas.json"
+DATA_DIR = Config.DATA_DIR
+LICENCAS_FILE = os.path.join(DATA_DIR, "licencas.json")
 PLANOS = {
     "free": {"dias_validade": 7, "limite_operacoes": 100},
     "mensal": {"dias_validade": 30, "limite_operacoes": 1000},
@@ -80,8 +86,8 @@ def calcular_data_validade(plano):
 
 def carregar_licencas():
     """Carrega o arquivo de licenças ou cria um novo se não existir."""
-    if not os.path.exists("data"):
-        os.makedirs("data")
+    if not os.path.exists(DATA_DIR):
+        os.makedirs(DATA_DIR, exist_ok=True)
 
     if not os.path.exists(LICENCAS_FILE):
         try:
@@ -620,30 +626,41 @@ class LicencaManager:
 
 
 def obter_hwid():
-    """Obtém o HWID do dispositivo atual"""
+    """Obtém o HWID do dispositivo atual (multiplataforma: Windows, macOS, Linux)"""
     try:
-        import wmi
-        import pythoncom
+        import platform
 
-        # Inicializa COM para a thread atual
-        pythoncom.CoInitialize()
+        # Tenta Windows via WMI se disponível
+        if platform.system() == "Windows":
+            try:
+                import wmi
+                import pythoncom
 
-        c = wmi.WMI()
-        for item in c.Win32_ComputerSystemProduct():
-            hwid = f"0x{item.UUID.replace('-', '')[:12]}"
-            logger.info(f"HWID obtido: {hwid}")
-            return hwid
-    except ImportError:
-        logger.error("Módulo WMI não encontrado. Instale com: pip install wmi")
-        return None
+                pythoncom.CoInitialize()
+                c = wmi.WMI()
+                for item in c.Win32_ComputerSystemProduct():
+                    hwid = f"0x{item.UUID.replace('-', '')[:12]}"
+                    logger.info(f"HWID Windows obtido: {hwid}")
+                    return hwid
+            except Exception as e:
+                logger.warning(f"Falha ao obter HWID via WMI no Windows: {e}")
+            finally:
+                try:
+                    pythoncom.CoUninitialize()
+                except:
+                    pass
+
+        # Fallback universal determinístico (macOS, Linux ou Windows sem WMI)
+        mac = uuid.getnode()
+        node_name = platform.node()
+        system_str = f"{platform.system()}-{platform.machine()}-{mac}-{node_name}"
+        hash_val = hashlib.sha256(system_str.encode("utf-8")).hexdigest()
+        hwid = f"0x{hash_val[:12].upper()}"
+        logger.info(f"HWID multiplataforma obtido: {hwid}")
+        return hwid
     except Exception as e:
         logger.error(f"Erro ao obter HWID: {e}")
-        return None
-    finally:
-        try:
-            pythoncom.CoUninitialize()
-        except:
-            pass
+        return "0x000000000000"
 
 
 def obter_ip():

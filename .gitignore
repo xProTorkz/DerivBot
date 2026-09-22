@@ -42,23 +42,25 @@ ENV/
 logs/*.log
 !logs/.gitkeep
 
-# Data files sensíveis (mantém estrutura)
+# Data files sensíveis (dados reais locais)
+data/*.json
+!data/*.example.json
 data/flask_session/
 data/*.db
 data/*.sqlite
 data/*.json.bak
 data/temp/
+src/data/
 
 # Configurações sensíveis
 .env
+.env.*
 !.env.example
 
 # Mantém arquivos importantes do projeto
 !README.md
 !LICENSE
 !requirements.txt
-!data/licencas.json
-!data/admin_licencas.json
 
 # Sistema
 .DS_Store

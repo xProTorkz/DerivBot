@@ -82,31 +82,30 @@
         </div>
 
         <div class="form-group">
-          <label for="token_deriv_real">Token Deriv Real (Obrigatório)</label>
-          <input
-            type="text"
-            id="token_deriv_real"
-            name="token_deriv_real"
-            placeholder="Token da conta real (para operações reais)"
-            autocomplete="off"
-            required
-          />
-          <small style="color: #4caf50; font-size: 12px">
-            💰 Token principal para operações com dinheiro real
-          </small>
-        </div>
-
-        <div class="form-group">
-          <label for="token_deriv_demo">Token Deriv Demo (Opcional)</label>
+          <label for="token_deriv_demo">Token Deriv Demo (Recomendado para Início)</label>
           <input
             type="text"
             id="token_deriv_demo"
             name="token_deriv_demo"
-            placeholder="Token da conta demo (backup para testes)"
+            placeholder="Token da conta demo para testes"
+            autocomplete="off"
+          />
+          <small style="color: #4caf50; font-size: 12px">
+            🧪 Recomendado: Para testes 100% seguros sem risco financeiro
+          </small>
+        </div>
+
+        <div class="form-group">
+          <label for="token_deriv_real">Token Deriv Real (Opcional)</label>
+          <input
+            type="text"
+            id="token_deriv_real"
+            name="token_deriv_real"
+            placeholder="Token da conta real (opcional)"
             autocomplete="off"
           />
           <small style="color: #888; font-size: 12px">
-            🧪 Opcional: Para testes e backup
+            💰 Opcional: Apenas quando desejar ativar conta real
           </small>
         </div>
 
@@ -200,9 +199,9 @@
           return;
         }
 
-        if (!tokenReal) {
+        if (!tokenReal && !tokenDemo) {
           e.preventDefault();
-          alert("❌ Por favor, forneça o token da conta REAL (obrigatório).");
+          alert("❌ Por favor, forneça pelo menos um token (Demo ou Real).");
           return;
         }
 

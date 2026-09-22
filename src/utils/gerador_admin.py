@@ -11,18 +11,23 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Tuple
 import logging
 
+try:
+    from config.config import Config
+except ImportError:
+    from src.config.config import Config
+
 logger = logging.getLogger(__name__)
 
 
 class GeradorLicencasAdmin:
     def __init__(self):
-        self.licencas_file = "data/licencas.json"
-        self.config_file = "data/admin_config.json"
+        self.licencas_file = os.path.join(Config.DATA_DIR, "licencas.json")
+        self.config_file = os.path.join(Config.DATA_DIR, "admin_config.json")
         self.ensure_files_exist()
 
     def ensure_files_exist(self):
         """Garante que os arquivos necessários existam"""
-        os.makedirs("data", exist_ok=True)
+        os.makedirs(Config.DATA_DIR, exist_ok=True)
 
         if not os.path.exists(self.licencas_file):
             with open(self.licencas_file, "w", encoding="utf-8") as f:

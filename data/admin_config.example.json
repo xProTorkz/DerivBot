@@ -1,0 +1,11 @@
+{
+  "email": {
+    "smtp_server": "smtp.gmail.com",
+    "smtp_port": 587,
+    "email_user": "seu@email.com",
+    "email_pass": "senha_do_app"
+  },
+  "api_key": "chave_api_gerada_automaticamente",
+  "admin_licenses": ["DERIVBOT-ADMIN-KEY1"],
+  "auto_send_email": false
+}

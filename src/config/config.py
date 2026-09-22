@@ -6,11 +6,19 @@ Contém constantes e configurações globais
 import os
 import json
 import logging
+import secrets
 from dotenv import load_dotenv
 
-# Carrega variáveis de ambiente do arquivo .env na pasta config
-env_path = os.path.join(os.path.dirname(__file__), ".env")
-load_dotenv(env_path)
+# Carrega variáveis de ambiente do arquivo .env (na raiz ou pasta config)
+BASE_DIR = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
+root_env = os.path.join(BASE_DIR, ".env")
+config_env = os.path.join(os.path.dirname(__file__), ".env")
+if os.path.exists(root_env):
+    load_dotenv(root_env)
+if os.path.exists(config_env):
+    load_dotenv(config_env)
 
 
 class Config:
@@ -18,9 +26,7 @@ class Config:
     VERSION = "2.0.0"
 
     # Diretórios - ajustado para a nova estrutura
-    BASE_DIR = os.path.dirname(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    )
+    BASE_DIR = BASE_DIR
     DATA_DIR = os.path.join(BASE_DIR, "data")
     LOGS_DIR = os.path.join(BASE_DIR, "logs")
 
@@ -30,7 +36,7 @@ class Config:
 
     # Configurações de logging
     LOG_CONFIG = {
-        "level": "INFO",  # DEBUG, INFO, WARNING, ERROR
+        "level": os.getenv("LOG_LEVEL", "INFO"),  # DEBUG, INFO, WARNING, ERROR
         "file": os.path.join(LOGS_DIR, "derivbot.log"),
         "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         "max_size": 10 * 1024 * 1024,  # 10MB
@@ -41,22 +47,28 @@ class Config:
 
     # Configurações da API Deriv
     DERIV_WEBSOCKET_URL = "wss://ws.derivws.com/websockets/v3"
-    DERIV_APP_ID = 71203
+    DERIV_APP_ID = int(os.getenv("DERIV_APP_ID", 71203))
 
     # Configurações do servidor Flask
-    FLASK_HOST = "0.0.0.0"
-    FLASK_PORT = 5000
+    FLASK_HOST = os.getenv("FLASK_HOST", "127.0.0.1")
+    FLASK_PORT = int(os.getenv("FLASK_PORT", 5001))
     FLASK_DEBUG = os.getenv("DEBUG", "False").lower() == "true"
     FLASK_ENV = os.getenv("FLASK_ENV", "production")
-    SECRET_KEY = os.getenv("SECRET_KEY", "derivbot-secret-key-2024-production")
+    SECRET_KEY = os.getenv("SECRET_KEY") or secrets.token_hex(32)
 
-    # Configurações de segurança
+    # Configurações de segurança e admin
     MAX_LOGIN_ATTEMPTS = 5
     SESSION_TIMEOUT = 3600  # segundos
     PASSWORD_MIN_LENGTH = 8
+    ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "")
+    ADMIN_LICENSES = [
+        lic.strip()
+        for lic in os.getenv("ADMIN_LICENSES", "DERIVBOT-82YM-E0VX").split(",")
+        if lic.strip()
+    ]
 
-    # Configurações de trading
-    MODO_REAL_PADRAO = True  # Sempre inicia em real por padrão
+    # Configurações de trading - DEMO POR PADRÃO (Issue #6)
+    MODO_REAL_PADRAO = False  # Sempre inicia em DEMO por segurança
     TIMEFRAME_PADRAO = 1  # segundos
     MAX_OPERACOES_SIMULTANEAS = 10
     ATIVO_PADRAO = "1HZ75V"  # VIX75 para scalping
@@ -68,15 +80,15 @@ class Config:
         "EMA": {"rapida": 8, "lenta": 21},
     }
 
-    # Configurações de email (opcional)
+    # Configurações de email (opcional via .env)
     EMAIL_CONFIG = {
-        "smtp_host": "smtp.gmail.com",
-        "smtp_port": 587,
-        "smtp_user": "",  # Configure se necessário
-        "smtp_pass": "",  # Configure se necessário
+        "smtp_host": os.getenv("SMTP_SERVER", "smtp.gmail.com"),
+        "smtp_port": int(os.getenv("SMTP_PORT", 587)),
+        "smtp_user": os.getenv("SMTP_USER", ""),
+        "smtp_pass": os.getenv("SMTP_PASS", ""),
     }
 
-    # API Key do DeepSeek (opcional - configure aqui se necessário)
+    # API Key do DeepSeek (opcional - via .env)
     DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 
     # Configurações de conexão e reconexão
@@ -323,3 +335,58 @@ class Config:
         except Exception as e:
             logging.error(f"Erro ao salvar configurações de notificação: {e}")
             return False
+
+
+# Constantes para módulos de análise técnica e inteligência
+CONFIG_MICRO_SCALPING_ANALISE = {
+    "suporte_resistencia_janela_velas": 5,
+    "suporte_resistencia_margem_percent": 0.03,
+    "meta_progresso_reducao_ops_percent": 75.0,
+    "rsi_sobrecompra_limiar": 70,
+    "rsi_sobrevenda_limiar": 30,
+    "suporte_resistencia_janela": 5,
+    "suporte_resistencia_margem": 0.03,
+    "rsi_sobrecompra": 70,
+    "rsi_sobrevenda": 30,
+    "meta_minima": 10.0,
+    "meta_progresso_reducao": 75.0,
+    "duracao_operacao": 1,
+    "multiplier_padrao": 1,
+    "ativo_padrao": "R_10",
+}
+
+RSI_PERIODO_PADRAO = 14
+RSI_SOBRECOMPRADO_PADRAO = 70
+RSI_SOBREVENDIDO_PADRAO = 30
+BOLLINGER_PERIODO_PADRAO = 20
+BOLLINGER_DESVIO_PADRAO = 2.0
+EMA_RAPIDA_PADRAO = 8
+EMA_LENTA_PADRAO = 21
+
+CONFIG_ANALISE_CATALOGADOR = {
+    "limites": {
+        "min_velas_analise": 10,
+    }
+}
+
+CONFIG_ESTRATEGIA_TURBO = {
+    "indicadores": {
+        "rsi_periodo": 14,
+    }
+}
+
+MODOS_OPERACAO_SCALPING = {
+    "iniciante": {
+        "max_operacoes_simultaneas": 1,
+        "confianca_min_sinal": 0.7,
+    },
+    "conservador": {
+        "max_operacoes_simultaneas": 3,
+        "confianca_min_sinal": 0.8,
+    },
+    "agressivo": {
+        "max_operacoes_simultaneas": 5,
+        "confianca_min_sinal": 0.6,
+    },
+}
+

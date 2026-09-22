@@ -190,13 +190,13 @@ MIT License - Veja LICENSE para detalhes.
 
 ### Configurações de Ambiente
 
-O arquivo `src/config/.env` contém:
+O arquivo `.env` (baseado em `.env.example`) contém:
 
 ```env
 # Configurações essenciais do DerivBot
-SECRET_KEY=chave_secreta_gerada_automaticamente
-DEEPSEEK_API_KEY=sk-d4f5f8438bb9483897d9d664bf2ee020
-FLASK_ENV=development
+SECRET_KEY=sua_chave_secreta_aqui
+DEEPSEEK_API_KEY=sua_chave_deepseek_aqui
+FLASK_ENV=production
 DEBUG=False
 ```
 

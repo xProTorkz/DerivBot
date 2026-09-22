@@ -819,6 +819,41 @@ class CatalogadorOtimizado:
         except Exception as e:
             print(f"Erro no log: {e}")
 
+    def pode_executar_operacao_agora(self) -> bool:
+        """Verifica se o intervalo mínimo entre operações foi respeitado"""
+        agora = time.time()
+        if agora - self.ultima_operacao_ts < self.intervalo_min_ops_s:
+            return False
+        return True
+
+    def verificar_protecao_operacoes(
+        self, operacoes_abertas: list, meta: float, lucro_atual: float
+    ) -> dict:
+        """Verifica se o robô pode parar com segurança sem ordens abertas pendentes"""
+        if operacoes_abertas and len(operacoes_abertas) > 0:
+            return {
+                "pode_parar": False,
+                "razao": f"Aguardando {len(operacoes_abertas)} operações abertas finalizarem",
+                "tempo_espera": 15,
+            }
+        return {"pode_parar": True, "razao": "Sem operações ativas"}
+
+    def obter_status_lucro(self) -> dict:
+        """Retorna o status consolidado de lucro e operações"""
+        return {
+            "lucro_sessao": self.lucro_total_sessao,
+            "total_operacoes": len(self.historico_operacoes_finalizadas),
+            "historico_recente": self.historico_operacoes_finalizadas[-10:],
+        }
+
+    def inicializar_scanner_ativos(self):
+        """Inicializa lista de ativos do scanner"""
+        self.ativos_priorizados = list(ATIVOS_SCALPING.keys())
+
+    def analisar_melhor_ativo(self) -> str:
+        """Retorna o melhor ativo selecionado para operações"""
+        return getattr(self, "ativo_selecionado", "1HZ75V")
+
 
 # Alias para compatibilidade - usa a versão otimizada
 Catalogador = CatalogadorOtimizado

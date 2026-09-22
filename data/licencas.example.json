@@ -1,0 +1,19 @@
+{
+  "licenca_exemplo": {
+    "codigo_licenca": "DERIVBOT-XXXX-XXXX",
+    "status": "ativa",
+    "plano": "vitalicio",
+    "validade": "VITALICIO",
+    "hwid": "",
+    "ip": "",
+    "deriv_real": "",
+    "deriv_demo": "",
+    "token_deriv_real": "",
+    "token_deriv_demo": "",
+    "data_criacao": "2025-01-01 00:00:00",
+    "data_vinculacao": "",
+    "cliente_email": "cliente@exemplo.com",
+    "cliente_nome": "Cliente Exemplo",
+    "observacoes": "Licença modelo"
+  }
+}

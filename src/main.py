@@ -5,7 +5,16 @@ Arquivo principal do DerivBot - Versão Enxuta
 Responsável por inicializar o servidor Flask e gerenciar as rotas principais
 """
 
+import sys
 import os
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+SRC_DIR = os.path.join(BASE_DIR, "src")
+if SRC_DIR not in sys.path:
+    sys.path.insert(0, SRC_DIR)
+
 import json
 import logging
 
@@ -864,23 +873,36 @@ def index():
         # Obtém tokens da licença
         token_real, token_demo = obter_tokens_da_licenca(licenca_auto)
 
-        if token_real:
+        if token_real or token_demo:
+            from config.config import Config
+            modo_real_padrao = getattr(Config, "MODO_REAL_PADRAO", False)
+
+            if token_demo and not modo_real_padrao:
+                tipo_conta = "demo"
+                token_ativo = token_demo
+            elif token_real:
+                tipo_conta = "real"
+                token_ativo = token_real
+            else:
+                tipo_conta = "demo"
+                token_ativo = token_demo
+
             # Configura sessão automaticamente
-            session["token"] = token_real
-            session["tipo_conta"] = "real"
+            session["token"] = token_ativo
+            session["tipo_conta"] = tipo_conta
             session["codigo_licenca"] = licenca_auto["codigo_licenca"]
             session["deriv_account"] = licenca_auto.get(
-                "deriv_real", f"account_{token_real[:8]}"
+                f"deriv_{tipo_conta}", f"account_{token_ativo[:8]}"
             )
-            session["token_real"] = token_real
-            session["token_demo"] = token_demo
+            session["token_real"] = token_real if token_real else ""
+            session["token_demo"] = token_demo if token_demo else ""
             session["saldo"] = 0
 
-            # Inicializa a API
-            inicializar_api(token_real)
+            # Inicializa a API com o token ativo
+            inicializar_api(token_ativo)
 
             logger.info(
-                f"[OK] Login automático realizado com sucesso - Licença: {licenca_auto['codigo_licenca']}"
+                f"[OK] Login automático realizado com sucesso - Licença: {licenca_auto['codigo_licenca']}, Modo: {tipo_conta}"
             )
             return redirect(url_for("painel"))
         else:
@@ -942,18 +964,24 @@ def login():
     if not codigo_licenca:
         return render_template("login.html", erro="Código de licença é obrigatório")
 
-    # Verifica se o token real foi fornecido (obrigatório)
-    if not token_real:
-        return render_template("login.html", erro="Token da conta REAL é obrigatório")
+    # Verifica se pelo menos um token foi fornecido
+    if not token_real and not token_demo:
+        return render_template(
+            "login.html", erro="Informe pelo menos um Token da Deriv (Demo ou Real)"
+        )
 
     # Valida o formato do código de licença
     if not validar_codigo_licenca(codigo_licenca):
         return render_template("login.html", erro="Código de licença inválido")
 
-    # Validação básica do formato do token
-    if len(token_real) < 10:
+    # Validação básica do formato dos tokens fornecidos
+    if token_real and len(token_real) < 10:
         return render_template(
             "login.html", erro="Token real deve ter pelo menos 10 caracteres"
+        )
+    if token_demo and len(token_demo) < 10:
+        return render_template(
+            "login.html", erro="Token demo deve ter pelo menos 10 caracteres"
         )
 
     # Carrega licenças existentes
@@ -999,83 +1027,85 @@ def login():
         licenca["ip"] = ip_atual
         logger.info(f"IP vinculado: {ip_atual}")
 
-    # Atualiza tokens (usuário pode trocar tokens livremente)
-    licenca["token_deriv_real"] = token_real
+    # Atualiza tokens fornecidos (usuário pode trocar tokens livremente)
+    if token_real:
+        licenca["token_deriv_real"] = token_real
     if token_demo:
         licenca["token_deriv_demo"] = token_demo
 
-    # Obtém o ID da conta real usando uma abordagem mais robusta
-    try:
-        logger.info(
-            f"[DEBUG] Tentando obter ID da conta real para token: {token_real[:10]}..."
-        )
+    # Obtém o ID da conta real se token real fornecido
+    if token_real:
+        try:
+            logger.info(
+                f"[DEBUG] Tentando obter ID da conta real para token: {token_real[:10]}..."
+            )
 
-        # Usa a função verificar_token que já funciona
-        valido, resultado = verificar_token(token_real)
-        if valido and resultado:
-            conta_id = resultado.get("conta_id", "")
-            if (
-                conta_id and conta_id != f"account_{token_real[:8]}"
-            ):  # Verifica se não é ID temporário
-                licenca["deriv_real"] = conta_id
-                logger.info(f"[OK] ID da conta real obtido e salvo: {conta_id}")
+            # Usa a função verificar_token que já funciona
+            valido, resultado = verificar_token(token_real)
+            if valido and resultado:
+                conta_id = resultado.get("conta_id", "")
+                if (
+                    conta_id and conta_id != f"account_{token_real[:8]}"
+                ):  # Verifica se não é ID temporário
+                    licenca["deriv_real"] = conta_id
+                    logger.info(f"[OK] ID da conta real obtido e salvo: {conta_id}")
 
-                # Atualiza saldo se disponível
-                saldo = resultado.get("saldo", 0)
-                if saldo:
-                    logger.info(f"[OK] Saldo da conta: {saldo}")
-            else:
-                # Se não conseguiu obter ID real, força uma nova tentativa
-                logger.warning(
-                    "[AVISO] ID da conta não obtido ou é temporário, tentando novamente..."
-                )
+                    # Atualiza saldo se disponível
+                    saldo = resultado.get("saldo", 0)
+                    if saldo:
+                        logger.info(f"[OK] Saldo da conta: {saldo}")
+                else:
+                    # Se não conseguiu obter ID real, força uma nova tentativa
+                    logger.warning(
+                        "[AVISO] ID da conta não obtido ou é temporário, tentando novamente..."
+                    )
 
-                # Tenta conectar diretamente para forçar obtenção do ID
-                from core.motor import Motor
+                    # Tenta conectar diretamente para forçar obtenção do ID
+                    from core.motor import Motor
 
-                motor_temp = Motor()
-                if motor_temp.conectar(token_real):
-                    import time
+                    motor_temp = Motor()
+                    if motor_temp.conectar(token_real):
+                        import time
 
-                    time.sleep(5)  # Aguarda mais tempo
+                        time.sleep(5)  # Aguarda mais tempo
 
-                    # Primeiro tenta o método normal
-                    conta_id_real = motor_temp.obter_id_conta()
-                    if not conta_id_real:
-                        # Se não funcionou, força uma nova requisição
-                        logger.info(
-                            "[RECONECTANDO] Tentando método forçado para obter ID real..."
-                        )
-                        conta_id_real = motor_temp.obter_id_conta_forcado()
+                        # Primeiro tenta o método normal
+                        conta_id_real = motor_temp.obter_id_conta()
+                        if not conta_id_real:
+                            # Se não funcionou, força uma nova requisição
+                            logger.info(
+                                "[RECONECTANDO] Tentando método forçado para obter ID real..."
+                            )
+                            conta_id_real = motor_temp.obter_id_conta_forcado()
 
-                    if conta_id_real:
-                        licenca["deriv_real"] = conta_id_real
-                        logger.info(
-                            f"[OK] ID da conta real obtido na segunda tentativa: {conta_id_real}"
-                        )
+                        if conta_id_real:
+                            licenca["deriv_real"] = conta_id_real
+                            logger.info(
+                                f"[OK] ID da conta real obtido na segunda tentativa: {conta_id_real}"
+                            )
 
-                        # Obtém e salva o saldo da conta real
-                        try:
-                            saldo_real = motor_temp.obter_saldo()
-                            if saldo_real:
-                                licenca["saldo_real"] = saldo_real
-                                logger.info(f"[SALDO] Saldo real salvo: {saldo_real}")
-                        except Exception as e:
-                            logger.error(f"Erro ao obter saldo real: {e}")
+                            # Obtém e salva o saldo da conta real
+                            try:
+                                saldo_real = motor_temp.obter_saldo()
+                                if saldo_real:
+                                    licenca["saldo_real"] = saldo_real
+                                    logger.info(f"[SALDO] Saldo real salvo: {saldo_real}")
+                            except Exception as e:
+                                logger.error(f"Erro ao obter saldo real: {e}")
+                        else:
+                            logger.error(
+                                "[ERRO] Não foi possível obter ID real da conta mesmo com método forçado"
+                            )
+
+                        motor_temp.desconectar()
                     else:
                         logger.error(
-                            "[ERRO] Não foi possível obter ID real da conta mesmo com método forçado"
+                            "[ERRO] Não foi possível conectar para obter ID da conta"
                         )
-
-                    motor_temp.desconectar()
-                else:
-                    logger.error(
-                        "[ERRO] Não foi possível conectar para obter ID da conta"
-                    )
-        else:
-            logger.warning(f"[AVISO] Não foi possível validar o token: {resultado}")
-    except Exception as e:
-        logger.error(f"[ERRO] Erro ao obter ID da conta real: {e}")
+            else:
+                logger.warning(f"[AVISO] Não foi possível validar o token: {resultado}")
+        except Exception as e:
+            logger.error(f"[ERRO] Erro ao obter ID da conta real: {e}")
 
     # Obtém o ID da conta demo se token demo foi fornecido
     if token_demo:
@@ -1136,30 +1166,49 @@ def login():
 
     logger.info(f"Licença atualizada: {codigo_licenca}")
 
+    # Configuração de conta padrão: prioriza Demo para segurança (Issue #6)
+    from config.config import Config
+    modo_real_padrao = getattr(Config, "MODO_REAL_PADRAO", False)
+
+    if token_demo and not modo_real_padrao:
+        tipo_conta_padrao = "demo"
+        token_ativo = token_demo
+    elif token_real:
+        tipo_conta_padrao = "real"
+        token_ativo = token_real
+    else:
+        tipo_conta_padrao = "demo"
+        token_ativo = token_demo
+
     # Marca a sessão como permanente
     session.permanent = True
 
     # Salva informações na sessão
     session["codigo_licenca"] = codigo_licenca
-    session["token"] = token_real  # Sempre usa token real como principal
-    session["tipo_conta"] = "real"  # Sempre inicia com conta real
-    session["token_real"] = token_real
+    session["token"] = token_ativo
+    session["tipo_conta"] = tipo_conta_padrao
+    session["token_real"] = token_real if token_real else ""
     session["token_demo"] = token_demo if token_demo else ""
 
-    # Usa o ID da conta real da licença se disponível
-    if licenca.get("deriv_real"):
+    # Usa o ID da conta correspondente se disponível
+    if tipo_conta_padrao == "real" and licenca.get("deriv_real"):
         session["deriv_account"] = licenca["deriv_real"]
         logger.info(f"[OK] Usando conta real: {licenca['deriv_real']}")
+    elif licenca.get("deriv_demo"):
+        session["deriv_account"] = licenca["deriv_demo"]
+        logger.info(f"[OK] Usando conta demo: {licenca['deriv_demo']}")
     else:
-        session["deriv_account"] = f"account_{token_real[:8]}"  # ID temporário
-        logger.warning("[AVISO] Usando ID temporário - conta real não identificada")
+        session["deriv_account"] = f"account_{token_ativo[:8]}"
+        logger.warning("[AVISO] Usando ID temporário de conta")
 
     session["saldo"] = 0
 
-    # Inicializa a API com o token real
-    inicializar_api(token_real)
+    # Inicializa a API com o token ativo
+    inicializar_api(token_ativo)
 
-    logger.info(f"Login realizado com sucesso - Licença: {codigo_licenca}")
+    logger.info(
+        f"Login realizado com sucesso - Licença: {codigo_licenca}, Modo: {tipo_conta_padrao}"
+    )
 
     # Redireciona para o painel
     return redirect(url_for("painel"))
@@ -1189,7 +1238,10 @@ def painel():
                 break
 
     # Prepara dados para o template
-    tipo_conta = session.get("tipo_conta", "real")  # Sempre real por padrão
+    from config.config import Config
+    tipo_conta = session.get(
+        "tipo_conta", "demo" if not getattr(Config, "MODO_REAL_PADRAO", False) else "real"
+    )
     saldo = session.get("saldo", 0)
 
     # Debug: Verifica tokens na sessão
@@ -1238,9 +1290,11 @@ def logout():
 
 @app.route("/admin")
 def admin():
-    """Rota do painel administrativo - ACESSO TEMPORARIAMENTE LIBERADO"""
-    # TEMPORÁRIO: Liberando acesso para configuração inicial
-    logger.info("[ADMIN] Acesso temporário ao admin liberado para configuração")
+    """Rota do painel administrativo - protegida por licença admin"""
+    autorizado, mensagem = verificar_acesso_admin()
+    if not autorizado:
+        logger.warning(f"[ADMIN] Tentativa de acesso não autorizada: {mensagem}")
+        return redirect(url_for("login"))
     return render_template("admin.html")
 
 
@@ -1256,7 +1310,7 @@ def redirecionar_se_nao_autenticado():
     """Redireciona para login se não estiver autenticado"""
     if not verificar_autenticacao():
         logger.warning("Usuário não autenticado - redirecionando para login")
-        return redirect(url_for("index"))
+        return redirect(url_for("login"))
     return None
 
 
@@ -1268,9 +1322,10 @@ def verificar_acesso_admin():
 
     # Verificar licença autorizada
     codigo_licenca = session.get("codigo_licenca")
-    LICENCAS_ADMIN_AUTORIZADAS = ["DERIVBOT-82YM-E0VX"]
+    from config.config import Config
+    licencas_admin = getattr(Config, "ADMIN_LICENSES", ["DERIVBOT-82YM-E0VX"])
 
-    if codigo_licenca not in LICENCAS_ADMIN_AUTORIZADAS:
+    if codigo_licenca not in licencas_admin:
         logger.warning(
             f"Tentativa de acesso API admin não autorizado - Licença: {codigo_licenca}"
         )
@@ -1935,14 +1990,27 @@ def status_robo():
         if licenca_auto:
             # Restaura sessão automaticamente
             token_real, token_demo = obter_tokens_da_licenca(licenca_auto)
-            if token_real:
-                session["token"] = token_real
-                session["tipo_conta"] = "real"
+            if token_real or token_demo:
+                from config.config import Config
+                modo_real = getattr(Config, "MODO_REAL_PADRAO", False)
+                if token_demo and not modo_real:
+                    tipo_conta = "demo"
+                    token_ativo = token_demo
+                elif token_real:
+                    tipo_conta = "real"
+                    token_ativo = token_real
+                else:
+                    tipo_conta = "demo"
+                    token_ativo = token_demo
+
+                session["token"] = token_ativo
+                session["tipo_conta"] = tipo_conta
                 session["codigo_licenca"] = licenca_auto["codigo_licenca"]
-                session["deriv_account"] = licenca_auto.get("deriv_real", "")
-                # Salva ambos os tokens na sessão para permitir troca de conta
-                session["token_real"] = token_real
-                session["token_demo"] = token_demo
+                session["deriv_account"] = licenca_auto.get(
+                    f"deriv_{tipo_conta}", f"account_{token_ativo[:8]}"
+                )
+                session["token_real"] = token_real if token_real else ""
+                session["token_demo"] = token_demo if token_demo else ""
             else:
                 return jsonify({"status": "erro", "mensagem": "Não autenticado"}), 401
         else:
@@ -1950,6 +2018,26 @@ def status_robo():
 
     try:
         global robo_ativo, modo_operacao, meta_diaria, status_operacao, ultima_mensagem
+
+        # Converte valores de forma segura logo no início
+        lucro_valor = 0.0
+        saldo_valor = 0.0
+
+        try:
+            if callable(lucro_atual):
+                lucro_valor = float(lucro_atual())
+            elif isinstance(lucro_atual, (int, float)):
+                lucro_valor = float(lucro_atual)
+        except Exception:
+            lucro_valor = 0.0
+
+        try:
+            if callable(saldo_atual):
+                saldo_valor = float(saldo_atual())
+            elif isinstance(saldo_atual, (int, float)):
+                saldo_valor = float(saldo_atual)
+        except Exception:
+            saldo_valor = 0.0
 
         # Sincroniza dados do motor antes de retornar
         sincronizar_dados_motor()
@@ -2007,29 +2095,6 @@ def status_robo():
                     "operacoes_ativas": 0,
                     "status": status_motor,
                 }
-
-        # Prepara dados seguros para JSON
-        # Converte valores de forma segura
-        lucro_valor = 0.0
-        saldo_valor = 0.0
-
-        try:
-            # Se lucro_atual é uma função, chama ela; senão usa o valor
-            if callable(lucro_atual):
-                lucro_valor = float(lucro_atual())
-            elif isinstance(lucro_atual, (int, float)):
-                lucro_valor = float(lucro_atual)
-        except:
-            lucro_valor = 0.0
-
-        try:
-            # Se saldo_atual é uma função, chama ela; senão usa o valor
-            if callable(saldo_atual):
-                saldo_valor = float(saldo_atual())
-            elif isinstance(saldo_atual, (int, float)):
-                saldo_valor = float(saldo_atual)
-        except:
-            saldo_valor = 0.0
 
         # Obtém logs de forma segura
         try:
@@ -2307,6 +2372,9 @@ def selecionar_conta():
 
 
 if __name__ == "__main__":
+    import socket
+    from config.config import Config
+
     # Carrega o histórico na inicialização
     carregar_historico()
 
@@ -2315,6 +2383,27 @@ if __name__ == "__main__":
     adicionar_log_tempo_real("Aguardando autenticação do usuário", "info")
     adicionar_log_tempo_real("Sistema pronto para operações", "info")
 
+    host = getattr(Config, "FLASK_HOST", "127.0.0.1")
+    porta = int(getattr(Config, "FLASK_PORT", 5001))
+
+    # Verifica se a porta configurada está livre; se não, procura a próxima
+    def testar_bind(h, p):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind((h, p))
+                return True
+        except OSError:
+            return False
+
+    if not testar_bind(host, porta):
+        for alt_port in [5001, 5050, 8080, 8000]:
+            if testar_bind(host, alt_port):
+                logger.warning(
+                    f"[REDE] Porta {porta} indisponível. Usando porta alternativa {alt_port}."
+                )
+                porta = alt_port
+                break
+
     # Inicia o servidor Flask
-    logger.info("[SISTEMA] Iniciando DerivBot...")
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    logger.info(f"[SISTEMA] Iniciando DerivBot em http://{host}:{porta}...")
+    app.run(host=host, port=porta, debug=False)
