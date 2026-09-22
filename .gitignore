@@ -80,7 +80,8 @@ tmp/
 *.rar
 *.tar.gz
 
-# Arquivos de teste
+# Arquivos de teste descartáveis
 test_*.py
 *_test.py
 tests/temp/
+!tests/test_micro_scalper.py

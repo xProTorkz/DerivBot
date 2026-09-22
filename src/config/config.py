@@ -381,12 +381,91 @@ MODOS_OPERACAO_SCALPING = {
         "confianca_min_sinal": 0.7,
     },
     "conservador": {
-        "max_operacoes_simultaneas": 3,
+        "max_operacoes_simultaneas": 1,
         "confianca_min_sinal": 0.8,
     },
     "agressivo": {
-        "max_operacoes_simultaneas": 5,
+        "max_operacoes_simultaneas": 1,
         "confianca_min_sinal": 0.6,
     },
 }
+
+# ==============================================================================
+# CONFIGURAÇÃO DO MICRO-SCALPER SELETIVO (Issues #2, #3, #4)
+# ==============================================================================
+MICRO_SCALPER_CONFIG = {
+    # 7. UMA OPERAÇÃO POR VEZ - Sem martingale, sem averaging down
+    "max_open_positions": 1,
+    "allow_martingale": False,
+    "max_martingale_steps": 0,
+    "martingale_multiplier": 1.0,
+
+    # 3. DETECTOR DE EXTREMOS
+    "extremo": {
+        "percentile_low": float(os.getenv("SCALPER_PERCENTILE_LOW", "5.0")),
+        "percentile_high": float(os.getenv("SCALPER_PERCENTILE_HIGH", "95.0")),
+        "z_score_threshold": float(os.getenv("SCALPER_Z_SCORE_THRESHOLD", "2.0")),
+        "janela_curta": int(os.getenv("SCALPER_JANELA_CURTA", "20")),
+        "janela_media": int(os.getenv("SCALPER_JANELA_MEDIA", "60")),
+        "janela_longa": int(os.getenv("SCALPER_JANELA_LONGA", "120")),
+        "rsi_oversold": float(os.getenv("SCALPER_RSI_OVERSOLD", "25.0")),
+        "rsi_overbought": float(os.getenv("SCALPER_RSI_OVERBOUGHT", "75.0")),
+        "bb_period": int(os.getenv("SCALPER_BB_PERIOD", "20")),
+        "bb_std": float(os.getenv("SCALPER_BB_STD", "2.0")),
+        "ema_fast": int(os.getenv("SCALPER_EMA_FAST", "8")),
+        "ema_slow": int(os.getenv("SCALPER_EMA_SLOW", "21")),
+    },
+
+    # 4. NÃO COMPRAR EM QUEDA SEM CONFIRMAÇÃO DE REVERSÃO
+    "reversao": {
+        "min_reversal_ticks": int(os.getenv("SCALPER_MIN_REVERSAL_TICKS", "3")),
+        "rsi_exit_margin": float(os.getenv("SCALPER_RSI_EXIT_MARGIN", "2.0")),
+        "min_ticks_desaceleracao": int(os.getenv("SCALPER_MIN_TICKS_DESACELERACAO", "2")),
+    },
+
+    # 5. SCORE DE CONFLUÊNCIA
+    "score": {
+        "min_score": float(os.getenv("SCALPER_MIN_SCORE", "85.0")),
+        "pesos": {
+            "extremo_estatistico": 25.0,  # percentil + z-score
+            "bollinger": 15.0,           # toque / rompimento de banda extrema
+            "rsi_extremo": 15.0,          # rsi sobrevendido/sobrecomprado
+            "distancia_ema": 15.0,        # esticamento em relação às EMAs
+            "confirmacao_reversao": 20.0, # esgotamento + virada de ticks
+            "saude_mercado": 10.0,        # volatilidade adequada + integridade dos dados
+        },
+    },
+
+    # 8. GATEWAY DE RISCO
+    "gateway_risco": {
+        "min_buffer_ticks": 30,
+        "max_spread_pct": 0.005,
+        "tempo_max_tick_stale_s": 2.5,
+        "min_balance_usd": 1.0,
+    },
+
+    # 11 & 12. SAÍDA NO PRIMEIRO LUCRO LÍQUIDO
+    "saida": {
+        "exit_mode": os.getenv("SCALPER_EXIT_MODE", "FIRST_POSITIVE_PROFIT"),
+        "min_exit_profit": float(os.getenv("SCALPER_MIN_EXIT_PROFIT", "0.02")),
+        "min_positive_updates": int(os.getenv("SCALPER_MIN_POSITIVE_UPDATES", "2")),
+        "max_hold_seconds": int(os.getenv("SCALPER_MAX_HOLD_SECONDS", "45")),
+    },
+
+    # 17. COOLDOWN
+    "cooldown": {
+        "tempo_minimo_segundos": int(os.getenv("SCALPER_COOLDOWN_SECONDS", "25")),
+    },
+
+    # 18. TELEMETRIA
+    "telemetria": {
+        "log_todas_oportunidades": True,
+        "max_historico_telemetria": 500,
+    },
+}
+
+# Vincula na classe Config para compatibilidade direta
+Config.MICRO_SCALPER = MICRO_SCALPER_CONFIG
+Config.MAX_OPEN_POSITIONS = 1
+
 

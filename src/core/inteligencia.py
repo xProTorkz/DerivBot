@@ -1,5 +1,6 @@
 import json
 import os
+import time
 import numpy as np
 import pandas as pd  # Keep pandas for Inteligencia class
 from typing import Dict, Any, List, Tuple, Optional
@@ -246,162 +247,778 @@ def calcular_rsi_local(
     return 100.0 - (100.0 / (1.0 + rs))
 
 
-def analisar_micro_scalping(
-    velas: List[Dict],
-    meta: float,
-    lucro_atual: float,
-    modo: str,
-    operacoes_ativas: int = 0,
-) -> Dict[str, Any]:
-    try:
-        if (
-            len(velas)
-            < global_config.CONFIG_ANALISE_CATALOGADOR["limites"]["min_velas_analise"]
-        ):  # Use min_velas from config
+# ==============================================================================
+# INTELIGÊNCIA MICRO-SCALPER EXTREMAMENTE SELETIVO (Issues #2, #3, #4)
+# ==============================================================================
+
+class MicroScalperState:
+    NORMAL = "NORMAL"
+    EXTREMO_DETECTADO = "EXTREMO_DETECTADO"
+    AGUARDANDO_REVERSAO = "AGUARDANDO_REVERSAO"
+    SINAL_CONFIRMADO = "SINAL_CONFIRMADO"
+    VALIDANDO_RISCO = "VALIDANDO_RISCO"
+    COMPRANDO = "COMPRANDO"
+    POSICAO_ABERTA = "POSICAO_ABERTA"
+    SAINDO = "SAINDO"
+    COOLDOWN = "COOLDOWN"
+
+
+class ExtremeDetector:
+    """
+    Detector de Extremos Estatísticos.
+    Identifica quando o ativo atingiu níveis extremos de sobrecompra ou sobrevenda
+    utilizando percentis históricos, z-score, bandas de Bollinger e RSI.
+    """
+
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        cfg_micro = getattr(global_config, "MICRO_SCALPER_CONFIG", {})
+        self.config = config or cfg_micro.get("extremo", {
+            "percentile_low": 5.0,
+            "percentile_high": 95.0,
+            "z_score_threshold": 2.0,
+            "rsi_oversold": 25.0,
+            "rsi_overbought": 75.0,
+            "bb_period": 20,
+            "bb_std": 2.0,
+        })
+
+    def detectar(self, snapshot: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Avalia se o snapshot de mercado representa um extremo estatístico.
+        Retorna diagnóstico completo com justificativa.
+        """
+        preco_atual = snapshot.get("preco_atual", 0.0)
+        ticks_count = snapshot.get("ticks_count", 0)
+
+        if preco_atual <= 0 or ticks_count < 10:
             return {
-                "sinal": None,
-                "confianca": 0.0,
-                "razao": "Dados de velas insuficientes",
+                "extremo_detectado": False,
+                "tipo_extremo": None,
+                "direcao_pretendida": None,
+                "pontuacao_extremo": 0.0,
+                "razao": f"Dados insuficientes para detecção de extremo (ticks: {ticks_count})",
+                "detalhes": {},
             }
 
-        modo_config = global_config.MODOS_OPERACAO_SCALPING.get(
-            modo, global_config.MODOS_OPERACAO_SCALPING["iniciante"]
+        percentil_curto = snapshot.get("percentil_curto", 50.0)
+        percentil_medio = snapshot.get("percentil_medio", 50.0)
+        z_score = snapshot.get("z_score", 0.0)
+        z_score_medio = snapshot.get("z_score_medio", z_score)
+        rsi = snapshot.get("rsi", 50.0)
+        bb_superior = snapshot.get("bb_superior", preco_atual)
+        bb_inferior = snapshot.get("bb_inferior", preco_atual)
+        dist_bb_inf = snapshot.get("distancia_bb_inferior", 0.0)
+        dist_bb_sup = snapshot.get("distancia_bb_superior", 0.0)
+
+        p_low = self.config.get("percentile_low", 5.0)
+        p_high = self.config.get("percentile_high", 95.0)
+        z_thresh = self.config.get("z_score_threshold", 2.0)
+        rsi_os = self.config.get("rsi_oversold", 25.0)
+        rsi_ob = self.config.get("rsi_overbought", 75.0)
+
+        # Condição 1: Extremo Baixo (Sobrevenda -> Oportunidade CALL)
+        cond_percentil_baixo = (percentil_curto <= p_low) or (percentil_medio <= p_low * 2.5 and percentil_curto <= 30.0)
+        cond_z_baixo = (z_score <= -z_thresh) or (z_score_medio <= -z_thresh and percentil_curto <= 30.0)
+        cond_rsi_baixo = rsi <= (rsi_os + 5.0)
+        cond_bb_baixo = (dist_bb_inf <= 0.02) or (preco_atual <= bb_inferior)
+
+        # Condição 2: Extremo Alto (Sobrecompra -> Oportunidade PUT)
+        cond_percentil_alto = (percentil_curto >= p_high) or (percentil_medio >= 100.0 - (p_low * 2.5) and percentil_curto >= 70.0)
+        cond_z_alto = (z_score >= z_thresh) or (z_score_medio >= z_thresh and percentil_curto >= 70.0)
+        cond_rsi_alto = rsi >= (rsi_ob - 5.0)
+        cond_bb_alto = (dist_bb_sup <= 0.02) or (preco_atual >= bb_superior)
+
+        detalhes = {
+            "percentil_curto": percentil_curto,
+            "percentil_medio": percentil_medio,
+            "z_score": z_score,
+            "z_score_medio": z_score_medio,
+            "rsi": rsi,
+            "dist_bb_inf": dist_bb_inf,
+            "dist_bb_sup": dist_bb_sup,
+        }
+
+        # Avaliação de Extremo Baixo (CALL)
+        confluencias_baixas = sum([cond_percentil_baixo, cond_z_baixo, cond_rsi_baixo, cond_bb_baixo])
+        if confluencias_baixas >= 2 and (cond_percentil_baixo or cond_z_baixo):
+            pontos = 15.0
+            if cond_percentil_baixo:
+                pontos += 5.0
+            if cond_z_baixo:
+                pontos += 5.0
+            pontos = min(25.0, pontos)
+            return {
+                "extremo_detectado": True,
+                "tipo_extremo": "BAIXO",
+                "direcao_pretendida": "CALL",
+                "pontuacao_extremo": round(pontos, 1),
+                "razao": f"Extremo Baixo: Pctl({percentil_curto:.1f}%), Z({z_score:.2f}), RSI({rsi:.1f})",
+                "detalhes": detalhes,
+            }
+
+        # Avaliação de Extremo Alto (PUT)
+        confluencias_altas = sum([cond_percentil_alto, cond_z_alto, cond_rsi_alto, cond_bb_alto])
+        if confluencias_altas >= 2 and (cond_percentil_alto or cond_z_alto):
+            pontos = 15.0
+            if cond_percentil_alto:
+                pontos += 5.0
+            if cond_z_alto:
+                pontos += 5.0
+            pontos = min(25.0, pontos)
+            return {
+                "extremo_detectado": True,
+                "tipo_extremo": "ALTO",
+                "direcao_pretendida": "PUT",
+                "pontuacao_extremo": round(pontos, 1),
+                "razao": f"Extremo Alto: Pctl({percentil_curto:.1f}%), Z({z_score:.2f}), RSI({rsi:.1f})",
+                "detalhes": detalhes,
+            }
+
+        # Sem extremo claro
+        return {
+            "extremo_detectado": False,
+            "tipo_extremo": None,
+            "direcao_pretendida": None,
+            "pontuacao_extremo": 0.0,
+            "razao": f"Mercado em faixa normal (Pctl: {percentil_curto:.1f}%, Z: {z_score:.2f}, RSI: {rsi:.1f})",
+            "detalhes": detalhes,
+        }
+
+
+class ReversalConfirmator:
+    """
+    Confirmador de Reversão.
+    REGRA MANDATÓRIA: NÃO COMPRAR UMA QUEDA SÓ PORQUE ESTÁ BAIXA.
+    Exige esgotamento da força direcional prévia e comprovação de virada (reversão)
+    através de sequência de ticks na direção oposta, desaceleração do slope e inflexão do RSI.
+    """
+
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        cfg_micro = getattr(global_config, "MICRO_SCALPER_CONFIG", {})
+        self.config = config or cfg_micro.get("reversao", {
+            "min_reversal_ticks": 3,
+            "rsi_exit_margin": 2.0,
+            "min_ticks_desaceleracao": 2,
+        })
+
+    def confirmar(
+        self,
+        direcao_pretendida: str,
+        ultimos_ticks: List[float],
+        snapshot: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Valida se há confirmação empírica de reversão para a direção pretendida.
+        """
+        min_ticks = self.config.get("min_reversal_ticks", 3)
+
+        if len(ultimos_ticks) < min_ticks + 2:
+            return {
+                "reversao_confirmada": False,
+                "pontuacao_reversao": 0.0,
+                "ticks_confirmados": 0,
+                "rsi_virou": False,
+                "razao": f"Histórico de ticks insuficiente ({len(ultimos_ticks)}/{min_ticks + 2})",
+                "detalhes": {},
+            }
+
+        ticks_recentes = ultimos_ticks[-(min_ticks + 3):]
+        rsi_atual = snapshot.get("rsi", 50.0)
+        inclinacao_curta = snapshot.get("inclinacao_curta", 0.0)
+
+        # 1. Contagem de ticks consecutivos na direção oposta
+        deltas = [ticks_recentes[i] - ticks_recentes[i - 1] for i in range(1, len(ticks_recentes))]
+        
+        ticks_favoraveis = 0
+        if direcao_pretendida == "CALL":
+            for d in reversed(deltas):
+                if d >= 0:
+                    ticks_favoraveis += 1
+                else:
+                    break
+        elif direcao_pretendida == "PUT":
+            for d in reversed(deltas):
+                if d <= 0:
+                    ticks_favoraveis += 1
+                else:
+                    break
+
+        # 2. Desaceleração / Inflexão do Slope
+        desacelerando = False
+        if direcao_pretendida == "CALL":
+            desacelerando = (inclinacao_curta >= -0.05) or (len(deltas) >= 2 and deltas[-1] > deltas[-2])
+        elif direcao_pretendida == "PUT":
+            desacelerando = (inclinacao_curta <= 0.05) or (len(deltas) >= 2 and deltas[-1] < deltas[-2])
+
+        # 3. Rejeição de Extremo (o último preço se afastou do extremo recente)
+        preco_atual = ticks_recentes[-1]
+        precos_anteriores = ticks_recentes[:-1]
+
+        rejeicao_extremo = False
+        if direcao_pretendida == "CALL":
+            min_anterior = min(precos_anteriores)
+            rejeicao_extremo = preco_atual >= min_anterior
+        elif direcao_pretendida == "PUT":
+            max_anterior = max(precos_anteriores)
+            rejeicao_extremo = preco_atual <= max_anterior
+
+        # Critério de aprovação:
+        # Pelo menos (min_ticks - 1) ticks na direção certa E rejeição do extremo E desaceleração
+        confirmado = (ticks_favoraveis >= (min_ticks - 1)) and rejeicao_extremo and desacelerando
+
+        pontuacao = 0.0
+        if confirmado:
+            pontuacao = 10.0
+            if ticks_favoraveis >= min_ticks:
+                pontuacao += 5.0
+            if desacelerando:
+                pontuacao += 5.0
+            pontuacao = min(20.0, pontuacao)
+
+        razao = (
+            f"Reversão confirmada ({ticks_favoraveis} ticks favoráveis, slope: {inclinacao_curta:.3f})"
+            if confirmado
+            else f"Aguardando reversão: ticks favoráveis={ticks_favoraveis}/{min_ticks}, rejeição={rejeicao_extremo}"
         )
-        max_operacoes_simultaneas = modo_config["max_operacoes_simultaneas"]
-
-        if operacoes_ativas >= max_operacoes_simultaneas:
-            return {
-                "sinal": None,
-                "confianca": 0.0,
-                "razao": f"Máximo de operações ({operacoes_ativas}/{max_operacoes_simultaneas})",
-            }
-
-        # Meta progress check (original logic)
-        meta_atingida_percent = (lucro_atual / meta * 100) if meta > 0 else 0
-        if (
-            meta_atingida_percent
-            > global_config.CONFIG_MICRO_SCALPING_ANALISE[
-                "meta_progresso_reducao_ops_percent"
-            ]
-        ):
-            reducao_fator = (100.0 - meta_atingida_percent) / (
-                100.0
-                - global_config.CONFIG_MICRO_SCALPING_ANALISE[
-                    "meta_progresso_reducao_ops_percent"
-                ]
-            )
-            max_ops_reduzido = max(1, int(max_operacoes_simultaneas * reducao_fator))
-            if operacoes_ativas >= max_ops_reduzido:
-                return {
-                    "sinal": None,
-                    "confianca": 0.0,
-                    "razao": f"Próximo da meta ({meta_atingida_percent:.1f}%). Ops limitadas a {max_ops_reduzido}",
-                }
-
-        closes = [v["close"] for v in velas]
-        # RSI from local calculation or preferably from a shared AnalisadorTecnico
-        rsi_period = global_config.CONFIG_ESTRATEGIA_TURBO["indicadores"]["rsi_periodo"]
-        rsi = calcular_rsi_local(closes, periodo=rsi_period)
-
-        suportes, resistencias = detectar_suporte_resistencia(velas)
-        preco_atual = velas[-1]["close"]
-
-        # Simplified direction: last 3 candles
-        if len(velas) >= 3:
-            direcao_curta = (
-                "ALTA"
-                if velas[-1]["close"] > velas[-3]["close"]
-                else ("BAIXA" if velas[-1]["close"] < velas[-3]["close"] else "NEUTRA")
-            )
-        else:
-            direcao_curta = "NEUTRA"
-
-        # Volatility: Standard deviation of last 10 closes
-        volatilidade = np.std(closes[-10:]) if len(closes) >= 10 else 0.0
-
-        # Força da tendência: (preco_atual - preco_5_velas_atras) / preco_5_velas_atras
-        if len(closes) >= 5 and closes[-5] != 0:
-            forca_tendencia = abs(closes[-1] - closes[-5]) / closes[-5] * 100
-        else:
-            forca_tendencia = 0.0
-
-        decisao = None
-        confianca = 0.0
-        razao = "Aguardando"
-
-        conf_min_modo = modo_config["confianca_min_sinal"]
-        rsi_sobrecompra_lim = global_config.CONFIG_MICRO_SCALPING_ANALISE[
-            "rsi_sobrecompra_limiar"
-        ]
-        rsi_sobrevenda_lim = global_config.CONFIG_MICRO_SCALPING_ANALISE[
-            "rsi_sobrevenda_limiar"
-        ]
-        margem_sr = global_config.CONFIG_MICRO_SCALPING_ANALISE[
-            "suporte_resistencia_margem_percent"
-        ]
-
-        # Lógica de Decisão (simplificada para exemplo, pode ser mais complexa)
-        if (
-            esta_em_suporte_ou_resistencia(preco_atual, resistencias, margem_sr)
-            and rsi > rsi_sobrecompra_lim
-        ):
-            decisao = "venda"
-            confianca = 0.70 + (rsi - rsi_sobrecompra_lim) / 100.0  # Base + rsi factor
-            razao = f"Resistência ({preco_atual:.5f}) + RSI Sobrecomprado ({rsi:.1f})"
-        elif (
-            esta_em_suporte_ou_resistencia(preco_atual, suportes, margem_sr)
-            and rsi < rsi_sobrevenda_lim
-        ):
-            decisao = "compra"
-            confianca = 0.70 + (rsi_sobrevenda_lim - rsi) / 100.0
-            razao = f"Suporte ({preco_atual:.5f}) + RSI Sobrevendido ({rsi:.1f})"
-
-        # Adicionar lógica de tendência se não houver sinal de S/R forte
-        elif decisao is None:
-            if (
-                direcao_curta == "ALTA"
-                and forca_tendencia > 0.05
-                and rsi > 50
-                and rsi < rsi_sobrecompra_lim - 5
-            ):  # Ex: 0.05% de força, RSI não extremo
-                decisao = "compra"
-                confianca = 0.60 + forca_tendencia * 10  # Confiança baseada na força
-                razao = f"Tendência de Alta ({direcao_curta}), Força: {forca_tendencia:.3f}%, RSI: {rsi:.1f}"
-            elif (
-                direcao_curta == "BAIXA"
-                and forca_tendencia > 0.05
-                and rsi < 50
-                and rsi > rsi_sobrevenda_lim + 5
-            ):
-                decisao = "venda"
-                confianca = 0.60 + forca_tendencia * 10
-                razao = f"Tendência de Baixa ({direcao_curta}), Força: {forca_tendencia:.3f}%, RSI: {rsi:.1f}"
-
-        if decisao and confianca < conf_min_modo:
-            razao += f" (Conf {confianca:.2f} < Min {conf_min_modo} - Aguardando)"
-            decisao = None
-            confianca = 0.0
-
-        confianca = min(confianca, 0.99)  # Cap confidence
 
         return {
-            "sinal": decisao,
-            "confianca": round(confianca, 2),
+            "reversao_confirmada": confirmado,
+            "pontuacao_reversao": round(pontuacao, 1),
+            "ticks_confirmados": ticks_favoraveis,
+            "rejeicao_extremo": rejeicao_extremo,
+            "desacelerando": desacelerando,
             "razao": razao,
-            "analise": {
-                "preco": preco_atual,
-                "rsi": round(rsi, 1),
-                "direcao": direcao_curta,
-                "forca_tendencia": round(forca_tendencia, 3),
-                "volatilidade": round(volatilidade, 5),
-                "suportes": suportes[-3:],
-                "resistencias": resistencias[-3:],
-                "meta_progresso_percent": round(meta_atingida_percent, 1),
+            "detalhes": {
+                "ticks_favoraveis": ticks_favoraveis,
+                "inclinacao_curta": inclinacao_curta,
+                "rejeicao_extremo": rejeicao_extremo,
             },
         }
+
+
+class ConfluenceScore:
+    """
+    Score de Confluência Ponderado.
+    Calcula pontuação de 0 a 100 com base em múltiplos fatores independentes:
+    - Extremo estatístico (percentil + z-score): até 25 pts
+    - Bollinger Bands (toque/rompimento): até 15 pts
+    - RSI extremo e inflexão: até 15 pts
+    - Distância das Médias Móveis (esticamento): até 15 pts
+    - Confirmação de reversão (ticks + slope): até 20 pts
+    - Saúde do mercado (volatilidade e dados): até 10 pts
+
+    Sinal SOMENTE emitido se Score >= min_score (padrão: 85).
+    """
+
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        cfg_micro = getattr(global_config, "MICRO_SCALPER_CONFIG", {})
+        self.config = config or cfg_micro.get("score", {
+            "min_score": 85.0,
+            "pesos": {
+                "extremo_estatistico": 25.0,
+                "bollinger": 15.0,
+                "rsi_extremo": 15.0,
+                "distancia_ema": 15.0,
+                "confirmacao_reversao": 20.0,
+                "saude_mercado": 10.0,
+            },
+        })
+        self.min_score = self.config.get("min_score", 85.0)
+
+    def calcular(
+        self,
+        direcao_pretendida: str,
+        extremo_res: Dict[str, Any],
+        reversao_res: Dict[str, Any],
+        snapshot: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Calcula o score de confluência final e decide se emite sinal.
+        """
+        scores = {}
+
+        # 1. Extremo estatístico (0 a 25)
+        scores["extremo_estatistico"] = extremo_res.get("pontuacao_extremo", 0.0)
+
+        # 2. Bollinger Bands (0 a 15)
+        preco_atual = snapshot.get("preco_atual", 0.0)
+        bb_superior = snapshot.get("bb_superior", preco_atual)
+        bb_inferior = snapshot.get("bb_inferior", preco_atual)
+        bb_media = snapshot.get("bb_media", preco_atual)
+
+        bb_score = 0.0
+        if direcao_pretendida == "CALL":
+            if preco_atual <= bb_inferior:
+                bb_score = 15.0
+            elif bb_media > bb_inferior and preco_atual < (bb_inferior + (bb_media - bb_inferior) * 0.4):
+                bb_score = 12.0
+            elif bb_media > bb_inferior and preco_atual < (bb_inferior + (bb_media - bb_inferior) * 0.6):
+                bb_score = 8.0
+        elif direcao_pretendida == "PUT":
+            if preco_atual >= bb_superior:
+                bb_score = 15.0
+            elif bb_superior > bb_media and preco_atual > (bb_superior - (bb_superior - bb_media) * 0.4):
+                bb_score = 12.0
+            elif bb_superior > bb_media and preco_atual > (bb_superior - (bb_superior - bb_media) * 0.6):
+                bb_score = 8.0
+        scores["bollinger"] = bb_score
+
+        # 3. RSI extremo (0 a 15)
+        rsi = snapshot.get("rsi", 50.0)
+        rsi_score = 0.0
+        if direcao_pretendida == "CALL":
+            if rsi <= 25.0:
+                rsi_score = 15.0
+            elif rsi <= 30.0:
+                rsi_score = 12.0
+            elif rsi <= 35.0:
+                rsi_score = 8.0
+        elif direcao_pretendida == "PUT":
+            if rsi >= 75.0:
+                rsi_score = 15.0
+            elif rsi >= 70.0:
+                rsi_score = 12.0
+            elif rsi >= 65.0:
+                rsi_score = 8.0
+        scores["rsi_extremo"] = rsi_score
+
+        # 4. Distância das EMAs (0 a 15)
+        ema_rapida = snapshot.get("ema_rapida", preco_atual)
+        ema_score = 0.0
+        if preco_atual > 0:
+            dist_ema_rapida = abs(preco_atual - ema_rapida) / preco_atual
+            if direcao_pretendida == "CALL" and preco_atual < ema_rapida:
+                if dist_ema_rapida >= 0.0008:
+                    ema_score = 15.0
+                else:
+                    ema_score = 10.0
+            elif direcao_pretendida == "PUT" and preco_atual > ema_rapida:
+                if dist_ema_rapida >= 0.0008:
+                    ema_score = 15.0
+                else:
+                    ema_score = 10.0
+            else:
+                ema_score = 5.0
+        scores["distancia_ema"] = ema_score
+
+        # 5. Confirmação de reversão (0 a 20)
+        scores["confirmacao_reversao"] = reversao_res.get("pontuacao_reversao", 0.0)
+
+        # 6. Saúde do mercado (0 a 10)
+        volatilidade = snapshot.get("volatilidade_instantanea", 0.0)
+        ticks_count = snapshot.get("ticks_count", 0)
+        saude_score = 0.0
+        if ticks_count >= 30 and volatilidade > 0:
+            saude_score = 10.0
+        elif ticks_count >= 15:
+            saude_score = 6.0
+        scores["saude_mercado"] = saude_score
+
+        # Soma ponderada
+        score_total = sum(scores.values())
+        score_total = min(100.0, round(score_total, 1))
+
+        aprovado = (score_total >= self.min_score) and reversao_res.get("reversao_confirmada", False)
+
+        motivos_recusa = []
+        if not extremo_res.get("extremo_detectado", False):
+            motivos_recusa.append("Sem extremo estatístico confirmado")
+        if not reversao_res.get("reversao_confirmada", False):
+            motivos_recusa.append(f"Reversão não confirmada ({reversao_res.get('razao')})")
+        if score_total < self.min_score:
+            motivos_recusa.append(f"Score {score_total:.1f} abaixo do mínimo {self.min_score:.1f}")
+
+        motivo_recusa_str = " | ".join(motivos_recusa) if motivos_recusa else ""
+
+        return {
+            "aprovado": aprovado,
+            "score": score_total,
+            "min_score": self.min_score,
+            "scores_detalhados": scores,
+            "sinal": direcao_pretendida if aprovado else None,
+            "motivo_recusa": motivo_recusa_str,
+            "razao": (
+                f"SINAL {direcao_pretendida} CONFIRMADO (Score {score_total:.1f}/{self.min_score:.1f})"
+                if aprovado
+                else f"Recusado: {motivo_recusa_str}"
+            ),
+        }
+
+
+class MicroScalperStateMachine:
+    """
+    Máquina de Estados Finita do Micro-Scalper.
+    Estados:
+    - NORMAL: Monitorando mercado e calculando estatísticas
+    - EXTREMO_DETECTADO: Extremo estatístico identificado
+    - AGUARDANDO_REVERSAO: Aguardando virada de ticks e inflexão
+    - SINAL_CONFIRMADO: Extremo + Reversão + Confluence Score >= 85
+    - VALIDANDO_RISCO: Gateway de risco checando spread, stale data, max open positions
+    - COMPRANDO: Ordem em trânsito na Deriv API
+    - POSICAO_ABERTA: Contrato em monitoramento via WebSocket
+    - SAINDO: Disparo de venda no primeiro lucro líquido positivo
+    - COOLDOWN: Intervalo pós-operação para evitar overtrading
+    """
+
+    def __init__(self):
+        self.estado_atual = MicroScalperState.NORMAL
+        self.tempo_mudanca_estado = time.time()
+        self.ultimo_sinal = None
+        self.ultimo_score = 0.0
+        self.ultimo_motivo_recusa = "Aguardando inicialização"
+        self.historico_estados: List[Dict[str, Any]] = []
+        self.total_sinais_gerados = 0
+        self.total_operacoes_concluidas = 0
+        self.operacoes_vitoriosas = 0
+        self.operacoes_derrotadas = 0
+
+    def transitar(self, novo_estado: str, motivo: str = ""):
+        """Registra a transição de estado garantindo rastreabilidade."""
+        if self.estado_atual != novo_estado:
+            agora = time.time()
+            duracao_anterior = agora - self.tempo_mudanca_estado
+            logger_intel.info(
+                f"🔄 Transição de Estado: [{self.estado_atual}] -> [{novo_estado}] "
+                f"(Duração anterior: {duracao_anterior:.2f}s) - Motivo: {motivo}"
+            )
+            self.historico_estados.append({
+                "de": self.estado_atual,
+                "para": novo_estado,
+                "tempo": datetime.now().isoformat(),
+                "duracao_segundos": round(duracao_anterior, 2),
+                "motivo": motivo,
+            })
+            if len(self.historico_estados) > 100:
+                self.historico_estados.pop(0)
+
+            self.estado_atual = novo_estado
+            self.tempo_mudanca_estado = agora
+
+    def registrar_resultado_operacao(self, lucro: float, motivo_saida: str):
+        """Atualiza estatísticas de desempenho empírico."""
+        self.total_operacoes_concluidas += 1
+        if lucro > 0:
+            self.operacoes_vitoriosas += 1
+        else:
+            self.operacoes_derrotadas += 1
+
+    def obter_win_rate(self) -> float:
+        """Calcula o win rate real observado."""
+        if self.total_operacoes_concluidas == 0:
+            return 0.0
+        return round((self.operacoes_vitoriosas / self.total_operacoes_concluidas) * 100, 2)
+
+    def obter_telemetria(self) -> Dict[str, Any]:
+        """Retorna snapshot completo da telemetria da máquina de estados."""
+        tempo_no_estado = round(time.time() - self.tempo_mudanca_estado, 1)
+        return {
+            "estado_atual": self.estado_atual,
+            "tempo_no_estado_s": tempo_no_estado,
+            "ultimo_score": self.ultimo_score,
+            "ultimo_motivo_recusa": self.ultimo_motivo_recusa,
+            "total_sinais": self.total_sinais_gerados,
+            "total_operacoes": self.total_operacoes_concluidas,
+            "operacoes_vitoriosas": self.operacoes_vitoriosas,
+            "operacoes_derrotadas": self.operacoes_derrotadas,
+            "win_rate_observado": self.obter_win_rate(),
+        }
+
+
+# Instância global da máquina de estados do módulo
+state_machine_micro_scalper = MicroScalperStateMachine()
+
+
+def analisar_micro_scalping(
+    dados_ou_snapshot: Any,
+    meta: float = 20.0,
+    lucro_atual: float = 0.0,
+    modo: str = "iniciante",
+    operacoes_ativas: int = 0,
+    ultimos_ticks: Optional[List[float]] = None,
+) -> Dict[str, Any]:
+    """
+    ANÁLISE CANÔNICA DO MICRO-SCALPER SELETIVO.
+    Substitui qualquer lógica aleatória por análise estatística determinística.
+    Integra ExtremeDetector, ReversalConfirmator, ConfluenceScore e StateMachine.
+    """
+    try:
+        sm = state_machine_micro_scalper
+
+        # 1. Checagem de meta diária atingida
+        if meta > 0 and lucro_atual >= meta:
+            sm.transitar(MicroScalperState.NORMAL, "Meta diária atingida")
+            sm.ultimo_motivo_recusa = f"Meta diária de ${meta:.2f} atingida"
+            return {
+                "sinal": None,
+                "confianca": 0.0,
+                "score": 0.0,
+                "estado": sm.estado_atual,
+                "razao": f"Meta diária de ${meta:.2f} já atingida (Lucro atual: ${lucro_atual:.2f})",
+                "motivo_recusa": sm.ultimo_motivo_recusa,
+            }
+
+        # 2. Checagem de operações ativas (MAX_OPEN_POSITIONS = 1)
+        if operacoes_ativas >= 1:
+            sm.transitar(MicroScalperState.POSICAO_ABERTA, "Operação aberta em andamento")
+            sm.ultimo_motivo_recusa = f"Já existe operação ativa ({operacoes_ativas}/1)"
+            return {
+                "sinal": None,
+                "confianca": 0.0,
+                "score": sm.ultimo_score,
+                "estado": sm.estado_atual,
+                "razao": "Aguardando fechamento de operação em andamento (MAX=1)",
+                "motivo_recusa": sm.ultimo_motivo_recusa,
+            }
+
+        # 3. Normalização dos dados de entrada (pode receber snapshot dict ou lista de velas)
+        snapshot: Dict[str, Any] = {}
+        ticks: List[float] = ultimos_ticks or []
+
+        if isinstance(dados_ou_snapshot, dict) and "preco_atual" in dados_ou_snapshot:
+            snapshot = dados_ou_snapshot
+            if not ticks and "ultimos_ticks" in snapshot:
+                ticks = snapshot["ultimos_ticks"]
+        elif isinstance(dados_ou_snapshot, list) and len(dados_ou_snapshot) > 0:
+            # Converte lista de velas ou ticks para snapshot simplificado
+            if isinstance(dados_ou_snapshot[0], dict):
+                closes = [v["close"] for v in dados_ou_snapshot]
+            else:
+                closes = [float(x) for x in dados_ou_snapshot]
+            
+            preco_atual = closes[-1]
+            ticks = closes[-60:]
+            
+            # Cálculo rápido de indicadores para compatibilidade
+            rsi = calcular_rsi_local(closes, 14)
+            p_curto = float(np.percentile(closes[-20:], 50)) if len(closes) >= 20 else 50.0
+            p_curto_val = (sum(1 for x in closes[-20:] if x <= preco_atual) / len(closes[-20:]) * 100) if len(closes) >= 20 else 50.0
+            mean_c = np.mean(closes[-20:]) if len(closes) >= 20 else preco_atual
+            std_c = np.std(closes[-20:]) if len(closes) >= 20 else 1.0
+            z_score = (preco_atual - mean_c) / std_c if std_c > 0 else 0.0
+
+            snapshot = {
+                "preco_atual": preco_atual,
+                "ticks_count": len(closes),
+                "rsi": rsi,
+                "percentil_curto": p_curto_val,
+                "percentil_medio": p_curto_val,
+                "z_score": z_score,
+                "bb_superior": mean_c + 2.0 * std_c,
+                "bb_inferior": mean_c - 2.0 * std_c,
+                "bb_media": mean_c,
+                "distancia_bb_superior": (mean_c + 2.0 * std_c - preco_atual) / preco_atual if preco_atual > 0 else 0.0,
+                "distancia_bb_inferior": (preco_atual - (mean_c - 2.0 * std_c)) / preco_atual if preco_atual > 0 else 0.0,
+                "ema_rapida": mean_c,
+                "ema_lenta": mean_c,
+                "inclinacao_curta": (closes[-1] - closes[-5]) / 5.0 if len(closes) >= 5 else 0.0,
+                "volatilidade_instantanea": std_c / mean_c if mean_c > 0 else 0.0,
+            }
+        else:
+            sm.ultimo_motivo_recusa = "Formato de dados não reconhecido"
+            return {
+                "sinal": None,
+                "confianca": 0.0,
+                "score": 0.0,
+                "estado": sm.estado_atual,
+                "razao": "Dados insuficientes ou inválidos",
+                "motivo_recusa": sm.ultimo_motivo_recusa,
+            }
+
+        # 4. Detector de Extremos
+        detector = ExtremeDetector()
+        extremo_res = detector.detectar(snapshot)
+
+        if not extremo_res["extremo_detectado"]:
+            sm.transitar(MicroScalperState.NORMAL, "Mercado em faixa normal")
+            sm.ultimo_motivo_recusa = extremo_res["razao"]
+            sm.ultimo_score = 0.0
+            return {
+                "sinal": None,
+                "confianca": 0.0,
+                "score": 0.0,
+                "estado": sm.estado_atual,
+                "razao": extremo_res["razao"],
+                "motivo_recusa": extremo_res["razao"],
+                "analise": snapshot,
+            }
+
+        # Extremo detectado!
+        direcao = extremo_res["direcao_pretendida"]
+        sm.transitar(
+            MicroScalperState.EXTREMO_DETECTADO,
+            f"Extremo {extremo_res['tipo_extremo']} detectado para {direcao}",
+        )
+
+        # 5. Confirmador de Reversão
+        sm.transitar(MicroScalperState.AGUARDANDO_REVERSAO, f"Validando virada para {direcao}")
+        confirmador = ReversalConfirmator()
+        reversao_res = confirmador.confirmar(direcao, ticks, snapshot)
+
+        # 6. Score de Confluência
+        confluence = ConfluenceScore()
+        score_res = confluence.calcular(direcao, extremo_res, reversao_res, snapshot)
+        sm.ultimo_score = score_res["score"]
+
+        if not score_res["aprovado"]:
+            sm.ultimo_motivo_recusa = score_res["motivo_recusa"]
+            return {
+                "sinal": None,
+                "confianca": round(score_res["score"] / 100.0, 2),
+                "score": score_res["score"],
+                "min_score": score_res["min_score"],
+                "estado": sm.estado_atual,
+                "razao": score_res["razao"],
+                "motivo_recusa": score_res["motivo_recusa"],
+                "scores_detalhados": score_res["scores_detalhados"],
+                "analise": snapshot,
+            }
+
+        # SINAL APROVADO COM EXTREMO + REVERSÃO + CONFLUÊNCIA >= 85!
+        sm.transitar(
+            MicroScalperState.SINAL_CONFIRMADO,
+            f"Sinal {direcao} aprovado com score {score_res['score']:.1f}",
+        )
+        sm.total_sinais_gerados += 1
+        sm.ultimo_sinal = direcao
+        sm.ultimo_motivo_recusa = "Nenhum (Sinal ativo e confirmado)"
+
+        return {
+            "sinal": direcao,
+            "tipo": direcao,
+            "confianca": round(score_res["score"] / 100.0, 2),
+            "score": score_res["score"],
+            "min_score": score_res["min_score"],
+            "estado": sm.estado_atual,
+            "razao": score_res["razao"],
+            "motivo_recusa": "",
+            "scores_detalhados": score_res["scores_detalhados"],
+            "analise": snapshot,
+        }
+
     except Exception as e:
         logger_intel.error(f"Erro na análise de micro scalping: {e}", exc_info=True)
-        return {"sinal": None, "confianca": 0.0, "razao": f"Erro: {str(e)}"}
+        return {
+            "sinal": None,
+            "confianca": 0.0,
+            "score": 0.0,
+            "estado": MicroScalperState.NORMAL,
+            "razao": f"Erro interno na inteligência: {str(e)}",
+            "motivo_recusa": str(e),
+        }
+
+
+def executar_replay_ticks(
+    historico_ticks: List[float],
+    meta_lucro: float = 10.0,
+    stake: float = 1.0,
+    payout_ratio: float = 0.85,
+    min_exit_profit: float = 0.05,
+    max_hold_ticks: int = 45,
+) -> Dict[str, Any]:
+    """
+    Framework determinístico de replay de ticks para Walk-Forward / Backtest.
+    Simula exatamente o pipeline:
+    Tick feed -> Catalogador -> ExtremeDetector -> ReversalConfirmator -> ConfluenceScore -> Saída no 1º Lucro.
+    """
+    from src.core.catalogador import CatalogadorOtimizado
+
+    cat = CatalogadorOtimizado()
+    cat.ativo_selecionado = "1HZ75V"
+    sm_local = MicroScalperStateMachine()
+
+    operacoes = []
+    motivos_recusa_contagem = {}
+    ticks_buffer = []
+
+    posicao_ativa = None
+    lucro_acumulado = 0.0
+
+    for i, preco in enumerate(historico_ticks):
+        cat.adicionar_tick(preco)
+        ticks_buffer.append(preco)
+
+        # Se temos posição aberta, avaliamos condição de saída
+        if posicao_ativa is not None:
+            ticks_em_posicao = i - posicao_ativa["tick_indice_entrada"]
+            preco_entrada = posicao_ativa["preco_entrada"]
+            direcao = posicao_ativa["tipo"]
+
+            # Variação percentual do preço
+            delta_pct = (preco - preco_entrada) / preco_entrada if direcao == "CALL" else (preco_entrada - preco) / preco_entrada
+            
+            # Estimativa de lucro proporcional na Deriv
+            # No primeiro tick positivo com lucro líquido real:
+            lucro_estimado = delta_pct * stake * 50.0  # Fator de alavancagem sintética
+            
+            # Condição de saída: primeiro lucro positivo >= min_exit_profit OU timeout
+            saiu = False
+            motivo_saida = ""
+            lucro_final = 0.0
+
+            if lucro_estimado >= min_exit_profit:
+                saiu = True
+                lucro_final = lucro_estimado
+                motivo_saida = "FIRST_POSITIVE_PROFIT"
+            elif ticks_em_posicao >= max_hold_ticks:
+                saiu = True
+                lucro_final = lucro_estimado
+                motivo_saida = "MAX_HOLD_TIMEOUT"
+
+            if saiu:
+                lucro_acumulado += lucro_final
+                sm_local.registrar_resultado_operacao(lucro_final, motivo_saida)
+                posicao_ativa["tick_indice_saida"] = i
+                posicao_ativa["preco_saida"] = preco
+                posicao_ativa["lucro"] = round(lucro_final, 4)
+                posicao_ativa["motivo_saida"] = motivo_saida
+                posicao_ativa["duracao_ticks"] = ticks_em_posicao
+                operacoes.append(posicao_ativa)
+                posicao_ativa = None
+            continue
+
+        # Se não há posição aberta, analisa oportunidade
+        if i < 30:
+            continue
+
+        snapshot = cat.obter_snapshot_mercado("1HZ75V")
+        analise = analisar_micro_scalping(
+            dados_ou_snapshot=snapshot,
+            meta=meta_lucro,
+            lucro_atual=lucro_acumulado,
+            modo="iniciante",
+            operacoes_ativas=0,
+            ultimos_ticks=ticks_buffer[-60:],
+        )
+
+        sinal = analise.get("sinal")
+        if sinal:
+            posicao_ativa = {
+                "id": len(operacoes) + 1,
+                "tipo": sinal,
+                "preco_entrada": preco,
+                "tick_indice_entrada": i,
+                "score": analise.get("score", 0.0),
+                "timestamp_simulado": i,
+            }
+        else:
+            motivo = analise.get("motivo_recusa", "Sem motivo")
+            motivos_recusa_contagem[motivo] = motivos_recusa_contagem.get(motivo, 0) + 1
+
+    total_ops = len(operacoes)
+    wins = sum(1 for op in operacoes if op["lucro"] > 0)
+    losses = total_ops - wins
+    win_rate = (wins / total_ops * 100) if total_ops > 0 else 0.0
+
+    return {
+        "total_ticks": len(historico_ticks),
+        "total_operacoes": total_ops,
+        "vitorias": wins,
+        "derrotas": losses,
+        "win_rate_percent": round(win_rate, 2),
+        "lucro_acumulado": round(lucro_acumulado, 2),
+        "motivos_recusa_principais": dict(sorted(motivos_recusa_contagem.items(), key=lambda x: x[1], reverse=True)[:5]),
+        "historico_operacoes": operacoes,
+    }
 
 
 # Classe Inteligencia (mais geral, baseada em pandas)

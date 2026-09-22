@@ -466,10 +466,10 @@
 
       <!-- Rodapé -->
       <div class="rodape-painel">
-        <div class="status-conexao">
+        <div class="status-conexao" style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
           <div class="status-dot pequeno" id="status-dot-conexao"></div>
           <span class="texto-truncado"
-            >Status: <span id="status-texto">Conectado</span></span
+            >Status: <span id="status-texto">Conectado</span> | <span id="scalper-status" style="font-weight: 600; color: #4CAF50;">ESTADO: NORMAL</span> | <span id="scalper-score" style="color: #FFC107;">Score: --/85</span> | <span id="scalper-motivo" style="color: #B0BEC5;">Aguardando oportunidade...</span></span
           >
         </div>
         <div class="hora-data" id="hora-atual"></div>
@@ -1523,6 +1523,35 @@
               } else {
                 statusTexto.textContent = "Desconectado";
                 statusDot.className = "status-dot pequeno desconectado";
+              }
+            }
+
+            if (data.micro_scalper) {
+              const scalperStatus = document.getElementById("scalper-status");
+              const scalperScore = document.getElementById("scalper-score");
+              const scalperMotivo = document.getElementById("scalper-motivo");
+              if (scalperStatus) {
+                const estado = data.micro_scalper.estado_atual || "NORMAL";
+                scalperStatus.textContent = `ESTADO: ${estado}`;
+                if (estado === "SINAL_CONFIRMADO" || estado === "COMPRANDO" || estado === "POSICAO_ABERTA") {
+                  scalperStatus.style.color = "#00E676";
+                } else if (estado === "EXTREMO_DETECTADO" || estado === "AGUARDANDO_REVERSAO") {
+                  scalperStatus.style.color = "#FFD600";
+                } else if (estado === "SAINDO") {
+                  scalperStatus.style.color = "#00B0FF";
+                } else if (estado === "COOLDOWN") {
+                  scalperStatus.style.color = "#FF9100";
+                } else {
+                  scalperStatus.style.color = "#78909C";
+                }
+              }
+              if (scalperScore) {
+                scalperScore.textContent = `Score: ${data.micro_scalper.ultimo_score || 0}/85`;
+              }
+              if (scalperMotivo) {
+                const motivo = data.micro_scalper.ultimo_motivo_recusa || "Aguardando oportunidade";
+                scalperMotivo.textContent = motivo.length > 60 ? motivo.substring(0, 57) + "..." : motivo;
+                scalperMotivo.title = motivo;
               }
             }
           })

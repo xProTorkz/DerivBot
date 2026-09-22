@@ -310,6 +310,69 @@ class AnalisadorTecnicoOtimizado:
             return "BAIXA"
         return "NEUTRA"
 
+    @staticmethod
+    def calcular_percentil(
+        precos: Tuple[float, ...], preco_atual: float, janela: int = 60
+    ) -> float:
+        """Calcula a posição percentual (0 a 100) do preço dentro da janela de ticks."""
+        if not precos:
+            return 50.0
+        amostra = precos[-janela:] if len(precos) >= janela else precos
+        if len(amostra) < 2:
+            return 50.0
+        menores = sum(1 for p in amostra if p < preco_atual)
+        iguais = sum(1 for p in amostra if p == preco_atual)
+        percentil = ((menores + (0.5 * iguais)) / len(amostra)) * 100.0
+        return round(float(percentil), 2)
+
+    @staticmethod
+    def calcular_z_score(
+        precos: Tuple[float, ...], preco_atual: float, janela: int = 60
+    ) -> float:
+        """Calcula o Z-Score do preço atual em relação à média e desvio da janela."""
+        if not precos:
+            return 0.0
+        amostra = precos[-janela:] if len(precos) >= janela else precos
+        if len(amostra) < 2:
+            return 0.0
+        media = float(np.mean(amostra))
+        desvio = float(np.std(amostra))
+        if desvio == 0:
+            return 0.0
+        z = (preco_atual - media) / desvio
+        return round(float(z), 3)
+
+    @staticmethod
+    def calcular_inclinacao(precos: Tuple[float, ...], n_ticks: int = 5) -> float:
+        """Calcula o slope linear da trajetória recente de ticks."""
+        if not precos or len(precos) < 2:
+            return 0.0
+        amostra = precos[-n_ticks:] if len(precos) >= n_ticks else precos
+        if len(amostra) < 2:
+            return 0.0
+        x = np.arange(len(amostra))
+        try:
+            slope, _ = np.polyfit(x, amostra, 1)
+            media_preco = float(np.mean(amostra))
+            if media_preco != 0:
+                return float(slope / media_preco * 100.0)
+            return float(slope)
+        except Exception:
+            return 0.0
+
+    @staticmethod
+    def calcular_volatilidade_instantanea(
+        precos: Tuple[float, ...], janela: int = 20
+    ) -> float:
+        """Calcula a volatilidade percentual instantânea (desvio relativo) da janela."""
+        if not precos or len(precos) < 2:
+            return 0.0
+        amostra = precos[-janela:] if len(precos) >= janela else precos
+        media = float(np.mean(amostra))
+        if media == 0:
+            return 0.0
+        return float((np.std(amostra) / media) * 100.0)
+
 
 class CalculadorAssertividade:
     """Calculadora de assertividade usando configurações centralizadas"""
@@ -410,6 +473,9 @@ class CalculadorAssertividade:
         except Exception as e:
             logger.error(f"Erro determinando tipo de contrato para {ativo}: {e}")
             return CONFIG_VOLATILITYS["fallback"]["tipo_contrato_padrao"]
+ 
+
+AnalisadorTecnico = AnalisadorTecnicoOtimizado
 
 
 class CatalogadorOtimizado:
@@ -733,6 +799,137 @@ class CatalogadorOtimizado:
         except Exception as e:
             self.logger.error(f"Erro ao obter velas: {e}")
             return []
+
+    def obter_ultimos_ticks(self, n_ticks: int = 150) -> List[float]:
+        """Retorna lista dos últimos n preços de ticks recebidos em tempo real."""
+        try:
+            if not self.ticks:
+                return []
+            return [float(preco) for _, preco in self.ticks[-n_ticks:]]
+        except Exception:
+            return []
+
+    def obter_snapshot_mercado(self, ativo: str = None) -> Dict[str, Any]:
+        """Constrói snapshot consolidado e enriquecido do mercado a partir dos ticks reais."""
+        try:
+            precos_ticks = self.obter_ultimos_ticks(150)
+            if not precos_ticks:
+                return {
+                    "valido": False,
+                    "razao": "Buffer de ticks vazio",
+                    "preco_atual": 0.0,
+                    "total_ticks": 0,
+                }
+
+            preco_atual = precos_ticks[-1]
+            tupla_precos = tuple(precos_ticks)
+
+            # Janelas configuradas
+            config_scalper = getattr(bot_config, "MICRO_SCALPER_CONFIG", getattr(getattr(bot_config, "Config", object), "MICRO_SCALPER", {}))
+            cfg_ext = config_scalper.get("extremo", {})
+
+            j_curta = cfg_ext.get("janela_curta", 20)
+            j_media = cfg_ext.get("janela_media", 60)
+            j_longa = cfg_ext.get("janela_longa", 120)
+
+            # Métricas estatísticas de distribuição
+            percentil_curto = AnalisadorTecnico.calcular_percentil(
+                tupla_precos, preco_atual, j_curta
+            )
+            percentil_medio = AnalisadorTecnico.calcular_percentil(
+                tupla_precos, preco_atual, j_media
+            )
+            percentil_longo = AnalisadorTecnico.calcular_percentil(
+                tupla_precos, preco_atual, j_longa
+            )
+
+            z_score_curto = AnalisadorTecnico.calcular_z_score(
+                tupla_precos, preco_atual, j_curta
+            )
+            z_score_medio = AnalisadorTecnico.calcular_z_score(
+                tupla_precos, preco_atual, j_media
+            )
+
+            # Indicadores técnicos clássicos calculados sobre os ticks
+            rsi_val = AnalisadorTecnico.calcular_rsi(
+                tupla_precos, cfg_ext.get("rsi_period", 14)
+            )
+            bb_val = AnalisadorTecnico.calcular_bollinger(
+                tupla_precos,
+                cfg_ext.get("bb_period", 20),
+                cfg_ext.get("bb_std", 2.0),
+            )
+            ema_rapida = AnalisadorTecnico.calcular_ema(
+                tupla_precos, cfg_ext.get("ema_fast", 8)
+            )
+            ema_lenta = AnalisadorTecnico.calcular_ema(
+                tupla_precos, cfg_ext.get("ema_slow", 21)
+            )
+
+            dist_ema_rapida_pct = (
+                ((preco_atual - ema_rapida) / ema_rapida * 100.0)
+                if ema_rapida
+                else 0.0
+            )
+            dist_ema_lenta_pct = (
+                ((preco_atual - ema_lenta) / ema_lenta * 100.0)
+                if ema_lenta
+                else 0.0
+            )
+
+            # Dinâmica e reversão recente
+            slope_5 = AnalisadorTecnico.calcular_inclinacao(tupla_precos, 5)
+            slope_10 = AnalisadorTecnico.calcular_inclinacao(tupla_precos, 10)
+            volatilidade = AnalisadorTecnico.calcular_volatilidade_instantanea(
+                tupla_precos, 20
+            )
+
+            bb_sup = bb_val.get("superior", preco_atual) if bb_val else preco_atual
+            bb_inf = bb_val.get("inferior", preco_atual) if bb_val else preco_atual
+            bb_med = bb_val.get("media", preco_atual) if bb_val else preco_atual
+            dist_bb_sup = (bb_sup - preco_atual) / preco_atual if preco_atual > 0 else 0.0
+            dist_bb_inf = (preco_atual - bb_inf) / preco_atual if preco_atual > 0 else 0.0
+
+            return {
+                "valido": True,
+                "ativo": ativo or self.ativo_selecionado,
+                "preco_atual": preco_atual,
+                "total_ticks": len(self.ticks),
+                "ticks_count": len(precos_ticks),
+                "timestamp": time.time(),
+                "percentil_curto": percentil_curto,
+                "percentil_medio": percentil_medio,
+                "percentil_longo": percentil_longo,
+                "z_score": z_score_curto or 0.0,
+                "z_score_curto": z_score_curto,
+                "z_score_medio": z_score_medio,
+                "rsi": rsi_val if rsi_val is not None else 50.0,
+                "bollinger": bb_val,
+                "bb_superior": bb_sup,
+                "bb_inferior": bb_inf,
+                "bb_media": bb_med,
+                "distancia_bb_superior": dist_bb_sup,
+                "distancia_bb_inferior": dist_bb_inf,
+                "ema_rapida": ema_rapida or preco_atual,
+                "ema_lenta": ema_lenta or preco_atual,
+                "dist_ema_rapida_pct": round(dist_ema_rapida_pct, 4),
+                "dist_ema_lenta_pct": round(dist_ema_lenta_pct, 4),
+                "slope_5": round(slope_5, 5),
+                "slope_10": round(slope_10, 5),
+                "inclinacao_curta": round(slope_5, 5),
+                "volatilidade": round(volatilidade, 4),
+                "volatilidade_instantanea": round(volatilidade, 4),
+                "ticks_recentes": precos_ticks[-15:],
+                "ultimos_ticks": precos_ticks,
+            }
+        except Exception as e:
+            self.logger.error(f"Erro ao obter snapshot de mercado: {e}")
+            return {
+                "valido": False,
+                "razao": f"Erro interno snapshot: {e}",
+                "preco_atual": 0.0,
+                "total_ticks": 0,
+            }
 
     def _processar_vela(self, timestamp: float, preco: float) -> None:
         """Processa formação de velas usando timeframe configurado"""

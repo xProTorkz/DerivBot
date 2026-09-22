@@ -6,7 +6,7 @@ import websocket
 import threading
 import asyncio
 from datetime import datetime
-from typing import Dict, List, Any, Callable
+from typing import Dict, List, Any, Callable, Tuple, Optional
 import logging
 
 # Importação com fallback para TTLCache
@@ -36,8 +36,28 @@ except ImportError:
             return key in self.data
 
 
-from config import config
-from core.catalogador import Catalogador, ATIVOS_TURBO_INTEGRADOS
+try:
+    from src.config import config
+except ImportError:
+    from config import config
+
+try:
+    from src.core.catalogador import Catalogador, ATIVOS_TURBO_INTEGRADOS
+except ImportError:
+    from core.catalogador import Catalogador, ATIVOS_TURBO_INTEGRADOS
+
+try:
+    from src.core.inteligencia import (
+        analisar_micro_scalping,
+        state_machine_micro_scalper,
+        MicroScalperState,
+    )
+except ImportError:
+    from core.inteligencia import (
+        analisar_micro_scalping,
+        state_machine_micro_scalper,
+        MicroScalperState,
+    )
 
 
 class SistemaStops:
@@ -617,6 +637,13 @@ class Motor:
         self.callback_tick = None
         self.ultima_resposta = None
         self.ultima_cotacao = None
+        # Micro-Scalper Inviolável (Issues #2, #3, #4)
+        self.ultimo_fechamento_ts = 0.0
+        self.req_id_counter = 1
+        self.subscricoes_contratos = {}
+        self.ultimo_motivo_recusa = "Aguardando ticks para análise"
+        self.ultimo_score = 0.0
+        self.propostas_recentes = {}
         # SISTEMA DE MÚLTIPLOS ATIVOS PARA SCALPING RÁPIDO
         self.ativos_ativos = [
             "1HZ75V",
@@ -727,6 +754,51 @@ class Motor:
         self.tempo_entre_tentativas = 3  # Reduzido para reconexão mais rápida
         self.ultima_tentativa = 0
         self.cache_operacoes = TTLCache(maxsize=100, ttl=60)
+
+    def _proximo_req_id(self) -> int:
+        """Gera um request ID único para correlacionar chamadas da API Deriv."""
+        self.req_id_counter = getattr(self, "req_id_counter", 1) + 1
+        return int(time.time() * 1000) % 100000000 + self.req_id_counter
+
+    def validar_gateway_risco(self, valor_ordem: float = 0.35) -> Tuple[bool, str]:
+        """
+        GATEWAY DE RISCO INVIOLÁVEL (Issues #2, #3, #4).
+        Bloqueia qualquer execução se:
+        - Já existir 1 operação aberta (MAX_OPEN_POSITIONS = 1)
+        - Em período de cooldown pós-operação
+        - Cotação / tick obsoleto (stale > 2.5s)
+        - Saldo insuficiente
+        - Meta diária atingida
+        """
+        # 1. Posições abertas (MAX_OPEN_POSITIONS = 1)
+        if len(self.operacoes_abertas) >= 1:
+            return False, "Gateway Risco: Máximo de 1 operação simultânea ativa atingido"
+
+        # 2. Cooldown pós-operação
+        cfg_micro = getattr(config, "MICRO_SCALPER_CONFIG", {})
+        cooldown_s = cfg_micro.get("cooldown", {}).get("tempo_minimo_segundos", 25)
+        tempo_desde_fechamento = time.time() - getattr(self, "ultimo_fechamento_ts", 0.0)
+        if getattr(self, "ultimo_fechamento_ts", 0.0) > 0 and tempo_desde_fechamento < cooldown_s:
+            restante = cooldown_s - tempo_desde_fechamento
+            return False, f"Gateway Risco: Em cooldown pós-operação ({restante:.1f}s restantes)"
+
+        # 3. Frescor dos ticks (stale data)
+        max_stale = cfg_micro.get("gateway_risco", {}).get("tempo_max_tick_stale_s", 2.5)
+        idade_tick = time.time() - getattr(self, "ultimo_tick_timestamp", 0.0)
+        if getattr(self, "ultimo_tick_timestamp", 0.0) > 0 and idade_tick > max_stale:
+            return False, f"Gateway Risco: Dados de ticks obsoletos ({idade_tick:.1f}s > {max_stale}s)"
+
+        # 4. Saldo
+        min_balance = cfg_micro.get("gateway_risco", {}).get("min_balance_usd", 1.0)
+        if self.saldo < (valor_ordem + min_balance):
+            return False, f"Gateway Risco: Saldo insuficiente (${self.saldo:.2f} < ${valor_ordem + min_balance:.2f})"
+
+        # 5. Meta diária
+        lucro_atual = self.obter_saldo() - self.saldo_inicial
+        if self.meta_diaria > 0 and lucro_atual >= self.meta_diaria:
+            return False, f"Gateway Risco: Meta diária de ${self.meta_diaria:.2f} já atingida"
+
+        return True, "Aprovado pelo Gateway de Risco"
 
     def conectar(self, token=None):
         """Conecta com a API da Deriv usando o token fornecido ou o token já configurado."""
@@ -863,14 +935,11 @@ class Motor:
             if "buy" in data and data["buy"]:
                 contract_id = data["buy"]["contract_id"]
 
-                # Verifica se tem informação de transaction_id para rastreamento
                 transaction_id = None
                 if "passthrough" in data and data["passthrough"]:
                     transaction_id = data["passthrough"].get("transaction_id")
 
-                # Registra com informações detalhadas
                 with self.lock:
-                    # Adiciona às operações abertas
                     self.operacoes_abertas[contract_id] = {
                         "id": contract_id,
                         "preco_entrada": data["buy"]["buy_price"],
@@ -879,32 +948,32 @@ class Motor:
                         .get("parameters", {})
                         .get("contract_type", ""),
                         "transaction_id": transaction_id,
-                        "timestamp_abertura": time.time(),  # Timestamp UNIX para cálculo de tempo decorrido
-                        "fechamento_automatico": (
-                            True
-                            if transaction_id
-                            and hasattr(self, "transacoes_pendentes")
-                            and transaction_id in self.transacoes_pendentes
-                            and self.transacoes_pendentes[transaction_id].get(
-                                "fechamento_automatico"
-                            )
-                            else False
-                        ),
-                        "tempo_maximo_segundos": 1,  # Default de 1 segundo para micro scalping
+                        "timestamp_abertura": time.time(),
+                        "positive_updates": 0,
+                        "motivo_saida": "",
+                        "fechamento_automatico": False,
                     }
 
-                    # Se tivermos o transaction_id, atualizamos seu status
                     if transaction_id and hasattr(self, "transacoes_pendentes"):
                         if transaction_id in self.transacoes_pendentes:
-                            self.transacoes_pendentes[transaction_id][
-                                "processada"
-                            ] = True
-                            self.transacoes_pendentes[transaction_id][
-                                "contract_id"
-                            ] = contract_id
+                            self.transacoes_pendentes[transaction_id]["processada"] = True
+                            self.transacoes_pendentes[transaction_id]["contract_id"] = contract_id
 
                 self.logger.info(
-                    f"Operação {contract_id} aberta com sucesso. Modo: micro scalping (1s)"
+                    f"✅ Operação {contract_id} confirmada na Deriv. Subscrevendo proposal_open_contract..."
+                )
+
+                # Subscreve para atualizações contínuas em tempo real
+                sub_req = {
+                    "proposal_open_contract": 1,
+                    "contract_id": contract_id,
+                    "subscribe": 1,
+                    "req_id": self._proximo_req_id(),
+                }
+                self.ws.send(json.dumps(sub_req))
+                state_machine_micro_scalper.transitar(
+                    MicroScalperState.POSICAO_ABERTA,
+                    f"Contrato {contract_id} aberto na Deriv",
                 )
 
                 # Adiciona stops para a operação
@@ -918,100 +987,143 @@ class Motor:
                     contract_id, valor_entrada, tipo_operacao, self.par_atual
                 )
 
-                # Para contratos multipliers, vamos configurar um timer para fechamento automático após 1 segundo
-                if "MULT" in str(self.operacoes_abertas[contract_id]["tipo"]).upper():
-                    self.logger.info(
-                        f"Configurado fechamento automático em 1 segundo para operação {contract_id}"
-                    )
-                    # Aqui usamos um timer, mas o _verificar_fechamento_automatico será responsável pelo fechamento
-
             # Processamento de atualização/fechamento de contratos
             if "proposal_open_contract" in data and data["proposal_open_contract"]:
                 contract = data["proposal_open_contract"]
                 contract_id = contract["contract_id"]
 
-                # Verifica stops se a operação ainda está aberta
-                if contract["is_sold"] == 0 and contract_id in self.operacoes_abertas:
-                    resultado_atual = contract.get("profit", 0)
-                    verificacao_stop = self.sistema_stops.verificar_stops_operacao(
-                        contract_id, resultado_atual
-                    )
+                # Armazena subscription_id se presente
+                if "subscription" in data and "id" in data["subscription"]:
+                    self.subscricoes_contratos[contract_id] = data["subscription"]["id"]
 
-                    if verificacao_stop["acao"] == "fechar":
-                        self.logger.info(
-                            f"🛑 {verificacao_stop['razao']} - Fechando operação {contract_id}"
-                        )
-                        self._fechar_operacao_por_stop(contract_id, verificacao_stop)
+                if contract_id in self.operacoes_abertas:
+                    operacao = self.operacoes_abertas[contract_id]
+                    is_sold = contract.get("is_sold", 0)
+                    is_valid_to_sell = contract.get("is_valid_to_sell", 0)
+                    profit = float(contract.get("profit", 0.0))
+                    tempo_aberto = time.time() - operacao.get("timestamp_abertura", time.time())
 
-                if contract["is_sold"] == 1 and contract_id in self.operacoes_abertas:
-                    lucro = contract["profit"]
+                    # Se a operação ainda está aberta:
+                    if is_sold == 0:
+                        cfg_saida = getattr(config, "MICRO_SCALPER_CONFIG", {}).get("saida", {})
+                        min_exit_profit = cfg_saida.get("min_exit_profit", 0.02)
+                        min_pos_updates = cfg_saida.get("min_positive_updates", 2)
+                        max_hold_s = cfg_saida.get("max_hold_seconds", 45)
 
-                    # Log detalhado do resultado
-                    self.logger.info(
-                        f"Operação {contract_id} finalizada com resultado: ${lucro}"
-                    )
+                        # Contagem de updates positivos
+                        if profit >= min_exit_profit:
+                            operacao["positive_updates"] = operacao.get("positive_updates", 0) + 1
+                        else:
+                            operacao["positive_updates"] = 0
 
-                    with self.lock:
-                        preco_entrada = self.operacoes_abertas[contract_id][
-                            "preco_entrada"
-                        ]
-                        transaction_id = self.operacoes_abertas[contract_id].get(
-                            "transaction_id"
-                        )
-
-                        # Registra resultado no histórico
-                        resultado = {
-                            "id": contract_id,
-                            "preco_entrada": preco_entrada,
-                            "preco_saida": contract["sell_price"],
-                            "lucro": lucro,
-                            "timestamp_abertura": self.operacoes_abertas[contract_id][
-                                "timestamp"
-                            ],
-                            "timestamp_fechamento": datetime.now().strftime(
-                                "%Y-%m-%d %H:%M:%S"
-                            ),
-                            "tipo": self.operacoes_abertas[contract_id]["tipo"],
-                        }
-
-                        # Adiciona ao histórico de operações
-                        self.historico_operacoes.append(resultado)
-
-                        # Atualiza o saldo após operação finalizada
-                        self.saldo = float(contract["balance_after"])
-
-                        # Notifica o sistema principal sobre a operação finalizada
-                        try:
-                            import main
-
-                            operacao_dados = self.operacoes_abertas.get(contract_id, {})
-                            main.adicionar_operacao(
-                                tipo=operacao_dados.get("tipo", "UNKNOWN"),
-                                valor=operacao_dados.get("valor", 0),
-                                resultado=lucro,
+                        # REGRA 1: SAÍDA NO PRIMEIRO LUCRO LÍQUIDO CONFIRMADO
+                        if operacao.get("positive_updates", 0) >= min_pos_updates and is_valid_to_sell == 1:
+                            self.logger.info(
+                                f"🎯 PRIMEIRO LUCRO LÍQUIDO CONFIRMADO! Venda antecipada disparada para {contract_id} "
+                                f"com lucro de +${profit:.4f} (após {tempo_aberto:.1f}s)"
                             )
-                        except Exception as e:
-                            self.logger.debug(f"Erro ao notificar operação: {e}")
+                            state_machine_micro_scalper.transitar(
+                                MicroScalperState.SAINDO,
+                                f"Primeiro lucro atingido: +${profit:.4f}",
+                            )
+                            operacao["motivo_saida"] = "FIRST_POSITIVE_PROFIT"
+                            self.fechar_operacao(contract_id)
 
-                        # Remove das operações abertas
-                        del self.operacoes_abertas[contract_id]
+                        # REGRA 2: TIMEOUT MÁXIMO DE SEGURANÇA
+                        elif tempo_aberto >= max_hold_s and is_valid_to_sell == 1:
+                            self.logger.info(
+                                f"⏱️ Timeout de retenção ({tempo_aberto:.1f}s >= {max_hold_s}s) para {contract_id}. "
+                                f"Encerrando operação (Profit: ${profit:.4f})..."
+                            )
+                            state_machine_micro_scalper.transitar(
+                                MicroScalperState.SAINDO,
+                                f"Timeout retenção atingido ({max_hold_s}s)",
+                            )
+                            operacao["motivo_saida"] = "MAX_HOLD_TIMEOUT"
+                            self.fechar_operacao(contract_id)
 
-                        # Remove stops da operação finalizada
-                        self.sistema_stops.remover_stop_operacao(contract_id)
+                        # REGRA 3: STOPS TRADICIONAIS
+                        else:
+                            verificacao_stop = self.sistema_stops.verificar_stops_operacao(
+                                contract_id, profit
+                            )
+                            if verificacao_stop.get("acao") == "fechar" and is_valid_to_sell == 1:
+                                self.logger.info(
+                                    f"🛑 {verificacao_stop['razao']} - Fechando operação {contract_id}"
+                                )
+                                state_machine_micro_scalper.transitar(
+                                    MicroScalperState.SAINDO,
+                                    verificacao_stop.get("razao", "Stop"),
+                                )
+                                operacao["motivo_saida"] = "STOP_DISPARADO"
+                                self._fechar_operacao_por_stop(contract_id, verificacao_stop)
 
-                    # Emite mensagem mais detalhada com resultado da operação
-                    resultado_texto = "GANHO" if lucro >= 0 else "PERDA"
-                    self.logger.info(
-                        f"Operação {contract_id} fechada com {resultado_texto}: ${lucro:.2f} (Saldo atual: ${self.saldo:.2f})"
-                    )
+                    # Se a operação foi finalizada (is_sold == 1):
+                    elif is_sold == 1:
+                        lucro = float(contract.get("profit", 0.0))
+                        motivo_saida = operacao.get("motivo_saida", "CONTRATO_EXPIRADO")
 
-                    # Verifica meta
-                    lucro_total = self.obter_saldo() - self.saldo_inicial
-                    take_profit = getattr(config, "TAKE_PROFIT", self.meta_diaria)
-                    if lucro_total >= take_profit:
-                        self.logger.info("🎯 Meta diária atingida!")
-                        self.meta_atingida = True
-                        self.rodando = False
+                        self.logger.info(
+                            f"🏁 Operação {contract_id} finalizada com lucro: ${lucro:+.4f} | Motivo: {motivo_saida}"
+                        )
+
+                        # Envia forget para encerrar a stream do contrato
+                        sub_id = self.subscricoes_contratos.pop(contract_id, None)
+                        if sub_id:
+                            try:
+                                self.ws.send(json.dumps({"forget": sub_id}))
+                            except Exception as e:
+                                self.logger.debug(f"Erro ao enviar forget para {sub_id}: {e}")
+
+                        # Registra na máquina de estados e ativa cooldown
+                        self.ultimo_fechamento_ts = time.time()
+                        state_machine_micro_scalper.registrar_resultado_operacao(lucro, motivo_saida)
+                        state_machine_micro_scalper.transitar(
+                            MicroScalperState.COOLDOWN,
+                            f"Pós-operação (Resultado: ${lucro:+.2f})",
+                        )
+
+                        with self.lock:
+                            preco_entrada = operacao.get("preco_entrada", 0.0)
+                            resultado = {
+                                "id": contract_id,
+                                "preco_entrada": preco_entrada,
+                                "preco_saida": contract.get("sell_price", 0.0),
+                                "lucro": lucro,
+                                "motivo_saida": motivo_saida,
+                                "timestamp_abertura": operacao.get("timestamp"),
+                                "timestamp_fechamento": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                "tipo": operacao.get("tipo"),
+                            }
+                            self.historico_operacoes.append(resultado)
+                            if "balance_after" in contract:
+                                self.saldo = float(contract["balance_after"])
+
+                            try:
+                                import main
+                                main.adicionar_operacao(
+                                    tipo=operacao.get("tipo", "UNKNOWN"),
+                                    valor=operacao.get("valor", 0),
+                                    resultado=lucro,
+                                )
+                            except Exception as e:
+                                self.logger.debug(f"Erro ao notificar operação no main: {e}")
+
+                            del self.operacoes_abertas[contract_id]
+                            self.sistema_stops.remover_stop_operacao(contract_id)
+
+                        resultado_texto = "GANHO" if lucro >= 0 else "PERDA"
+                        self.logger.info(
+                            f"Operação {contract_id} fechada com {resultado_texto}: ${lucro:.2f} (Saldo atual: ${self.saldo:.2f})"
+                        )
+
+                        # Verifica meta
+                        lucro_total = self.obter_saldo() - self.saldo_inicial
+                        take_profit = getattr(config, "TAKE_PROFIT", self.meta_diaria)
+                        if self.meta_diaria > 0 and lucro_total >= take_profit:
+                            self.logger.info("🎯 Meta diária atingida!")
+                            self.meta_atingida = True
+                            self.rodando = False
 
             # Captura erros retornados pela API
             if "error" in data:
@@ -1123,137 +1235,137 @@ class Motor:
         self, ativo, preco_atual, modo, meta, lucro_atual, operacoes_ativas
     ):
         """
-        ANÁLISE PRINCIPAL DA ESTRATÉGIA TURBO
-        Retorna análise completa para entrada em contratos de 15 segundos
+        ANÁLISE CANÔNICA DO MICRO-SCALPER SELETIVO (Issues #2, #3, #4).
+        Zero random: 100% determinístico baseado em extremos estatísticos,
+        confirmação de reversão e score de confluência >= 85.
         """
-        import random
-
-        # FORÇA ATIVO FIXO NO VIX75 PARA FOCAR EM ENTRADAS
-        ativo = "1HZ75V"  # SEMPRE VIX75
+        ativo = "1HZ75V"
         if self.par_atual != "1HZ75V":
             self.par_atual = "1HZ75V"
 
-        # Verifica se deve operar - MAIS OPERAÇÕES SIMULTÂNEAS
-        limite_operacoes = {
-            "iniciante": 5,  # 5 operações simultâneas
-            "conservador": 7,  # 7 operações simultâneas
-            "agressivo": 10,  # 10 operações simultâneas
-        }.get(modo, 5)
-
-        if operacoes_ativas >= limite_operacoes:
+        # 1. Checagem prévia de operações ativas (MAX_OPEN_POSITIONS = 1)
+        if operacoes_ativas >= 1:
+            motivo = "Máximo de 1 operação simultânea ativa"
+            self.ultimo_motivo_recusa = motivo
             return {
                 "executada": False,
                 "sinal": False,
-                "razao": f"Limite de operações simultâneas atingido ({limite_operacoes})",
+                "tipo": None,
+                "razao": motivo,
+                "motivo_recusa": motivo,
                 "confianca": 0.0,
+                "score": 0.0,
+                "estado": MicroScalperState.POSICAO_ABERTA,
                 "lucro_atual": lucro_atual,
                 "operacoes_ativas": operacoes_ativas,
             }
 
-        # Verifica se atingiu meta
-        if lucro_atual >= meta:
+        # 2. Checagem de meta diária
+        if meta > 0 and lucro_atual >= meta:
+            motivo = f"Meta diária de ${meta:.2f} já atingida (Lucro atual: ${lucro_atual:.2f})"
+            self.ultimo_motivo_recusa = motivo
             return {
                 "executada": False,
                 "sinal": False,
-                "razao": f"Meta diária de ${meta:.2f} já atingida",
+                "tipo": None,
+                "razao": motivo,
+                "motivo_recusa": motivo,
                 "confianca": 0.0,
+                "score": 0.0,
+                "estado": MicroScalperState.NORMAL,
                 "lucro_atual": lucro_atual,
                 "operacoes_ativas": operacoes_ativas,
             }
 
-        # SIMULAÇÃO DE ANÁLISE TÉCNICA TURBO
-        # Em uma implementação real, aqui seria feita análise de EMA, RSI, Bollinger
+        # 3. Snapshot de mercado e ticks reais
+        snapshot = {}
+        ultimos_ticks = []
+        if hasattr(self.catalogador, "obter_snapshot_mercado"):
+            snapshot = self.catalogador.obter_snapshot_mercado(self.par_atual)
+        if hasattr(self.catalogador, "obter_ultimos_ticks"):
+            ultimos_ticks = self.catalogador.obter_ultimos_ticks(60)
 
-        # Simula indicadores técnicos
-        ema8 = preco_atual * (1 + random.uniform(-0.001, 0.001))
-        ema21 = preco_atual * (1 + random.uniform(-0.002, 0.002))
-        rsi = random.uniform(25, 75)
-        bb_superior = preco_atual * 1.002
-        bb_inferior = preco_atual * 0.998
-
-        # Análise de tendência
-        tendencia_alta = ema8 > ema21
-        # Verifica se preço está nas bandas (removido variável não usada)
-
-        # Calcula confiança baseada nos indicadores
-        confianca = 0.0
-        sinais = []
-        sinal = False
-        tipo_operacao = None
-
-        # ANÁLISE ULTRA AGRESSIVA - FORÇA ENTRADAS CONSTANTES
-
-        # SEMPRE GERA SINAL - Condições extremamente flexíveis
-        if rsi < 60:  # 60% das vezes será CALL
-            confianca = random.uniform(0.65, 0.95)
-            tipo_operacao = "CALL"
-            sinal = True
-            sinais.append("Sinal CALL forçado")
-            sinais.append(f"RSI {rsi:.1f} favorável")
-
-        else:  # 40% das vezes será PUT
-            confianca = random.uniform(0.65, 0.95)
-            tipo_operacao = "PUT"
-            sinal = True
-            sinais.append("Sinal PUT forçado")
-            sinais.append(f"RSI {rsi:.1f} favorável")
-
-        # BOOST DE CONFIANÇA para garantir entrada
-        if modo == "agressivo":
-            confianca = min(0.95, confianca + 0.10)  # +10% confiança no modo agressivo
-
-        # Sem sinal claro
-        if not sinal:
+        # Se dados insuficientes, aguarda sem forçar
+        if not snapshot.get("valido", False) or len(ultimos_ticks) < 15:
+            motivo = f"Aguardando ticks para análise estatística ({len(ultimos_ticks)}/15 ticks recebidos)"
+            self.ultimo_motivo_recusa = motivo
             return {
                 "executada": False,
                 "sinal": False,
-                "razao": f"Aguardando sinal claro - RSI: {rsi:.1f}, Tendência: {'Alta' if tendencia_alta else 'Baixa'}",
+                "tipo": None,
+                "razao": motivo,
+                "motivo_recusa": motivo,
                 "confianca": 0.0,
+                "score": 0.0,
+                "estado": MicroScalperState.NORMAL,
                 "lucro_atual": lucro_atual,
                 "operacoes_ativas": operacoes_ativas,
             }
 
-        # Verifica confiança mínima - MUITO MAIS AGRESSIVO
-        confianca_minima = {
-            "iniciante": 0.50,  # 50% - FORÇA ENTRADAS
-            "conservador": 0.55,  # 55% - FORÇA ENTRADAS
-            "agressivo": 0.45,  # 45% - FORÇA ENTRADAS MÁXIMO
-        }.get(modo, 0.50)
+        # 4. Avaliação seletiva de micro-scalping
+        resultado_intel = analisar_micro_scalping(
+            dados_ou_snapshot=snapshot,
+            meta=meta,
+            lucro_atual=lucro_atual,
+            modo=modo,
+            operacoes_ativas=operacoes_ativas,
+            ultimos_ticks=ultimos_ticks,
+        )
 
-        if confianca < confianca_minima:
-            return {
-                "executada": False,
-                "sinal": False,
-                "razao": f"Confiança {confianca:.2f} abaixo do mínimo {confianca_minima:.2f}",
-                "confianca": confianca,
-                "lucro_atual": lucro_atual,
-                "operacoes_ativas": operacoes_ativas,
-            }
+        sinal_direcao = resultado_intel.get("sinal")
+        score = resultado_intel.get("score", 0.0)
+        confianca = resultado_intel.get("confianca", 0.0)
+        razao = resultado_intel.get("razao", "Aguardando confluência")
+        motivo_recusa = resultado_intel.get("motivo_recusa", razao)
+        estado = resultado_intel.get("estado", MicroScalperState.NORMAL)
 
-        # Calcula volume da operação
-        volume = 0.35  # Volume fixo para estratégia turbo
+        self.ultimo_score = score
+        self.ultimo_motivo_recusa = motivo_recusa
+
+        # Volume de entrada
+        volume = 0.35
         if modo == "conservador":
             volume = 0.50
         elif modo == "agressivo":
             volume = 1.00
 
-        # EXECUTA A OPERAÇÃO
+        indicadores_resumo = {
+            "rsi": snapshot.get("rsi", 50.0),
+            "z_score": snapshot.get("z_score", 0.0),
+            "percentil_curto": snapshot.get("percentil_curto", 50.0),
+            "inclinacao": snapshot.get("inclinacao_curta", 0.0),
+            "bb_dist_inf": snapshot.get("distancia_bb_inferior", 0.0),
+            "bb_dist_sup": snapshot.get("distancia_bb_superior", 0.0),
+        }
+
+        if not sinal_direcao:
+            return {
+                "executada": False,
+                "sinal": False,
+                "tipo": None,
+                "razao": razao,
+                "motivo_recusa": motivo_recusa,
+                "confianca": confianca,
+                "score": score,
+                "estado": estado,
+                "indicadores": indicadores_resumo,
+                "lucro_atual": lucro_atual,
+                "operacoes_ativas": operacoes_ativas,
+            }
+
         return {
             "executada": True,
             "sinal": True,
-            "tipo": tipo_operacao,
-            "ativo": ativo,
+            "tipo": sinal_direcao,
+            "ativo": self.par_atual,
             "volume": volume,
-            "duracao": 15,  # 15 segundos
+            "duracao": 15,
             "confianca": confianca,
-            "razao": f"TURBO {tipo_operacao} - " + " | ".join(sinais),
-            "indicadores": {
-                "ema8": ema8,
-                "ema21": ema21,
-                "rsi": rsi,
-                "bb_superior": bb_superior,
-                "bb_inferior": bb_inferior,
-            },
+            "score": score,
+            "estado": estado,
+            "razao": razao,
+            "motivo_recusa": "",
+            "indicadores": indicadores_resumo,
             "lucro_atual": lucro_atual,
             "operacoes_ativas": operacoes_ativas,
         }
@@ -1263,24 +1375,12 @@ class Motor:
         self.callback_tick = callback
 
     def executar_operacao_inteligente(self, _: str = "default") -> dict:
-        """Executa operação usando ESTRATÉGIA TURBO para contratos de 15 segundos."""
+        """Executa análise seletiva e gerencia entrada através do gateway de risco."""
         try:
-            # Verifica se pode executar operação usando o catalogador otimizado
-            if hasattr(self.catalogador, "pode_executar_operacao_agora"):
-                if not self.catalogador.pode_executar_operacao_agora():
-                    return {
-                        "sucesso": False,
-                        "razao": "Aguardando intervalo entre operações",
-                        "tipo": "AGUARDAR",
-                    }
-
-            # Calcula lucro atual
             lucro_atual = self.obter_saldo() - self.saldo_inicial
-
-            # Conta operações ativas
             self.operacoes_ativas_count = len(self.operacoes_abertas)
 
-            # ESTRATÉGIA TURBO: Análise específica para VIX75
+            # Análise determinística do micro-scalper
             analise = self._analisar_entrada_turbo(
                 ativo=self.par_atual,
                 preco_atual=(
@@ -1294,54 +1394,72 @@ class Motor:
                 operacoes_ativas=self.operacoes_ativas_count,
             )
 
-            # Se não há sinal, retorna a análise
+            # Se não há sinal, retorna a análise para telemetria/log
             if not analise.get("sinal", False):
                 return {
                     "executada": False,
                     "razao": analise.get("razao", "Sem sinal"),
+                    "motivo_recusa": analise.get("motivo_recusa", "Sem sinal"),
                     "confianca": analise.get("confianca", 0.0),
+                    "score": analise.get("score", 0.0),
+                    "estado": analise.get("estado", MicroScalperState.NORMAL),
                     "lucro_atual": lucro_atual,
                     "operacoes_ativas": self.operacoes_ativas_count,
                 }
 
-            # Se há sinal, executa a operação
+            # Sinal aprovado com confluência >= 85!
             tipo_operacao = analise.get("tipo", "CALL")
             valor_entrada = analise.get("volume", 0.35)
 
-            # Executa a operação
+            # GATEWAY DE RISCO INVIOLÁVEL: validação final pré-ordem
+            valido_risco, motivo_risco = self.validar_gateway_risco(valor_entrada)
+            if not valido_risco:
+                self.logger.warning(f"🚫 Ordem bloqueada pelo gateway de risco: {motivo_risco}")
+                state_machine_micro_scalper.transitar(MicroScalperState.NORMAL, motivo_risco)
+                return {
+                    "executada": False,
+                    "razao": motivo_risco,
+                    "motivo_recusa": motivo_risco,
+                    "confianca": analise.get("confianca", 0.0),
+                    "score": analise.get("score", 0.0),
+                    "estado": MicroScalperState.NORMAL,
+                    "lucro_atual": lucro_atual,
+                    "operacoes_ativas": self.operacoes_ativas_count,
+                }
+
+            # Envia ordem para a Deriv API
+            state_machine_micro_scalper.transitar(
+                MicroScalperState.COMPRANDO,
+                f"Enviando {tipo_operacao} de ${valor_entrada:.2f}",
+            )
             sucesso = self.comprar(tipo_operacao, valor_entrada)
 
             if sucesso:
-                # Registra a nova operação no controle
-                if hasattr(self, "modo_operacao") and self.modo_operacao == "iniciante":
-                    try:
-                        import main
-
-                        if hasattr(main, "registrar_nova_operacao"):
-                            main.registrar_nova_operacao()
-                    except:
-                        pass  # Ignora erro se main não estiver disponível
-
                 self.logger.info(
-                    f"🚀 ENTRADA EXECUTADA! TURBO {tipo_operacao} - ${valor_entrada:.2f} - "
-                    f"Confiança: {analise.get('confianca', 0.0):.2f} - {analise.get('razao', 'Operação turbo')}"
+                    f"🚀 ENTRADA EXECUTADA! {tipo_operacao} - ${valor_entrada:.2f} - "
+                    f"Score: {analise.get('score', 0.0):.1f} - {analise.get('razao')}"
                 )
-
                 return {
                     "executada": True,
                     "tipo": tipo_operacao,
                     "valor": valor_entrada,
                     "confianca": analise.get("confianca", 0.0),
+                    "score": analise.get("score", 0.0),
+                    "estado": MicroScalperState.COMPRANDO,
                     "razao": analise.get("razao", "Operação executada"),
-                    "lucro_esperado": valor_entrada * 0.85,  # Estimativa de lucro
+                    "lucro_esperado": valor_entrada * 0.85,
                     "lucro_atual": lucro_atual,
                     "operacoes_ativas": self.operacoes_ativas_count + 1,
                 }
             else:
+                state_machine_micro_scalper.transitar(MicroScalperState.NORMAL, "Falha na API ao comprar")
                 return {
                     "executada": False,
-                    "razao": "Falha ao executar operação na API",
+                    "razao": "Falha ao enviar ordem para a Deriv API",
+                    "motivo_recusa": "Falha de comunicação WebSocket / API",
                     "confianca": analise.get("confianca", 0.0),
+                    "score": analise.get("score", 0.0),
+                    "estado": MicroScalperState.NORMAL,
                     "lucro_atual": lucro_atual,
                     "operacoes_ativas": self.operacoes_ativas_count,
                 }
@@ -1893,99 +2011,36 @@ class Motor:
             self.logger.error(f"Erro ao fechar operação por stop: {e}")
 
     def _verificar_fechamento_automatico(self):
-        """Verifica operações que precisam ser fechadas automaticamente para micro scalping."""
-        operacoes_para_fechar = []
-
-        # Obtém o timestamp atual
+        """
+        Watchdog de Segurança para Operações Abertas.
+        Monitora se o contrato excedeu o tempo máximo de retenção (max_hold_seconds)
+        e dispara fechamento de emergência caso a API não tenha finalizado.
+        NUNCA fecha cegamente após 1 segundo.
+        """
         agora = time.time()
-
         try:
-            # Se não temos operações abertas, não precisa fazer nada
             if not self.operacoes_abertas:
                 return
 
-            # Adiciona log detalhado para debug quando temos operações abertas
-            if self.operacoes_abertas:
-                self.logger.debug(
-                    f"Verificando {len(self.operacoes_abertas)} operações para fechamento automático"
-                )
+            cfg_saida = getattr(config, "MICRO_SCALPER_CONFIG", {}).get("saida", {})
+            max_hold_s = cfg_saida.get("max_hold_seconds", 45)
 
-            # Verifica as operações abertas
             for contract_id, operacao in list(self.operacoes_abertas.items()):
-                # Verifica se a operação tem flag de fechamento automático
-                if operacao.get("fechamento_automatico", False):
-                    # Verifica se o tempo máximo foi atingido
-                    timestamp_abertura = operacao.get("timestamp_abertura", 0)
-                    tempo_maximo = operacao.get("tempo_maximo_segundos", 1)
-                    tempo_decorrido = agora - timestamp_abertura
+                timestamp_abertura = operacao.get("timestamp_abertura", agora)
+                tempo_decorrido = agora - timestamp_abertura
 
-                    # Se quase atingiu o tempo, faz log para debug
-                    if (
-                        tempo_decorrido >= (tempo_maximo * 0.8)
-                        and tempo_decorrido < tempo_maximo
-                    ):
-                        self.logger.debug(
-                            f"Operação {contract_id} quase atingindo limite: {tempo_decorrido:.2f}s / {tempo_maximo}s"
-                        )
-
-                    # Se atingiu o tempo máximo, adiciona para fechar
-                    if tempo_decorrido >= tempo_maximo:
-                        # Adiciona à lista de operações para fechar
-                        operacoes_para_fechar.append(contract_id)
-                        self.logger.info(
-                            f"Operação {contract_id} atingiu tempo limite de {tempo_maximo}s (tempo real: {tempo_decorrido:.2f}s). Fechando..."
-                        )
-                else:
-                    # Se não tem flag de fechamento automático mas é multiplier, adiciona a flag
-                    tipo = operacao.get("tipo", "").upper()
-                    if "MULT" in tipo:
-                        # Adiciona flag de fechamento automático
-                        self.logger.info(
-                            f"Adicionando flag de fechamento automático para operação multiplier {contract_id}"
-                        )
-                        self.operacoes_abertas[contract_id][
-                            "fechamento_automatico"
-                        ] = True
-                        self.operacoes_abertas[contract_id]["tempo_maximo_segundos"] = 1
-
-                        # Se não tem timestamp de abertura, adiciona
-                        if (
-                            "timestamp_abertura"
-                            not in self.operacoes_abertas[contract_id]
-                        ):
-                            self.operacoes_abertas[contract_id][
-                                "timestamp_abertura"
-                            ] = agora
-
-            # Fecha as operações identificadas com prioridade alta
-            for contract_id in operacoes_para_fechar:
-                self.logger.info(
-                    f"Iniciando fechamento forçado da operação {contract_id}"
-                )
-                if self.fechar_operacao(contract_id):
-                    self.logger.info(
-                        f"Operação {contract_id} fechada com sucesso após 1s (micro scalping)"
-                    )
-                else:
-                    # Se falhou, tenta novamente com força
+                # Se ultrapassou o tempo limite de segurança, força fechamento
+                if tempo_decorrido >= max_hold_s:
                     self.logger.warning(
-                        f"Falha no fechamento normal da operação {contract_id}, tentando com força..."
+                        f"⚠️ Watchdog: Operação {contract_id} atingiu tempo máximo de retenção "
+                        f"({tempo_decorrido:.1f}s >= {max_hold_s}s). Disparando fechamento..."
                     )
-                    try:
-                        # Envia requisição direta sem verificações adicionais
-                        req = {"sell": contract_id, "price": 0}
-                        self.ws.send(json.dumps(req))
-                        self.logger.info(
-                            f"Fechamento forçado enviado para operação {contract_id}"
-                        )
-                    except Exception as e:
-                        self.logger.error(
-                            f"Erro no fechamento forçado da operação {contract_id}: {str(e)}"
-                        )
+                    operacao["motivo_saida"] = "MAX_HOLD_WATCHDOG"
+                    self.fechar_operacao(contract_id)
 
         except Exception as e:
             self.logger.error(
-                f"Erro ao verificar fechamento automático: {str(e)}", exc_info=True
+                f"Erro no watchdog de operações: {str(e)}", exc_info=True
             )
 
     def status_conexao(self):

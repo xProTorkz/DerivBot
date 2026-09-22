@@ -2138,6 +2138,30 @@ def status_robo():
             logger.error(f"Erro ao obter logs tempo real: {e}")
             logs_recentes = []
 
+        # Telemetria do Micro-Scalper
+        telemetria_scalper = {
+            "estado_atual": "NORMAL",
+            "ultimo_score": 0.0,
+            "ultimo_motivo_recusa": "Aguardando inicialização",
+            "win_rate_observado": 0.0,
+            "total_operacoes": 0,
+        }
+        try:
+            from src.core.inteligencia import state_machine_micro_scalper
+            telemetria_scalper = state_machine_micro_scalper.obter_telemetria()
+        except Exception:
+            try:
+                from core.inteligencia import state_machine_micro_scalper
+                telemetria_scalper = state_machine_micro_scalper.obter_telemetria()
+            except Exception:
+                pass
+
+        if motor:
+            if hasattr(motor, "ultimo_motivo_recusa") and motor.ultimo_motivo_recusa:
+                telemetria_scalper["ultimo_motivo_recusa"] = motor.ultimo_motivo_recusa
+            if hasattr(motor, "ultimo_score") and motor.ultimo_score:
+                telemetria_scalper["ultimo_score"] = motor.ultimo_score
+
         response_data = {
             "ativo": bool(robo_ativo),
             "modo": str(modo_operacao or "iniciante"),
@@ -2149,6 +2173,7 @@ def status_robo():
             "mensagem_log": str(ultima_mensagem or "Sistema pronto"),
             "ativo_atual": ativo_info,
             "motor_status": motor_status,
+            "micro_scalper": telemetria_scalper,
             "logs_tempo_real": logs_recentes,
             "historico_recente": (
                 historico_operacoes[-3:] if historico_operacoes else []
