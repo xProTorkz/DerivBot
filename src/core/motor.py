@@ -209,8 +209,11 @@ class SistemaStops:
 
     def verificar_stops_globais(self, saldo_atual: float) -> dict:
         """Verifica stops globais baseados no saldo total"""
-        if self.saldo_inicial == 0:
+        if self.saldo_inicial == 0 and saldo_atual > 0:
             self.saldo_inicial = saldo_atual
+
+        if self.saldo_inicial <= 0:
+            return {"acao": "continuar", "razao": "Aguardando saldo inicial"}
 
         resultado_total = saldo_atual - self.saldo_inicial
         resultado_percent = (resultado_total / self.saldo_inicial) * 100
