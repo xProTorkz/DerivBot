@@ -697,6 +697,41 @@ def obter_tokens_da_licenca(licenca):
     return token_real, token_demo
 
 
+def sincronizar_tokens_sessao():
+    """Garante que a sessão do usuário sempre reflita os tokens válidos da licença salva"""
+    codigo_licenca = session.get("codigo_licenca")
+    licencas = carregar_licencas()
+    licenca = None
+    if codigo_licenca:
+        for l in licencas.values():
+            if l.get("codigo_licenca") == codigo_licenca:
+                licenca = l
+                break
+    if not licenca and licencas:
+        licenca = list(licencas.values())[0]
+        session["codigo_licenca"] = licenca.get("codigo_licenca")
+
+    if licenca:
+        token_real = licenca.get("token_deriv_real", "")
+        token_demo = licenca.get("token_deriv_demo", "")
+        tipo_conta = session.get("tipo_conta", "demo")
+
+        if token_real and token_real != "a1b2c3d4e5f6g7h8":
+            session["token_real"] = token_real
+        if token_demo and token_demo != "a1b2c3d4e5f6g7h8":
+            session["token_demo"] = token_demo
+
+        token_atual = token_real if tipo_conta == "real" else token_demo
+        if token_atual and token_atual != "a1b2c3d4e5f6g7h8":
+            session["token"] = token_atual
+
+        if tipo_conta == "real" and licenca.get("deriv_real"):
+            session["deriv_account"] = licenca["deriv_real"]
+        elif licenca.get("deriv_demo"):
+            session["deriv_account"] = licenca["deriv_demo"]
+
+
+
 def forcar_demo_para_teste_ai():
     """[AI] FUNÇÃO ESPECIAL: Força uso de demo quando EU (AI) estiver testando
 
@@ -1255,6 +1290,9 @@ def painel():
     redirect_response = redirecionar_se_nao_autenticado()
     if redirect_response:
         return redirect_response
+
+    # Sincroniza tokens e contas da licença para a sessão
+    sincronizar_tokens_sessao()
 
     # Carrega o histórico
     carregar_historico()
@@ -1912,6 +1950,8 @@ def toggle_bot():
                 {"status": "parado", "mensagem": "Robô parado com segurança"}
             )
         else:
+            # Sincroniza tokens da licença para garantir que a sessão esteja atualizada
+            sincronizar_tokens_sessao()
             token_sessao = session.get("token", "")
             if not token_sessao or token_sessao == "a1b2c3d4e5f6g7h8":
                 return (
@@ -2066,6 +2106,7 @@ def api_status_sistema():
 @app.route("/status_robo")
 def status_robo():
     """Rota para obter status do robô com informações inteligentes"""
+    sincronizar_tokens_sessao()
     # Verifica autenticação automática se não há sessão
     if "token" not in session:
         licenca_auto = verificar_autenticacao_automatica()
@@ -2407,6 +2448,7 @@ def status_deriv():
 def api_saldo_atual():
     """Rota para obter saldo atual da conta"""
     try:
+        sincronizar_tokens_sessao()
         # Verifica autenticação
         if "token" not in session:
             return jsonify({"status": "erro", "mensagem": "Não autenticado"}), 401
@@ -2467,6 +2509,7 @@ def api_saldo_atual():
 def selecionar_conta():
     """Rota para alternar entre conta real e demo"""
     try:
+        sincronizar_tokens_sessao()
         # Verifica autenticação
         if "token" not in session:
             return jsonify({"status": "erro", "mensagem": "Não autenticado"}), 401
