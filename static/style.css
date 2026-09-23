@@ -2021,29 +2021,3 @@ body {
   box-shadow: none !important;
 }
 
-/* Info de Banca, Meta e Stake Derivados (#23.E) */
-.banca-info-badge {
-  font-size: 0.78rem;
-  color: #B0BEC5;
-  margin-top: 6px;
-  text-align: center;
-  background: rgba(255, 255, 255, 0.03);
-  padding: 6px 12px;
-  border-radius: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  display: flex;
-  justify-content: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.banca-info-item strong {
-  color: #ECEFF1;
-}
-
-.banca-info-alerta {
-  color: #FFC107;
-  font-size: 0.72rem;
-  font-weight: 600;
-}
-

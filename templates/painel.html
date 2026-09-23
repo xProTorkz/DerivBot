@@ -192,7 +192,7 @@
           <p id="lucro-meta">
             <span class="rs">$</span>
             <span id="lucro-valor" class="positivo">0</span>
-            <span id="meta-valor">/0</span>
+            <span id="meta-valor">/20</span>
           </p>
         </div>
       </div>
@@ -233,15 +233,10 @@
               type="number"
               min="0"
               step="0.01"
+              value="20"
               aria-label="Meta diária em dólares"
               inputmode="decimal"
             />
-          </div>
-          <div class="banca-info-badge" id="banca-info-badge" style="display: none;">
-            <span class="banca-info-item">Banca Inicial: <strong id="info-banca-inicial">--</strong></span>
-            <span class="banca-info-item">Meta Sessão: <strong id="info-meta-efetiva">--</strong></span>
-            <span class="banca-info-item">Entrada (1%): <strong id="info-stake-efetivo">--</strong></span>
-            <span class="banca-info-alerta" id="info-stake-aviso" style="display: none;">(Ajustado ao mín. $0.35)</span>
           </div>
         </div>
         <button
@@ -346,7 +341,7 @@
             </button>
           </div>
 
-          <h2 class="titulo-historico">Operações & Histórico <span id="contador-abertas-header" style="font-size: 0.85em; color: #4CAF50;">(0/3)</span></h2>
+          <h2 class="titulo-historico">Operações & Histórico</h2>
 
           <div class="acoes-direita">
             <button
@@ -1498,14 +1493,7 @@
       // ==============================================================
       function renderizarOperacoesAtivas(operacoes) {
         const tbody = document.getElementById("historico-tabela-body");
-        const contadorHeader = document.getElementById("contador-abertas-header");
         if (!tbody) return;
-
-        const count = operacoes ? operacoes.length : 0;
-        if (contadorHeader) {
-          contadorHeader.textContent = `(${count}/3)`;
-          contadorHeader.style.color = count > 0 ? "#00E676" : "#78909C";
-        }
 
         if (!operacoes || operacoes.length === 0) {
           tbody.innerHTML = `
@@ -1606,29 +1594,12 @@
 
             // 4. Meta no cabeçalho
             const metaElement = document.getElementById("meta-valor");
-            const metaVal = data.meta_efetiva !== undefined ? data.meta_efetiva : (metaInput ? metaInput.value : 20);
+            const metaVal = metaInput && metaInput.value ? metaInput.value : 20;
             if (metaElement) {
               metaElement.textContent = `/${metaVal}`;
             }
 
-            // 5. Badge de Informações da Banca / Meta / Stake
-            const bancaBadge = document.getElementById("banca-info-badge");
-            const infoBanca = document.getElementById("info-banca-inicial");
-            const infoMeta = document.getElementById("info-meta-efetiva");
-            const infoStake = document.getElementById("info-stake-efetivo");
-            const infoStakeAviso = document.getElementById("info-stake-aviso");
-
-            if (bancaBadge && data.banca_inicial !== undefined) {
-              bancaBadge.style.display = "flex";
-              if (infoBanca) infoBanca.textContent = `$${parseFloat(data.banca_inicial).toFixed(2)}`;
-              if (infoMeta) infoMeta.textContent = `$${parseFloat(data.meta_efetiva || metaVal).toFixed(2)}`;
-              if (infoStake) infoStake.textContent = `$${parseFloat(data.valor_operacao_efetivo || 0.35).toFixed(2)}`;
-              if (infoStakeAviso) {
-                infoStakeAviso.style.display = data.stake_elevado_pelo_minimo ? "inline" : "none";
-              }
-            }
-
-            // 6. Operações ativas em tempo real
+            // 5. Operações ativas em tempo real
             renderizarOperacoesAtivas(data.operacoes_ativas || []);
 
             // 7. Steppers do ciclo (Analisando, Abrindo, Finalizado)
