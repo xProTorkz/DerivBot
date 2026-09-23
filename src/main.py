@@ -2370,6 +2370,36 @@ def api_logs_tempo_real():
         return jsonify({"status": "erro", "mensagem": str(e)}), 500
 
 
+@app.route("/api/grafico/dados")
+def api_grafico_dados():
+    """Rota para dados de gráfico de performance"""
+    try:
+        hist = list(historico_recente) if "historico_recente" in globals() else []
+        lucro_atual = float(lucro_realizado_sessao) if "lucro_realizado_sessao" in globals() else 0.0
+
+        pontos = []
+        acum = 0.0
+        for op in reversed(hist):
+            r = float(op.get("resultado_real", op.get("lucro", 0.0)))
+            acum += r
+            pontos.append({
+                "hora": op.get("hora_fechamento") or op.get("hora") or "",
+                "resultado": r,
+                "acumulado": round(acum, 2),
+                "ativo": op.get("ativo", "1HZ75V")
+            })
+
+        return jsonify({
+            "status": "ok",
+            "total_operacoes": len(hist),
+            "lucro_total": round(lucro_atual, 2),
+            "pontos": pontos
+        })
+    except Exception as e:
+        logger.error(f"Erro ao gerar dados do gráfico: {e}")
+        return jsonify({"status": "erro", "mensagem": str(e)}), 500
+
+
 @app.route("/api/performance")
 def api_performance():
     """Rota para métricas de performance"""

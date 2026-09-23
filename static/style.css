@@ -1017,25 +1017,113 @@ body {
 .acoes-direita {
   display: flex;
   gap: 0.5rem;
+  align-items: center;
 }
 
 .icone-historico {
+  position: relative;
   background: transparent;
   border: none;
-  font-size: 1.2rem;
+  font-size: 1.25rem;
   cursor: pointer;
   color: var(--cinza-claro);
-  transition: color 0.2s, transform 0.2s;
-  padding: 0.3rem;
+  transition: color 0.2s, transform 0.2s, background-color 0.2s;
+  padding: 0.35rem 0.5rem;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  outline: none;
 }
 
 .icone-historico:hover {
   color: var(--branco);
-  transform: scale(1.1);
+  transform: scale(1.15);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .icone-historico.ativo {
   color: var(--verde-claro);
+  background: rgba(76, 175, 80, 0.15);
+}
+
+/* Tooltip customizado instantâneo ao passar o mouse */
+.icone-historico[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  background: #181d26;
+  color: #f0f4f8;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  padding: 5px 9px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6), 0 0 10px rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s ease;
+  z-index: 9999;
+}
+
+.icone-historico[data-tooltip]::before {
+  content: "";
+  position: absolute;
+  bottom: calc(100% + 3px);
+  left: 50%;
+  transform: translateX(-50%);
+  border-width: 5px 5px 0 5px;
+  border-style: solid;
+  border-color: #181d26 transparent transparent transparent;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s ease, visibility 0.12s ease;
+  z-index: 9999;
+}
+
+.icone-historico[data-tooltip]:hover::after {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+}
+
+.icone-historico[data-tooltip]:hover::before {
+  opacity: 1;
+  visibility: visible;
+}
+
+/* Ajustes nas extremidades para o tooltip não cortar */
+.acoes-esquerda .icone-historico:first-child[data-tooltip]::after {
+  left: 0;
+  transform: translateX(0) translateY(4px);
+}
+.acoes-esquerda .icone-historico:first-child[data-tooltip]:hover::after {
+  transform: translateX(0) translateY(0);
+}
+.acoes-esquerda .icone-historico:first-child[data-tooltip]::before {
+  left: 12px;
+  transform: none;
+}
+
+.acoes-direita .icone-historico:last-child[data-tooltip]::after {
+  left: auto;
+  right: 0;
+  transform: translateX(0) translateY(4px);
+}
+.acoes-direita .icone-historico:last-child[data-tooltip]:hover::after {
+  transform: translateX(0) translateY(0);
+}
+.acoes-direita .icone-historico:last-child[data-tooltip]::before {
+  left: auto;
+  right: 12px;
+  transform: none;
 }
 
 .tabela-wrapper {
@@ -1900,16 +1988,37 @@ body {
   100% { text-shadow: none; transform: scale(1); }
 }
 
-/* Card Glow, iluminação e bordas com gradiente sutil (#23.G) */
-.info-bar, .modo-meta-wrapper, #barra-status, .historico {
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45), 0 0 15px rgba(0, 0, 0, 0.25) !important;
-  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+/* Card Glow e Iluminância Fixa em TODOS os cards (#23) */
+/* Leve iluminância fixa e borda sutil para contrastar e destacar cada card do fundo escuro */
+.card-conta,
+.licenca-wrapper,
+.info-bar,
+.modo-meta-wrapper,
+.banner-noticias-telemetria,
+#barra-status,
+.historico,
+.rodape-painel {
+  border: 1px solid rgba(255, 255, 255, 0.13) !important;
+  box-shadow: 0 0 16px rgba(255, 255, 255, 0.06), 0 0 2px rgba(255, 255, 255, 0.16), 0 8px 24px rgba(0, 0, 0, 0.55) !important;
+  transition: border-color 0.25s ease, box-shadow 0.25s ease !important;
 }
 
-.info-bar:hover, .modo-meta-wrapper:hover, #barra-status:hover, .historico:hover {
-  border-color: rgba(255, 255, 255, 0.15) !important;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.55), 0 0 20px rgba(255, 255, 255, 0.03) !important;
+.card-conta:hover,
+.licenca-wrapper:hover,
+.info-bar:hover,
+.modo-meta-wrapper:hover,
+.banner-noticias-telemetria:hover,
+#barra-status:hover,
+.historico:hover,
+.rodape-painel:hover {
+  border-color: rgba(255, 255, 255, 0.22) !important;
+  box-shadow: 0 0 22px rgba(255, 255, 255, 0.10), 0 0 3px rgba(255, 255, 255, 0.24), 0 10px 28px rgba(0, 0, 0, 0.65) !important;
+}
+
+/* Garante que o container recolhido não exiba bordas ou iluminância fantasma */
+.modo-meta-wrapper.recolhido {
+  border: none !important;
+  box-shadow: none !important;
 }
 
 /* Info de Banca, Meta e Stake Derivados (#23.E) */

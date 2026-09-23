@@ -330,7 +330,7 @@
               class="icone-historico ativo"
               id="btn-historico-atual"
               onclick="trocarAba('tabela')"
-              title="Operações Abertas / Tempo Real"
+              data-tooltip="Operações em Tempo Real"
               aria-label="Ver operações abertas em tempo real"
             >
               📄
@@ -339,7 +339,7 @@
               class="icone-historico"
               id="btn-historico-completo"
               onclick="trocarAba('historico-completo')"
-              title="Histórico Geral do Dia"
+              data-tooltip="Histórico Geral do Dia"
               aria-label="Ver histórico completo do dia"
             >
               📊
@@ -353,7 +353,7 @@
               class="icone-historico"
               id="btn-graficos"
               onclick="trocarAba('grafico')"
-              title="Gráficos de Performance"
+              data-tooltip="Gráficos de Performance"
               aria-label="Ver gráficos de performance"
             >
               📈
@@ -362,7 +362,7 @@
               class="icone-historico"
               id="btn-logs"
               onclick="trocarAba('logs')"
-              title="Logs em Tempo Real"
+              data-tooltip="Logs em Tempo Real"
               aria-label="Ver logs em tempo real"
             >
               📋
@@ -371,7 +371,7 @@
               class="icone-historico"
               id="btn-limpar"
               onclick="trocarAba('limpar')"
-              title="Limpar Histórico"
+              data-tooltip="Limpar Histórico"
               aria-label="Limpar histórico de operações"
             >
               🗑️
@@ -465,6 +465,19 @@
                 {% endfor %}
               </tbody>
             </table>
+          </div>
+        </div>
+
+        <!-- Logs em Tempo Real -->
+        <div id="logs-tempo-real" style="display: none;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <h3 style="color: #ECEFF1; font-size: 0.95rem; margin: 0;">📋 Logs do Sistema e Operações</h3>
+            <button onclick="carregarLogsTempoReal()" style="background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); color: #B0BEC5; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 0.75rem;">🔄 Atualizar</button>
+          </div>
+          <div id="container-logs" style="max-height: 250px; overflow-y: auto; background: rgba(0, 0, 0, 0.35); border-radius: 6px; padding: 10px; border: 1px solid rgba(255, 255, 255, 0.08);">
+            <div id="lista-logs">
+              <p style="color: #888; text-align: center; padding: 12px;">Carregando logs...</p>
+            </div>
           </div>
         </div>
 
@@ -1268,13 +1281,19 @@
     </script>
 
     <script src="{{ url_for('static', filename='mobile.js') }}"></script>
-    <script src="{{ url_for('static', filename='scripts.js') }}"></script>
+    <script src="{{ url_for('static', filename='scripts.js') }}?v={{ range(1, 999999) | random }}"></script>
 
     <!-- Script de teste direto -->
     <script>
       console.log("🔥 Script inline carregado!");
 
       let roboAtivo = false;
+
+      function moverHistoricoParaCompleto() {
+        if (typeof carregarHistoricoCompleto === "function") {
+          carregarHistoricoCompleto();
+        }
+      }
 
       function iniciarRoboSeguro() {
         console.log("🚀 Iniciando robô...");

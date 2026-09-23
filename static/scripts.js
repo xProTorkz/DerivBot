@@ -731,19 +731,34 @@ document.addEventListener("DOMContentLoaded", function () {
   window.limparCache = limparCache;
 
   window.limparHistorico = function () {
-    if (!confirm("Tem certeza que deseja limpar o histórico?")) return;
+    if (!confirm("Tem certeza que deseja limpar o histórico desta sessão?")) return;
 
     fetch("/limpar_historico", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: "{}", // pode ser um objeto vazio
+      body: "{}",
     })
       .then((res) => res.json())
       .then((data) => {
         if (data.status === "ok") {
-          document.getElementById("historico-tabela-body").innerHTML = "";
+          const tbody = document.getElementById("historico-tabela-body");
+          if (tbody) {
+            tbody.innerHTML = `
+              <tr id="linha-sem-operacao">
+                <td colspan="6" style="text-align: center; color: #888; padding: 12px;">Nenhuma operação em andamento</td>
+              </tr>
+            `;
+          }
+          const tbodyComp = document.getElementById("historico-completo-body");
+          if (tbodyComp) {
+            tbodyComp.innerHTML = `
+              <tr>
+                <td colspan="6" style="text-align: center; color: #888; padding: 14px;">Nenhuma operação finalizada nesta sessão.</td>
+              </tr>
+            `;
+          }
           console.log("🧹 Histórico apagado com sucesso.");
         } else {
           alert("Erro ao limpar histórico: " + data.mensagem);
@@ -1027,139 +1042,223 @@ document.addEventListener("DOMContentLoaded", function () {
       "$" + lucroTotal.toFixed(2);
   }
 
-  // Função para trocar entre abas do histórico
+  // Função para trocar entre abas do histórico (Totalmente defensiva contra nós ausentes)
   window.trocarAba = function (aba) {
-    // Esconde todas as abas
-    document.getElementById("tabela-historico").style.display = "none";
-    document.getElementById("resumo-diario").style.display = "none";
-    document.getElementById("grafico-diario").style.display = "none";
-    document.getElementById("historico-completo").style.display = "none";
-    document.getElementById("logs-tempo-real").style.display = "none";
+    const abas = [
+      "tabela-historico",
+      "resumo-diario",
+      "grafico-diario",
+      "historico-completo",
+      "logs-tempo-real"
+    ];
+    abas.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = "none";
+    });
 
-    // Remove a classe ativa de todos os botões
-    document.getElementById("btn-historico-atual").classList.remove("ativo");
-    document.getElementById("btn-historico-completo").classList.remove("ativo");
-    document.getElementById("btn-graficos").classList.remove("ativo");
-    document.getElementById("btn-logs").classList.remove("ativo");
-    document.getElementById("btn-limpar").classList.remove("ativo");
+    const botoes = [
+      "btn-historico-atual",
+      "btn-historico-completo",
+      "btn-graficos",
+      "btn-logs",
+      "btn-limpar"
+    ];
+    botoes.forEach(id => {
+      const btn = document.getElementById(id);
+      if (btn) btn.classList.remove("ativo");
+    });
 
-    // Mostra a aba selecionada e ativa o botão correspondente
     switch (aba) {
-      case "tabela":
-        document.getElementById("tabela-historico").style.display = "block";
-        document.getElementById("btn-historico-atual").classList.add("ativo");
+      case "tabela": {
+        const el = document.getElementById("tabela-historico");
+        if (el) el.style.display = "block";
+        const btn = document.getElementById("btn-historico-atual");
+        if (btn) btn.classList.add("ativo");
         break;
-      case "resumo":
-        document.getElementById("resumo-diario").style.display = "block";
-        document
-          .getElementById("btn-historico-completo")
-          .classList.add("ativo");
+      }
+      case "resumo": {
+        const el = document.getElementById("resumo-diario");
+        if (el) el.style.display = "block";
+        const btn = document.getElementById("btn-historico-completo");
+        if (btn) btn.classList.add("ativo");
         break;
-      case "grafico":
-        document.getElementById("grafico-diario").style.display = "block";
-        document.getElementById("btn-graficos").classList.add("ativo");
+      }
+      case "grafico": {
+        const el = document.getElementById("grafico-diario");
+        if (el) el.style.display = "block";
+        const btn = document.getElementById("btn-graficos");
+        if (btn) btn.classList.add("ativo");
         carregarGrafico();
         break;
-      case "logs":
-        document.getElementById("logs-tempo-real").style.display = "block";
-        document.getElementById("btn-logs").classList.add("ativo");
+      }
+      case "logs": {
+        const el = document.getElementById("logs-tempo-real");
+        if (el) el.style.display = "block";
+        const btn = document.getElementById("btn-logs");
+        if (btn) btn.classList.add("ativo");
         carregarLogsTempoReal();
         break;
-      case "historico-completo":
-        document.getElementById("historico-completo").style.display = "block";
-        document
-          .getElementById("btn-historico-completo")
-          .classList.add("ativo");
+      }
+      case "historico-completo": {
+        const el = document.getElementById("historico-completo");
+        if (el) el.style.display = "block";
+        const btn = document.getElementById("btn-historico-completo");
+        if (btn) btn.classList.add("ativo");
         carregarHistoricoCompleto();
         break;
-      case "limpar":
-        document.getElementById("tabela-historico").style.display = "block";
-        document.getElementById("btn-historico-atual").classList.add("ativo");
+      }
+      case "limpar": {
+        const el = document.getElementById("tabela-historico");
+        if (el) el.style.display = "block";
+        const btn = document.getElementById("btn-historico-atual");
+        if (btn) btn.classList.add("ativo");
         limparHistorico();
         break;
+      }
     }
   };
 
   function carregarGrafico() {
-    // Implementação para carregar gráficos
-    fetch("/api/grafico/dados")
+    const container = document.getElementById("grafico-diario");
+    if (!container) return;
+
+    fetch("/historico")
       .then((res) => res.json())
-      .then((data) => {
-        if (data.status === "ok") {
-          document.getElementById("grafico-diario").innerHTML = `
-            <p>Dados do gráfico carregados com sucesso!</p>
-            <div id="grafico-container" style="width: 100%; height: 300px; background: #1e1e1e; border-radius: 8px; margin-top: 10px; display: flex; align-items: center; justify-content: center;">
-              <p>📊 Gráfico em tempo real disponível</p>
+      .then((operacoes) => {
+        if (!operacoes || operacoes.length === 0) {
+          container.innerHTML = `
+            <div style="padding: 30px; text-align: center; color: #888;">
+              <span style="font-size: 2rem; display: block; margin-bottom: 8px;">📈</span>
+              <p>Nenhuma operação finalizada na sessão para exibir o gráfico de performance.</p>
             </div>
           `;
-        } else {
-          document.getElementById("grafico-diario").innerHTML = `
-            <p style="color: #ff444f;">Erro ao carregar dados do gráfico: ${data.mensagem}</p>
-          `;
+          return;
         }
+
+        let vitorias = 0;
+        let derrotas = 0;
+        let lucroAcumulado = 0.0;
+        const pontos = [];
+
+        const opsCronologicas = [...operacoes].reverse();
+        opsCronologicas.forEach((op, index) => {
+          const res = parseFloat(op.resultado_real !== undefined ? op.resultado_real : (op.lucro || 0.0));
+          if (res > 0) vitorias++;
+          else if (res < 0) derrotas++;
+          lucroAcumulado += res;
+          pontos.push({
+            idx: index + 1,
+            lucro: res,
+            acumulado: lucroAcumulado,
+            ativo: op.ativo || "1HZ75V",
+            hora: op.hora_fechamento || op.hora || ""
+          });
+        });
+
+        const total = vitorias + derrotas;
+        const winRate = total > 0 ? ((vitorias / total) * 100).toFixed(1) : "0.0";
+        const lucroTotalStr = (lucroAcumulado >= 0 ? "+$" : "-$") + Math.abs(lucroAcumulado).toFixed(2);
+        const lucroClass = lucroAcumulado >= 0 ? "positivo" : "negativo";
+
+        const minVal = Math.min(0, ...pontos.map(p => p.acumulado));
+        const maxVal = Math.max(1, ...pontos.map(p => p.acumulado));
+        const range = (maxVal - minVal) || 1;
+        const svgW = 460;
+        const svgH = 130;
+        const padding = 20;
+
+        const coords = pontos.map((p, i) => {
+          const x = padding + (i / Math.max(1, pontos.length - 1)) * (svgW - padding * 2);
+          const y = svgH - padding - ((p.acumulado - minVal) / range) * (svgH - padding * 2);
+          return `${x.toFixed(1)},${y.toFixed(1)}`;
+        });
+        const pointsAttr = coords.join(" ");
+
+        container.innerHTML = `
+          <div style="padding: 12px; text-align: center;">
+            <div style="display: flex; justify-content: center; gap: 14px; margin-bottom: 14px; flex-wrap: wrap;">
+              <div style="background: rgba(255,255,255,0.05); padding: 6px 14px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.08);">
+                <span style="font-size: 0.75rem; color: #888; display: block;">Total Trades</span>
+                <strong style="color: #fff; font-size: 1rem;">${total}</strong>
+              </div>
+              <div style="background: rgba(76, 175, 80, 0.1); padding: 6px 14px; border-radius: 6px; border: 1px solid rgba(76, 175, 80, 0.2);">
+                <span style="font-size: 0.75rem; color: #4CAF50; display: block;">Vitórias</span>
+                <strong style="color: #4CAF50; font-size: 1rem;">${vitorias} (${winRate}%)</strong>
+              </div>
+              <div style="background: rgba(244, 67, 54, 0.1); padding: 6px 14px; border-radius: 6px; border: 1px solid rgba(244, 67, 54, 0.2);">
+                <span style="font-size: 0.75rem; color: #f44336; display: block;">Derrotas</span>
+                <strong style="color: #f44336; font-size: 1rem;">${derrotas}</strong>
+              </div>
+              <div style="background: rgba(255,255,255,0.05); padding: 6px 14px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.08);">
+                <span style="font-size: 0.75rem; color: #888; display: block;">Lucro da Sessão</span>
+                <strong class="${lucroClass}" style="font-size: 1rem;">${lucroTotalStr}</strong>
+              </div>
+            </div>
+            <div style="background: rgba(0, 0, 0, 0.35); border-radius: 8px; padding: 12px; border: 1px solid rgba(255,255,255,0.08); margin: 0 auto; max-width: 520px;">
+              <span style="font-size: 0.75rem; color: #aaa; margin-bottom: 6px; display: block;">Curva de Patrimônio / Lucro Acumulado ($)</span>
+              <svg width="100%" height="130" viewBox="0 0 ${svgW} ${svgH}" style="overflow: visible;">
+                <polyline fill="none" stroke="${lucroAcumulado >= 0 ? '#00E676' : '#f44336'}" stroke-width="2.5" points="${pointsAttr}" stroke-linecap="round" stroke-linejoin="round"/>
+                ${pontos.map((p, i) => {
+                  const [cx, cy] = coords[i].split(",");
+                  return `<circle cx="${cx}" cy="${cy}" r="4" fill="${p.lucro >= 0 ? '#00E676' : '#f44336'}" stroke="#fff" stroke-width="1.5"><title>Trade #${p.idx}: ${p.ativo} | $${p.acumulado.toFixed(2)}</title></circle>`;
+                }).join("")}
+              </svg>
+            </div>
+          </div>
+        `;
       })
       .catch((err) => {
-        document.getElementById("grafico-diario").innerHTML = `
-          <p style="color: #ff444f;">Erro ao carregar gráfico: ${err.message}</p>
-        `;
+        container.innerHTML = `<p style="color: #ff444f; padding: 15px;">Erro ao carregar gráfico: ${err.message}</p>`;
       });
   }
 
   function carregarLogsTempoReal() {
-    // Implementação para carregar logs em tempo real
     fetch("/logs_tempo_real")
       .then((res) => res.json())
       .then((data) => {
-        if (data.status === "ok" && data.logs) {
-          const listaLogs = document.getElementById("lista-logs");
-          listaLogs.innerHTML = "";
+        const listaLogs = document.getElementById("lista-logs");
+        if (!listaLogs) return;
+        listaLogs.innerHTML = "";
 
-          if (data.logs.length === 0) {
-            listaLogs.innerHTML =
-              '<p style="color: #888; text-align: center;">Nenhum log disponível</p>';
-            return;
-          }
-
-          // Mostra os logs mais recentes primeiro
-          data.logs.reverse().forEach((log) => {
-            const logElement = document.createElement("div");
-            logElement.style.cssText = `
-              padding: 8px 12px;
-              margin-bottom: 5px;
-              border-radius: 4px;
-              border-left: 3px solid ${getLogColor(log.tipo)};
-              background: rgba(255,255,255,0.05);
-              font-family: monospace;
-              font-size: 13px;
-            `;
-
-            logElement.innerHTML = `
-              <span style="color: #888; font-size: 11px;">[${
-                log.timestamp
-              }]</span>
-              <span style="color: ${getLogColor(
-                log.tipo
-              )}; margin-left: 8px;">${log.mensagem}</span>
-            `;
-
-            listaLogs.appendChild(logElement);
-          });
-
-          // Auto-scroll para o topo (logs mais recentes)
-          const container = document.getElementById("container-logs");
-          container.scrollTop = 0;
-        } else {
-          document.getElementById("lista-logs").innerHTML = `
-            <p style="color: #ff444f; text-align: center;">Erro ao carregar logs: ${
-              data.mensagem || "Erro desconhecido"
-            }</p>
-          `;
+        if (!data || !data.logs || data.logs.length === 0) {
+          listaLogs.innerHTML =
+            '<p style="color: #888; text-align: center; padding: 12px;">Nenhum log disponível nesta sessão</p>';
+          return;
         }
+
+        const logsArray = [...data.logs].reverse();
+        logsArray.forEach((log) => {
+          const logElement = document.createElement("div");
+          const logColor = getLogColor(log.tipo);
+          logElement.style.cssText = `
+            padding: 8px 12px;
+            margin-bottom: 5px;
+            border-radius: 4px;
+            border-left: 3px solid ${logColor};
+            background: rgba(255,255,255,0.04);
+            font-family: monospace;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+          `;
+
+          logElement.innerHTML = `
+            <span style="color: #78909C; font-size: 11px;">[${log.timestamp || "--"}]</span>
+            <span style="color: ${logColor}; flex-grow: 1;">${log.mensagem || ""}</span>
+          `;
+
+          listaLogs.appendChild(logElement);
+        });
+
+        const container = document.getElementById("container-logs");
+        if (container) container.scrollTop = 0;
       })
       .catch((err) => {
-        document.getElementById("lista-logs").innerHTML = `
-          <p style="color: #ff444f; text-align: center;">Erro ao carregar logs: ${err.message}</p>
-        `;
+        const listaLogs = document.getElementById("lista-logs");
+        if (listaLogs) {
+          listaLogs.innerHTML = `<p style="color: #ff444f; padding: 10px;">Erro ao carregar logs: ${err.message}</p>`;
+        }
       });
   }
 
