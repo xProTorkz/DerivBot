@@ -46,7 +46,7 @@ class Config:
     }
 
     # Configurações da API Deriv
-    DERIV_WEBSOCKET_URL = "wss://ws.derivws.com/websockets/v3"
+    DERIV_WEBSOCKET_URL = os.getenv("DERIV_WEBSOCKET_URL", "wss://red.derivws.com/websockets/v3")
     DERIV_APP_ID = int(os.getenv("DERIV_APP_ID", 71203))
 
     # Configurações do servidor Flask

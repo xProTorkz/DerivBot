@@ -824,9 +824,9 @@ class Motor:
         """
         try:
             self.token = token
-            # Cloudflare 530/1016 indica que ws.deriv.com não resolve em algumas regiões.
-            # Domínio oficial conforme documentação: ws.derivws.com
-            ws_url = "wss://ws.derivws.com/websockets/v3?app_id=71203"
+            ws_base = getattr(config, "DERIV_WEBSOCKET_URL", "wss://red.derivws.com/websockets/v3")
+            app_id = getattr(config, "DERIV_APP_ID", 71203)
+            ws_url = f"{ws_base}?app_id={app_id}"
 
             # Fecha conexão existente se houver
             self.desconectar()
