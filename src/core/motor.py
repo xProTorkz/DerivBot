@@ -38,10 +38,10 @@ except ImportError:
 
 try:
     from src.config import config
-    from src.config.config import obter_limite_posicoes, normalizar_modo_operacao
+    from src.config.config import Config, obter_limite_posicoes, normalizar_modo_operacao
 except ImportError:
     from config import config
-    from config.config import obter_limite_posicoes, normalizar_modo_operacao
+    from config.config import Config, obter_limite_posicoes, normalizar_modo_operacao
 
 try:
     from src.core.catalogador import Catalogador, ATIVOS_TURBO_INTEGRADOS
@@ -710,7 +710,9 @@ class Motor:
         )
         self.scanner_ativo = True  # Ativa o scanner de ativos
         self.ultimo_scan_ativo = 0  # Timestamp do último scan
-        self.modo_real = getattr(config, "MODO_REAL_PADRAO", True)
+        # DEMO por padrão — Config.MODO_REAL_PADRAO é atributo da CLASSE, não do módulo
+        self.modo_real = bool(getattr(Config, "MODO_REAL_PADRAO", False))
+
         self.catalogador = Catalogador()  # Inicializa catalogador
         # Define o ativo atual no catalogador
         self.catalogador.ativo_atual = self.par_atual
@@ -1153,6 +1155,18 @@ class Motor:
 
                 # Verifica operações que precisam ser fechadas automaticamente (micro scalping)
                 self._verificar_fechamento_automatico()
+
+            # Processamento de erros da API Deriv (buy/proposal rejected, etc.)
+            if "error" in data and data["error"]:
+                err = data["error"]
+                err_code = err.get("code", "UNKNOWN")
+                err_msg = err.get("message", str(err))
+                req_type = data.get("echo_req", {}).get("buy") or data.get("msg_type", "")
+                self.logger.error(
+                    f"❌ [DERIV API ERROR] [{err_code}] {err_msg} "
+                    f"(req_type={req_type}, req={str(data.get('echo_req', {}))[:200]})"
+                )
+                self.ultimo_erro = f"[{err_code}] {err_msg}"
 
             # Processamento de abertura de contratos
             if "buy" in data and data["buy"]:
@@ -1958,13 +1972,19 @@ class Motor:
         - Suporte a múltiplos ativos integrados
         """
         try:
-            # Trava estrita de segurança para conta REAL
-            if getattr(self, "modo_real", False):
+            # Trava de segurança: SOMENTE em conta REAL (modo_real == True, bool)
+            # Em DEMO, ordens são enviadas normalmente pelo WebSocket
+            is_real = bool(getattr(self, "modo_real", False))
+            if is_real:
                 self.logger.error(
-                    "🛑 [SAFETY LOCK] Execução em conta REAL bloqueada nesta versão "
-                    "(SHADOW/DEMO ONLY: REAL_ORDER_SENT = NO, REAL_ACCOUNT_EXECUTION = BLOCKED). Nenhuma ordem enviada."
+                    "🛑 [SAFETY LOCK] Conta REAL detectada — execução bloqueada nesta versão "
+                    "(REAL_ACCOUNT_EXECUTION = BLOCKED). Configure modo DEMO para operar."
                 )
                 return False
+
+            self.logger.info(
+                f"✅ [DEMO] Conta DEMO confirmada (modo_real={is_real}) — processando ordem {tipo} ${valor:.2f} em {ativo or self.par_atual}"
+            )
 
             # Trava estrita de SESSION STOP
             if getattr(self, "session_stopped", False):
@@ -2454,9 +2474,9 @@ class Motor:
         self.logger.info("Motor parado")
 
     def set_modo(self, modo: str):
-        """Define modo de operação"""
-        self.modo_real = modo.lower()
-        self.logger.info(f"Modo alterado para: {self.modo_real}")
+        """Define modo de operação (demo/real)"""
+        self.modo_real = (modo.lower() == "real")
+        self.logger.info(f"Modo alterado para: {'REAL' if self.modo_real else 'DEMO'}")
 
     def get_status(self) -> Dict[str, Any]:
         """Retorna status atual"""
