@@ -686,14 +686,17 @@ class Motor:
         self.ultimo_motivo_recusa = "Aguardando ticks para análise"
         self.ultimo_score = 0.0
         self.propostas_recentes = {}
-        # SISTEMA DE MÚLTIPLOS ATIVOS PARA SCALPING RÁPIDO
+        # SISTEMA DE MÚLTIPLOS ATIVOS PARA SCALPING RÁPIDO (1s prioritários)
         self.ativos_ativos = [
+            "1HZ10V",
+            "1HZ25V",
+            "1HZ50V",
             "1HZ75V",
             "1HZ100V",
             "R_10",
             "R_25",
             "R_50",
-        ]  # Múltiplos ativos
+        ]  # Múltiplos ativos (1s prioritários)
         self.par_atual = "1HZ75V"  # Ativo principal
         self.ativo_fixo_turbo = False  # Modo multi-ativo habilitado (Issue #5)
         self.rotacao_ativos = True  # Habilita rotação seletiva
@@ -701,6 +704,7 @@ class Motor:
         self.tick_subscription_id_por_ativo: Dict[str, str] = {}
         self.ultima_cotacao_por_ativo: Dict[str, float] = {}
         self.ultimo_tick_timestamp_por_ativo: Dict[str, float] = {}
+        self.ultima_telemetria_analise: Dict[str, Any] = {}
         self.logger.info(
             f"ESTRATEGIA TURBO MULTI-ATIVO ATIVADA - Ativos: {self.ativos_ativos}"
         )
@@ -1632,6 +1636,8 @@ class Motor:
             "bb_dist_sup": snapshot.get("distancia_bb_superior", 0.0),
         }
 
+        min_score = resultado_intel.get("min_score", 85.0)
+
         if not sinal_direcao:
             return {
                 "executada": False,
@@ -1642,6 +1648,7 @@ class Motor:
                 "motivo_recusa": motivo_recusa,
                 "confianca": confianca,
                 "score": score,
+                "min_score": min_score,
                 "estado": estado,
                 "indicadores": indicadores_resumo,
                 "lucro_atual": lucro_atual,
@@ -1657,6 +1664,7 @@ class Motor:
             "duracao": 15,
             "confianca": confianca,
             "score": score,
+            "min_score": min_score,
             "estado": estado,
             "razao": razao,
             "motivo_recusa": "",
@@ -1742,10 +1750,13 @@ class Motor:
                     "motivo_recusa": "Nenhum sinal confirmado",
                     "confianca": 0.0,
                     "score": 0.0,
+                    "min_score": 85.0,
                     "estado": MicroScalperState.NORMAL,
                     "lucro_atual": lucro_atual,
                     "operacoes_ativas": self.operacoes_ativas_count,
                 }
+
+            self.ultima_telemetria_analise = analise
 
             # Se não há sinal em nenhum ativo, retorna a telemetria
             if not analise.get("sinal", False):
@@ -1756,6 +1767,7 @@ class Motor:
                     "motivo_recusa": analise.get("motivo_recusa", "Sem sinal"),
                     "confianca": analise.get("confianca", 0.0),
                     "score": analise.get("score", 0.0),
+                    "min_score": analise.get("min_score", 85.0),
                     "estado": analise.get("estado", MicroScalperState.NORMAL),
                     "lucro_atual": lucro_atual,
                     "operacoes_ativas": self.operacoes_ativas_count,

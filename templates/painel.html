@@ -246,6 +246,26 @@
           🚀 Iniciar Robô
         </button>
 
+        <!-- Banner de Notícias e Telemetria em Tempo Real (Micro-Scalper Scanner) -->
+        <div class="banner-noticias-telemetria" id="banner-noticias-telemetria">
+          <div class="banner-noticias-header">
+            <span class="banner-badge-live" id="banner-badge-live">
+              <span class="pulse-dot"></span> <span id="banner-badge-texto">SCANNER EM PAUSA</span>
+            </span>
+            <span class="banner-ativo-tag" id="banner-ativo-tag">1HZ10V - 100V (1s)</span>
+            <span class="banner-score-tag" id="banner-score-tag">Confluência: <strong id="banner-score-valor">--</strong></span>
+          </div>
+          <div class="banner-noticias-conteudo">
+            <span class="banner-icone" id="banner-icone">📡</span>
+            <div class="banner-texto-marquee" id="banner-texto-marquee">
+              <span id="banner-texto-principal">Robô pronto para operar nos ativos de 1 segundo...</span>
+            </div>
+          </div>
+          <div class="banner-barra-progresso-container">
+            <div class="banner-barra-progresso" id="banner-barra-progresso" style="width: 0%;"></div>
+          </div>
+        </div>
+
         <!-- Log Simples -->
         <div class="log-temp" id="log-temp">
           <span class="log-emoji">⏳</span>
@@ -1340,11 +1360,22 @@
             // Atualiza bolinhas baseado no status do robô
             atualizarStatusBolinhas(roboAtivo);
 
-            // Mostra mensagem de sucesso
+            // Transição suave: recolhe seletores e bloqueia inputs
+            const modoMetaWrapper = document.querySelector(".modo-meta-wrapper");
+            const modoSelect = document.getElementById("modo");
+            const metaInput = document.getElementById("meta");
+
+            // Mostra mensagem de sucesso e atualiza transição visual
             if (roboAtivo) {
+              if (modoMetaWrapper) modoMetaWrapper.classList.add("recolhido");
+              if (modoSelect) modoSelect.disabled = true;
+              if (metaInput) metaInput.disabled = true;
               console.log("✅ Robô iniciado com sucesso!");
-              adicionarLogInformativo("✅ Robô ativo - Analisando mercado...");
+              adicionarLogInformativo("✅ Robô ativo - Analisando mercado nos ativos de 1s...");
             } else {
+              if (modoMetaWrapper) modoMetaWrapper.classList.remove("recolhido");
+              if (modoSelect) modoSelect.disabled = false;
+              if (metaInput) metaInput.disabled = false;
               console.log("⏹️ Robô parado");
               adicionarLogInformativo("⏹️ Robô parado");
             }
@@ -1603,6 +1634,99 @@
               }
             }
 
+            // Sincroniza estado de recolhimento dos seletores com o estado do robô
+            const modoMetaWrapper = document.querySelector(".modo-meta-wrapper");
+            const modoSelect = document.getElementById("modo");
+            const metaInput = document.getElementById("meta");
+            const botaoControle = document.getElementById("bot-control-btn");
+            const botEstaAtivo = Boolean(data.ativo);
+
+            if (modoMetaWrapper) {
+              if (botEstaAtivo && !modoMetaWrapper.classList.contains("recolhido")) {
+                modoMetaWrapper.classList.add("recolhido");
+                if (modoSelect) modoSelect.disabled = true;
+                if (metaInput) metaInput.disabled = true;
+              } else if (!botEstaAtivo && modoMetaWrapper.classList.contains("recolhido")) {
+                modoMetaWrapper.classList.remove("recolhido");
+                if (modoSelect) modoSelect.disabled = false;
+                if (metaInput) metaInput.disabled = false;
+              }
+            }
+
+            if (botaoControle && !botaoControle.disabled) {
+              roboAtivo = botEstaAtivo;
+              botaoControle.innerHTML = botEstaAtivo ? "⏹️ Parar Robô" : "🚀 Iniciar Robô";
+              botaoControle.classList.toggle("ativo", botEstaAtivo);
+            }
+
+            // Atualiza Banner de Notícias / Telemetria em Tempo Real
+            const bannerBadgeLive = document.getElementById("banner-badge-live");
+            const bannerBadgeTexto = document.getElementById("banner-badge-texto");
+            const bannerAtivoTag = document.getElementById("banner-ativo-tag");
+            const bannerScoreValor = document.getElementById("banner-score-valor");
+            const bannerIcone = document.getElementById("banner-icone");
+            const bannerTextoPrincipal = document.getElementById("banner-texto-principal");
+            const bannerBarraProgresso = document.getElementById("banner-barra-progresso");
+
+            const telemetria = data.telemetria_banner || {};
+            const ativoScan = telemetria.ativo || (data.ativo_atual ? data.ativo_atual.ativo : "1HZ75V");
+            const scoreAtual = typeof telemetria.score === "number" ? telemetria.score : (data.micro_scalper ? data.micro_scalper.ultimo_score || 0 : 0);
+            const scoreMin = typeof telemetria.min_score === "number" ? telemetria.min_score : 85;
+            const estadoAtual = telemetria.estado || (data.micro_scalper ? data.micro_scalper.estado_atual : "NORMAL");
+            const motivoAtual = telemetria.motivo || (data.micro_scalper ? data.micro_scalper.ultimo_motivo_recusa : "Aguardando confluência");
+
+            if (bannerBadgeLive && bannerBadgeTexto) {
+              if (botEstaAtivo) {
+                bannerBadgeLive.className = "banner-badge-live ativo";
+                bannerBadgeTexto.textContent = "LIVE SCANNER (1s)";
+              } else {
+                bannerBadgeLive.className = "banner-badge-live";
+                bannerBadgeTexto.textContent = "SCANNER EM PAUSA";
+              }
+            }
+
+            if (bannerAtivoTag) {
+              bannerAtivoTag.textContent = `${ativoScan} (1s)`;
+            }
+
+            if (bannerScoreValor) {
+              bannerScoreValor.textContent = `${scoreAtual.toFixed(1)} / ${scoreMin.toFixed(0)}`;
+            }
+
+            if (bannerBarraProgresso) {
+              const pct = Math.min(100, Math.max(0, Math.round((scoreAtual / scoreMin) * 100)));
+              bannerBarraProgresso.style.width = `${pct}%`;
+              if (pct >= 90) {
+                bannerBarraProgresso.style.background = "linear-gradient(90deg, #10b981, #00E676)";
+              } else if (pct >= 60) {
+                bannerBarraProgresso.style.background = "linear-gradient(90deg, #ffc107, #f59e0b)";
+              } else {
+                bannerBarraProgresso.style.background = "linear-gradient(90deg, #3b82f6, #6366f1)";
+              }
+            }
+
+            if (bannerIcone) {
+              if (estadoAtual === "SINAL_CONFIRMADO" || estadoAtual === "COMPRANDO") {
+                bannerIcone.textContent = "🚀";
+              } else if (estadoAtual === "POSICAO_ABERTA") {
+                bannerIcone.textContent = "📈";
+              } else if (estadoAtual === "AGUARDANDO_REVERSAO" || estadoAtual === "EXTREMO_DETECTADO") {
+                bannerIcone.textContent = "⚡";
+              } else if (botEstaAtivo) {
+                bannerIcone.textContent = "🔍";
+              } else {
+                bannerIcone.textContent = "⏸️";
+              }
+            }
+
+            if (bannerTextoPrincipal) {
+              if (!botEstaAtivo) {
+                bannerTextoPrincipal.textContent = "Robô pronto para operar nos ativos de 1 segundo (VIX 1s). Clique em Iniciar.";
+              } else {
+                bannerTextoPrincipal.textContent = `[${ativoScan}] ${motivoAtual}`;
+              }
+            }
+
             if (data.micro_scalper) {
               const scalperStatus = document.getElementById("scalper-status");
               const scalperScore = document.getElementById("scalper-score");
@@ -1623,7 +1747,7 @@
                 }
               }
               if (scalperScore) {
-                scalperScore.textContent = `Score: ${data.micro_scalper.ultimo_score || 0}/85`;
+                scalperScore.textContent = `Score: ${data.micro_scalper.ultimo_score || 0}/${scoreMin.toFixed(0)}`;
               }
               if (scalperMotivo) {
                 const motivo = data.micro_scalper.ultimo_motivo_recusa || "Aguardando oportunidade";

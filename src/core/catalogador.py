@@ -168,7 +168,7 @@ PAR_PADRAO_OPERACAO = "1HZ75V"
 
 # Configuração de ativos para estratégia turbo integrada
 ATIVOS_TURBO_INTEGRADOS = {
-    "1HZ75V": {  # VIX75
+    "1HZ10V": {  # Volatility 10 (1s) Index
         "tipo_contrato": "turbo",
         "duracao_segundos": 15,
         "min_stake": 0.35,
@@ -178,7 +178,7 @@ ATIVOS_TURBO_INTEGRADOS = {
         "timeframe": 1,
         "scalping_friendly": True,
     },
-    "1HZ100V": {  # VIX100
+    "1HZ25V": {  # Volatility 25 (1s) Index
         "tipo_contrato": "turbo",
         "duracao_segundos": 15,
         "min_stake": 0.35,
@@ -188,7 +188,37 @@ ATIVOS_TURBO_INTEGRADOS = {
         "timeframe": 1,
         "scalping_friendly": True,
     },
-    "R_10": {  # Volatility 10 Index
+    "1HZ50V": {  # Volatility 50 (1s) Index
+        "tipo_contrato": "turbo",
+        "duracao_segundos": 15,
+        "min_stake": 0.35,
+        "max_stake": 100.0,
+        "contract_types": ["CALL", "PUT"],
+        "multipliers": [10, 100, 200, 300, 400],
+        "timeframe": 1,
+        "scalping_friendly": True,
+    },
+    "1HZ75V": {  # Volatility 75 (1s) Index
+        "tipo_contrato": "turbo",
+        "duracao_segundos": 15,
+        "min_stake": 0.35,
+        "max_stake": 100.0,
+        "contract_types": ["CALL", "PUT"],
+        "multipliers": [10, 100, 200, 300, 400],
+        "timeframe": 1,
+        "scalping_friendly": True,
+    },
+    "1HZ100V": {  # Volatility 100 (1s) Index
+        "tipo_contrato": "turbo",
+        "duracao_segundos": 15,
+        "min_stake": 0.35,
+        "max_stake": 100.0,
+        "contract_types": ["CALL", "PUT"],
+        "multipliers": [10, 100, 200, 300, 400],
+        "timeframe": 1,
+        "scalping_friendly": True,
+    },
+    "R_10": {  # Volatility 10 Index (compatibilidade)
         "tipo_contrato": "turbo",
         "duracao_segundos": 15,
         "min_stake": 0.35,
@@ -198,7 +228,7 @@ ATIVOS_TURBO_INTEGRADOS = {
         "timeframe": 1,
         "scalping_friendly": True,
     },
-    "R_25": {  # Volatility 25 Index
+    "R_25": {  # Volatility 25 Index (compatibilidade)
         "tipo_contrato": "turbo",
         "duracao_segundos": 15,
         "min_stake": 0.35,
@@ -208,7 +238,7 @@ ATIVOS_TURBO_INTEGRADOS = {
         "timeframe": 1,
         "scalping_friendly": True,
     },
-    "R_50": {  # Volatility 50 Index
+    "R_50": {  # Volatility 50 Index (compatibilidade)
         "tipo_contrato": "turbo",
         "duracao_segundos": 15,
         "min_stake": 0.35,

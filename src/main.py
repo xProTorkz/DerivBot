@@ -2173,6 +2173,23 @@ def status_robo():
             if hasattr(motor, "ultimo_score") and motor.ultimo_score:
                 telemetria_scalper["ultimo_score"] = motor.ultimo_score
 
+        # Banner rotativo de notícias / telemetria da análise em tempo real
+        banner_info = {
+            "ativo": par_atual,
+            "score": telemetria_scalper.get("ultimo_score", 0.0),
+            "min_score": 85.0,
+            "estado": telemetria_scalper.get("estado_atual", "NORMAL"),
+            "motivo": telemetria_scalper.get("ultimo_motivo_recusa", "Aguardando início"),
+        }
+        if motor and hasattr(motor, "ultima_telemetria_analise") and motor.ultima_telemetria_analise:
+            ult_an = motor.ultima_telemetria_analise
+            banner_info["ativo"] = ult_an.get("ativo", par_atual)
+            banner_info["score"] = ult_an.get("score", banner_info["score"])
+            banner_info["min_score"] = ult_an.get("min_score", 85.0)
+            st_raw = ult_an.get("estado", "NORMAL")
+            banner_info["estado"] = getattr(st_raw, "value", str(st_raw))
+            banner_info["motivo"] = ult_an.get("motivo_recusa") or ult_an.get("razao") or banner_info["motivo"]
+
         response_data = {
             "ativo": bool(robo_ativo),
             "modo": str(modo_operacao or "iniciante"),
@@ -2185,6 +2202,7 @@ def status_robo():
             "ativo_atual": ativo_info,
             "motor_status": motor_status,
             "micro_scalper": telemetria_scalper,
+            "telemetria_banner": banner_info,
             "logs_tempo_real": logs_recentes,
             "historico_recente": (
                 historico_operacoes[-3:] if historico_operacoes else []

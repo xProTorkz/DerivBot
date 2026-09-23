@@ -535,12 +535,31 @@ class ConfluenceScore:
         })
         self.min_score = self.config.get("min_score", 85.0)
 
+    def obter_min_score_perfil(self, modo: Optional[str] = None) -> float:
+        """Retorna o score mínimo calibrado por perfil ou o padrão da config."""
+        env_score = os.getenv("SCALPER_MIN_SCORE")
+        if env_score:
+            try:
+                return float(env_score)
+            except ValueError:
+                pass
+
+        m = (modo or "").lower().strip()
+        if m == "agressivo":
+            return 70.0
+        elif m in ["conservador", "intermediario"]:
+            return 78.0
+        elif m == "iniciante":
+            return 82.0
+        return self.min_score
+
     def calcular(
         self,
         direcao_pretendida: str,
         extremo_res: Dict[str, Any],
         reversao_res: Dict[str, Any],
         snapshot: Dict[str, Any],
+        modo: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Calcula o score de confluência final e decide se emite sinal.
@@ -628,27 +647,28 @@ class ConfluenceScore:
         score_total = sum(scores.values())
         score_total = min(100.0, round(score_total, 1))
 
-        aprovado = (score_total >= self.min_score) and reversao_res.get("reversao_confirmada", False)
+        target_min_score = self.obter_min_score_perfil(modo)
+        aprovado = (score_total >= target_min_score) and reversao_res.get("reversao_confirmada", False)
 
         motivos_recusa = []
         if not extremo_res.get("extremo_detectado", False):
             motivos_recusa.append("Sem extremo estatístico confirmado")
         if not reversao_res.get("reversao_confirmada", False):
             motivos_recusa.append(f"Reversão não confirmada ({reversao_res.get('razao')})")
-        if score_total < self.min_score:
-            motivos_recusa.append(f"Score {score_total:.1f} abaixo do mínimo {self.min_score:.1f}")
+        if score_total < target_min_score:
+            motivos_recusa.append(f"Score {score_total:.1f} abaixo do mínimo {target_min_score:.1f}")
 
         motivo_recusa_str = " | ".join(motivos_recusa) if motivos_recusa else ""
 
         return {
             "aprovado": aprovado,
             "score": score_total,
-            "min_score": self.min_score,
+            "min_score": target_min_score,
             "scores_detalhados": scores,
             "sinal": direcao_pretendida if aprovado else None,
             "motivo_recusa": motivo_recusa_str,
             "razao": (
-                f"SINAL {direcao_pretendida} CONFIRMADO (Score {score_total:.1f}/{self.min_score:.1f})"
+                f"SINAL {direcao_pretendida} CONFIRMADO (Score {score_total:.1f}/{target_min_score:.1f})"
                 if aprovado
                 else f"Recusado: {motivo_recusa_str}"
             ),
@@ -681,6 +701,9 @@ class MicroScalperStateMachine:
         self.total_operacoes_concluidas = 0
         self.operacoes_vitoriosas = 0
         self.operacoes_derrotadas = 0
+        self.dados_ultimo_extremo: Optional[Dict[str, Any]] = None
+        self.timestamp_ultimo_extremo: float = 0.0
+        self.direcao_reversao: Optional[str] = None
 
     def transitar(self, novo_estado: str, motivo: str = ""):
         """Registra a transição de estado garantindo rastreabilidade."""
@@ -759,6 +782,7 @@ def analisar_micro_scalping(
     operacoes_ativas: int = 0,
     ultimos_ticks: Optional[List[float]] = None,
     ativo: Optional[str] = None,
+    state_machine: Optional[MicroScalperStateMachine] = None,
 ) -> Dict[str, Any]:
     """
     ANÁLISE CANÔNICA DO MICRO-SCALPER SELETIVO (Issues #2, #3, #4, #20).
@@ -771,7 +795,7 @@ def analisar_micro_scalping(
         if not ativo and isinstance(dados_ou_snapshot, dict):
             ativo = dados_ou_snapshot.get("ativo") or dados_ou_snapshot.get("simbolo")
 
-        sm = obter_state_machine(ativo)
+        sm = state_machine or obter_state_machine(ativo)
 
         # 1. Checagem de meta diária atingida
         if meta > 0 and lucro_atual >= meta:
@@ -854,11 +878,36 @@ def analisar_micro_scalping(
                 "motivo_recusa": sm.ultimo_motivo_recusa,
             }
 
-        # 4. Detector de Extremos
+        # 4. Detector de Extremos e Janela de Reversão
         detector = ExtremeDetector()
         extremo_res = detector.detectar(snapshot)
+        confluence = ConfluenceScore()
+        target_min_score = confluence.obter_min_score_perfil(modo)
 
-        if not extremo_res["extremo_detectado"]:
+        agora = time.time()
+        janela_reversao_s = 10.0
+
+        if extremo_res["extremo_detectado"]:
+            direcao = extremo_res["direcao_pretendida"]
+            sm.dados_ultimo_extremo = extremo_res
+            sm.timestamp_ultimo_extremo = agora
+            sm.direcao_reversao = direcao
+            sm.transitar(
+                MicroScalperState.EXTREMO_DETECTADO,
+                f"Extremo {extremo_res['tipo_extremo']} detectado para {direcao}",
+            )
+            sm.transitar(MicroScalperState.AGUARDANDO_REVERSAO, f"Validando virada para {direcao}")
+        elif (
+            sm.estado_atual == MicroScalperState.AGUARDANDO_REVERSAO
+            and getattr(sm, "dados_ultimo_extremo", None) is not None
+            and (agora - getattr(sm, "timestamp_ultimo_extremo", 0.0)) <= janela_reversao_s
+        ):
+            # O preço está dentro da janela de reversão pós-extremo!
+            extremo_res = sm.dados_ultimo_extremo
+            direcao = sm.direcao_reversao
+        else:
+            sm.dados_ultimo_extremo = None
+            sm.direcao_reversao = None
             sm.transitar(MicroScalperState.NORMAL, "Mercado em faixa normal")
             sm.ultimo_motivo_recusa = extremo_res["razao"]
             sm.ultimo_score = 0.0
@@ -866,27 +915,19 @@ def analisar_micro_scalping(
                 "sinal": None,
                 "confianca": 0.0,
                 "score": 0.0,
+                "min_score": target_min_score,
                 "estado": sm.estado_atual,
                 "razao": extremo_res["razao"],
                 "motivo_recusa": extremo_res["razao"],
                 "analise": snapshot,
             }
 
-        # Extremo detectado!
-        direcao = extremo_res["direcao_pretendida"]
-        sm.transitar(
-            MicroScalperState.EXTREMO_DETECTADO,
-            f"Extremo {extremo_res['tipo_extremo']} detectado para {direcao}",
-        )
-
         # 5. Confirmador de Reversão
-        sm.transitar(MicroScalperState.AGUARDANDO_REVERSAO, f"Validando virada para {direcao}")
         confirmador = ReversalConfirmator()
         reversao_res = confirmador.confirmar(direcao, ticks, snapshot)
 
-        # 6. Score de Confluência
-        confluence = ConfluenceScore()
-        score_res = confluence.calcular(direcao, extremo_res, reversao_res, snapshot)
+        # 6. Score de Confluência calibrado por perfil
+        score_res = confluence.calcular(direcao, extremo_res, reversao_res, snapshot, modo=modo)
         sm.ultimo_score = score_res["score"]
 
         if not score_res["aprovado"]:
@@ -903,7 +944,7 @@ def analisar_micro_scalping(
                 "analise": snapshot,
             }
 
-        # SINAL APROVADO COM EXTREMO + REVERSÃO + CONFLUÊNCIA >= 85!
+        # SINAL APROVADO COM EXTREMO + REVERSÃO + CONFLUÊNCIA!
         sm.transitar(
             MicroScalperState.SINAL_CONFIRMADO,
             f"Sinal {direcao} aprovado com score {score_res['score']:.1f}",
@@ -911,6 +952,8 @@ def analisar_micro_scalping(
         sm.total_sinais_gerados += 1
         sm.ultimo_sinal = direcao
         sm.ultimo_motivo_recusa = "Nenhum (Sinal ativo e confirmado)"
+        sm.dados_ultimo_extremo = None
+        sm.direcao_reversao = None
 
         return {
             "sinal": direcao,
