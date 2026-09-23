@@ -1277,13 +1277,14 @@
         const modo = document.getElementById("modo").value || "iniciante";
         const meta = parseFloat(document.getElementById("meta").value) || 20;
         const botao = document.getElementById("bot-control-btn");
+        if (!botao || botao.disabled) return;
+        botao.disabled = true;
 
         console.log("Dados:", { modo, meta, roboAtivo });
 
         // Atualiza interface imediatamente
         if (!roboAtivo) {
           botao.innerHTML = "⏳ Iniciando...";
-          botao.disabled = true;
 
           // Move histórico atual para histórico completo
           moverHistoricoParaCompleto();
@@ -1352,8 +1353,8 @@
             // Atualiza estado do robô
             roboAtivo = data.status === "iniciado";
 
-            // Atualiza botão com emoji
-            botao.innerHTML = roboAtivo ? "⏹️ Parar Robô" : "🚀 Iniciar Robô";
+            // Atualiza botão com emoji padronizado
+            botao.innerHTML = roboAtivo ? "⛔ Parar Robô" : "🚀 Iniciar Robô";
             botao.disabled = false;
             botao.classList.toggle("ativo", roboAtivo);
 
@@ -1655,7 +1656,7 @@
 
             if (botaoControle && !botaoControle.disabled) {
               roboAtivo = botEstaAtivo;
-              botaoControle.innerHTML = botEstaAtivo ? "⏹️ Parar Robô" : "🚀 Iniciar Robô";
+              botaoControle.innerHTML = botEstaAtivo ? "⛔ Parar Robô" : "🚀 Iniciar Robô";
               botaoControle.classList.toggle("ativo", botEstaAtivo);
             }
 

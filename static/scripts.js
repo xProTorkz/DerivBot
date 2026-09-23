@@ -153,8 +153,10 @@ document.addEventListener("DOMContentLoaded", function () {
     return;
   }
 
-  botaoControle.addEventListener("click", async () => {
-    console.log("🔥 BOTÃO CLICADO! Iniciando processo...");
+  // De-duplicação: Se iniciarRoboSeguro já estiver definido no HTML, evita múltiplos handlers
+  if (!window.iniciarRoboSeguro) {
+    botaoControle.addEventListener("click", async () => {
+      console.log("🔥 BOTÃO CLICADO! Iniciando processo...");
 
     const modo = modoSelect.value;
     const meta = parseFloat(metaInput.value);
@@ -232,7 +234,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
       // Alterna o estado do botão
       roboAtivo = dados.status === "iniciado";
-      botaoControle.textContent = roboAtivo ? "Parar Robô" : "Iniciar Robô";
+      botaoControle.textContent = roboAtivo ? "⛔ Parar Robô" : "🚀 Iniciar Robô";
       botaoControle.classList.toggle("ativo", roboAtivo);
 
       // 👇 atualiza exibição do modo
@@ -251,7 +253,8 @@ document.addEventListener("DOMContentLoaded", function () {
     } catch (erro) {
       console.error("Erro ao alternar robô:", erro);
     }
-  });
+    });
+  }
 
   function atualizarLog(mensagem, tipo = "info") {
     const logElement = document.getElementById("log-temporario") || document.getElementById("log-temp");
@@ -767,7 +770,7 @@ document.addEventListener("DOMContentLoaded", function () {
           } else {
             atualizarLog("⏸️ Robô está parado.", "config");
             resetarProgressoBolinhas();
-            botaoControle.textContent = "▶️ Iniciar Robô";
+            botaoControle.textContent = "🚀 Iniciar Robô";
             botaoControle.classList.remove("ativo");
           }
         }

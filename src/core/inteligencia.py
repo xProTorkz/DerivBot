@@ -935,7 +935,23 @@ def analisar_micro_scalping(
         ):
             # O preço está dentro da janela de reversão pós-extremo!
             extremo_res = sm.dados_ultimo_extremo
-            direcao = sm.direcao_reversao
+        elif sm.estado_atual in (
+            MicroScalperState.POSICAO_ABERTA,
+            MicroScalperState.COMPRANDO,
+            MicroScalperState.SAINDO,
+            MicroScalperState.COOLDOWN,
+        ):
+            # Não reseta para NORMAL se o ativo já possui uma operação ativa ou em transição
+            return {
+                "sinal": None,
+                "confianca": 0.0,
+                "score": getattr(sm, "ultimo_score", 0.0),
+                "min_score": target_min_score,
+                "estado": sm.estado_atual,
+                "razao": f"Ativo em estado {sm.estado_atual.name}",
+                "motivo_recusa": f"Ativo em estado {sm.estado_atual.name}",
+                "analise": snapshot,
+            }
         else:
             sm.dados_ultimo_extremo = None
             sm.direcao_reversao = None
