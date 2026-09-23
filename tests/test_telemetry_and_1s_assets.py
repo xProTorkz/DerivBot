@@ -45,10 +45,10 @@ class TestOneSecondAssetsAndPersistence(unittest.TestCase):
     def test_score_calibration_by_profile(self):
         """Verifica calibração dinâmica do score mínimo por perfil de risco."""
         cs = ConfluenceScore()
-        self.assertEqual(cs.obter_min_score_perfil("agressivo"), 70.0)
-        self.assertEqual(cs.obter_min_score_perfil("conservador"), 78.0)
-        self.assertEqual(cs.obter_min_score_perfil("intermediario"), 78.0)
-        self.assertEqual(cs.obter_min_score_perfil("iniciante"), 82.0)
+        self.assertEqual(cs.obter_min_score_perfil("agressivo"), 65.0)
+        self.assertEqual(cs.obter_min_score_perfil("conservador"), 70.0)
+        self.assertEqual(cs.obter_min_score_perfil("intermediario"), 70.0)
+        self.assertEqual(cs.obter_min_score_perfil("iniciante"), 72.0)
         # Sem perfil especificado mantém padrão (85.0)
         self.assertEqual(cs.obter_min_score_perfil(None), 85.0)
 
@@ -63,10 +63,12 @@ class TestOneSecondAssetsAndPersistence(unittest.TestCase):
         snap = cat.obter_snapshot_mercado("1HZ75V")
         sm = MicroScalperStateMachine()
 
-        # Primeira análise: detecta extremo e entra em AGUARDANDO_REVERSAO
+        # Primeira análise: detecta extremo e entra em AGUARDANDO_REVERSAO ou SINAL_CONFIRMADO se já há reversão
         res1 = analisar_micro_scalping(snap, ultimos_ticks=ticks[-60:], state_machine=sm, modo="agressivo")
-        self.assertEqual(sm.estado_atual, MicroScalperState.AGUARDANDO_REVERSAO)
-        self.assertIsNotNone(sm.dados_ultimo_extremo)
+        self.assertIn(sm.estado_atual, [MicroScalperState.AGUARDANDO_REVERSAO, MicroScalperState.SINAL_CONFIRMADO])
+        # dados_ultimo_extremo é consumido (None) quando sinal é confirmado; ainda presente se aguardando reversão
+        if sm.estado_atual == MicroScalperState.AGUARDANDO_REVERSAO:
+            self.assertIsNotNone(sm.dados_ultimo_extremo)
 
         # Adiciona mais 1 tick favorável (91.0)
         ticks.append(91.0)

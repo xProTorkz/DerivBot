@@ -2549,13 +2549,13 @@ class Motor:
                             self.rodando = False
                             break
 
-                    # Intervalos seguros para análise
+                    # Intervalos calibrados para ativos de 1 segundo
                     intervalo = {
-                        "iniciante": 2.0,  # 2 segundos - Seguro
-                        "intermediario": 1.0,  # 1 segundo - Moderado
-                        "conservador": 1.0,  # 1 segundo - Moderado
-                        "agressivo": 0.5,  # 500ms - Rápido mas seguro
-                    }.get(self.modo_operacao, 2.0)
+                        "iniciante": 1.0,    # 1 segundo - ativos 1s exigem análise rápida
+                        "intermediario": 0.8, # 800ms - moderado
+                        "conservador": 0.8,   # 800ms - moderado
+                        "agressivo": 0.4,    # 400ms - máxima velocidade
+                    }.get(self.modo_operacao, 1.0)
 
                     time.sleep(intervalo)
 

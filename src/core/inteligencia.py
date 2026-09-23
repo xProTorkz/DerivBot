@@ -439,67 +439,91 @@ class ReversalConfirmator:
         # 1. Contagem de ticks consecutivos na direção oposta
         deltas = [ticks_recentes[i] - ticks_recentes[i - 1] for i in range(1, len(ticks_recentes))]
         
-        ticks_favoraveis = 0
+        ticks_consecutivos = 0
         if direcao_pretendida == "CALL":
             for d in reversed(deltas):
                 if d >= 0:
-                    ticks_favoraveis += 1
+                    ticks_consecutivos += 1
                 else:
                     break
         elif direcao_pretendida == "PUT":
             for d in reversed(deltas):
                 if d <= 0:
-                    ticks_favoraveis += 1
+                    ticks_consecutivos += 1
                 else:
                     break
 
-        # 2. Desaceleração / Inflexão do Slope
-        desacelerando = False
-        if direcao_pretendida == "CALL":
-            desacelerando = (inclinacao_curta >= -0.05) or (len(deltas) >= 2 and deltas[-1] > deltas[-2])
-        elif direcao_pretendida == "PUT":
-            desacelerando = (inclinacao_curta <= 0.05) or (len(deltas) >= 2 and deltas[-1] < deltas[-2])
-
-        # 3. Rejeição de Extremo (o último preço se afastou do extremo recente)
         preco_atual = ticks_recentes[-1]
         precos_anteriores = ticks_recentes[:-1]
 
+        # 2. Desaceleração / Inflexão do Slope e deltas favoráveis recentes
+        ultimos_deltas = deltas[-3:] if len(deltas) >= 3 else deltas
+        desacelerando = False
         rejeicao_extremo = False
-        if direcao_pretendida == "CALL":
-            min_anterior = min(precos_anteriores)
-            rejeicao_extremo = preco_atual >= min_anterior
-        elif direcao_pretendida == "PUT":
-            max_anterior = max(precos_anteriores)
-            rejeicao_extremo = preco_atual <= max_anterior
+        virada = False
 
-        # Critério de aprovação:
-        # Pelo menos (min_ticks - 1) ticks na direção certa E rejeição do extremo E desaceleração
-        confirmado = (ticks_favoraveis >= (min_ticks - 1)) and rejeicao_extremo and desacelerando
+        if direcao_pretendida == "CALL":
+            ticks_favoraveis_recentes = sum(1 for d in ultimos_deltas if d >= 0)
+            ultimo_delta_favoravel = deltas[-1] >= 0 if deltas else False
+            deslocamento_recente = (ticks_recentes[-1] - ticks_recentes[-3]) if len(ticks_recentes) >= 3 else (deltas[-1] if deltas else 0.0)
+            
+            min_extremo = min(ticks_recentes)
+            rejeicao_extremo = (preco_atual > min_extremo) or (preco_atual >= min(precos_anteriores))
+            desacelerando = (inclinacao_curta >= -0.05) or (len(deltas) >= 2 and deltas[-1] > deltas[-2]) or ultimo_delta_favoravel
+            
+            virada = (
+                (ticks_consecutivos >= 2)
+                or (ticks_consecutivos >= 1 and (ticks_favoraveis_recentes >= 2 or deslocamento_recente > 0))
+                or (desacelerando and ultimo_delta_favoravel and rejeicao_extremo)
+            )
+            ticks_aprovados = max(ticks_consecutivos, ticks_favoraveis_recentes)
+
+        elif direcao_pretendida == "PUT":
+            ticks_favoraveis_recentes = sum(1 for d in ultimos_deltas if d <= 0)
+            ultimo_delta_favoravel = deltas[-1] <= 0 if deltas else False
+            deslocamento_recente = (ticks_recentes[-3] - ticks_recentes[-1]) if len(ticks_recentes) >= 3 else (-deltas[-1] if deltas else 0.0)
+            
+            max_extremo = max(ticks_recentes)
+            rejeicao_extremo = (preco_atual < max_extremo) or (preco_atual <= max(precos_anteriores))
+            desacelerando = (inclinacao_curta <= 0.05) or (len(deltas) >= 2 and deltas[-1] < deltas[-2]) or ultimo_delta_favoravel
+            
+            virada = (
+                (ticks_consecutivos >= 2)
+                or (ticks_consecutivos >= 1 and (ticks_favoraveis_recentes >= 2 or deslocamento_recente > 0))
+                or (desacelerando and ultimo_delta_favoravel and rejeicao_extremo)
+            )
+            ticks_aprovados = max(ticks_consecutivos, ticks_favoraveis_recentes)
+        else:
+            ticks_aprovados = 0
+
+        # Critério de aprovação: virada demonstrada E (rejeição do extremo OU desaceleração)
+        confirmado = virada and (rejeicao_extremo or desacelerando)
 
         pontuacao = 0.0
         if confirmado:
             pontuacao = 10.0
-            if ticks_favoraveis >= min_ticks:
+            if ticks_consecutivos >= 2 or ticks_aprovados >= 2:
                 pontuacao += 5.0
             if desacelerando:
                 pontuacao += 5.0
             pontuacao = min(20.0, pontuacao)
 
         razao = (
-            f"Reversão confirmada ({ticks_favoraveis} ticks favoráveis, slope: {inclinacao_curta:.3f})"
+            f"Reversão confirmada ({ticks_aprovados} ticks favoráveis, slope: {inclinacao_curta:.3f})"
             if confirmado
-            else f"Aguardando reversão: ticks favoráveis={ticks_favoraveis}/{min_ticks}, rejeição={rejeicao_extremo}"
+            else f"Aguardando reversão: ticks favoráveis={ticks_consecutivos}/{min_ticks}, rejeição={rejeicao_extremo}"
         )
 
         return {
             "reversao_confirmada": confirmado,
             "pontuacao_reversao": round(pontuacao, 1),
-            "ticks_confirmados": ticks_favoraveis,
+            "ticks_confirmados": ticks_aprovados,
             "rejeicao_extremo": rejeicao_extremo,
             "desacelerando": desacelerando,
             "razao": razao,
             "detalhes": {
-                "ticks_favoraveis": ticks_favoraveis,
+                "ticks_favoraveis": ticks_consecutivos,
+                "ticks_aprovados": ticks_aprovados,
                 "inclinacao_curta": inclinacao_curta,
                 "rejeicao_extremo": rejeicao_extremo,
             },
@@ -546,11 +570,11 @@ class ConfluenceScore:
 
         m = (modo or "").lower().strip()
         if m == "agressivo":
-            return 70.0
+            return 65.0
         elif m in ["conservador", "intermediario"]:
-            return 78.0
+            return 70.0
         elif m == "iniciante":
-            return 82.0
+            return 72.0
         return self.min_score
 
     def calcular(
