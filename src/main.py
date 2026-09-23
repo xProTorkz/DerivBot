@@ -1234,9 +1234,8 @@ def login():
         logger.info(f"[OK] Usando conta demo: {licenca['deriv_demo']}")
     else:
         session["deriv_account"] = f"account_{token_ativo[:8]}"
-        logger.warning("[AVISO] Usando ID temporário de conta")
-
-    session["saldo"] = 0
+    # Define saldo inicial baseado na licença
+    session["saldo"] = float(licenca.get(f"saldo_{tipo_conta_padrao}", 10000.0 if tipo_conta_padrao == "demo" else 0.0))
 
     # Inicializa a API com o token ativo
     inicializar_api(token_ativo)
@@ -2102,7 +2101,10 @@ def status_robo():
     try:
         global robo_ativo, modo_operacao, meta_diaria, status_operacao, ultima_mensagem
 
-        # Converte valores de forma segura logo no início
+        # Sincroniza dados do motor antes de calcular valores
+        sincronizar_dados_motor()
+
+        # Converte valores de forma segura
         lucro_valor = 0.0
         saldo_valor = 0.0
 
@@ -2115,15 +2117,24 @@ def status_robo():
             lucro_valor = 0.0
 
         try:
-            if callable(saldo_atual):
+            if motor and hasattr(motor, "saldo") and motor.saldo is not None and float(motor.saldo) > 0:
+                saldo_valor = float(motor.saldo)
+            elif callable(saldo_atual):
                 saldo_valor = float(saldo_atual())
-            elif isinstance(saldo_atual, (int, float)):
+            elif isinstance(saldo_atual, (int, float)) and float(saldo_atual) > 0:
                 saldo_valor = float(saldo_atual)
+            elif session.get("saldo"):
+                saldo_valor = float(session.get("saldo"))
+
+            if saldo_valor == 0.0:
+                licencas = carregar_licencas()
+                tipo_c = session.get("tipo_conta", "demo")
+                for l in licencas.values():
+                    if l.get("codigo_licenca") == session.get("codigo_licenca"):
+                        saldo_valor = float(l.get(f"saldo_{tipo_c}", 10000.0 if tipo_c == "demo" else 0.0))
+                        break
         except Exception:
             saldo_valor = 0.0
-
-        # Sincroniza dados do motor antes de retornar
-        sincronizar_dados_motor()
 
         # Informações do ativo atual - ESTRATÉGIA TURBO FIXA
         ativo_info = {
