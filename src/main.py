@@ -18,6 +18,7 @@ if SRC_DIR not in sys.path:
 import json
 import time
 import logging
+import threading
 
 
 from datetime import datetime, timedelta
@@ -795,29 +796,54 @@ def carregar_historico():
         historico_operacoes = []
 
 
-def adicionar_operacao(tipo, valor, resultado):
-    """Adiciona uma operação ao histórico"""
+def adicionar_operacao(
+    tipo,
+    valor,
+    resultado,
+    contract_id=None,
+    transaction_id=None,
+    ativo=None,
+    motivo_saida=None,
+    hora_abertura=None,
+    hora_fechamento=None,
+    status_final=None,
+):
+    """Adiciona uma operação ao histórico garantindo esquema completo e idempotência (Issue #23.B)"""
     global historico_operacoes, contador_operacoes, lucro_atual, saldo_atual
 
-    # Usa timezone local do Brasil
+    # Idempotência por contract_id
+    if contract_id and any(str(op.get("contract_id")) == str(contract_id) for op in historico_operacoes):
+        return
+
     from datetime import timezone, timedelta
 
     fuso_brasil = timezone(timedelta(hours=-3))  # UTC-3 (Brasília)
     agora = datetime.now(fuso_brasil)
 
+    data_str = agora.strftime("%d/%m/%Y")
+    hora_str = agora.strftime("%H:%M:%S")
+
     operacao = {
-        "data": agora.strftime("%d/%m/%Y"),
-        "hora": agora.strftime("%H:%M:%S"),
+        "contract_id": str(contract_id) if contract_id else None,
+        "transaction_id": transaction_id,
+        "data": data_str,
+        "hora": hora_str,
+        "hora_abertura": hora_abertura or hora_str,
+        "hora_fechamento": hora_fechamento or hora_str,
         "timestamp": agora.timestamp(),
+        "ativo": ativo or "1HZ75V",
         "tipo": tipo,
-        "valor": valor,
-        "resultado_real": resultado,
+        "valor": float(valor),
+        "resultado_real": float(resultado),
+        "lucro": float(resultado),
+        "motivo_saida": motivo_saida or ("TAKE_PROFIT" if resultado > 0 else "STOP_LOSS"),
+        "status_final": status_final or ("WIN" if resultado > 0 else ("LOSS" if resultado < 0 else "EMPATE")),
     }
 
     historico_operacoes.append(operacao)
     contador_operacoes += 1
 
-    # Atualiza lucro atual
+    # Atualiza lucro atual da sessão
     lucro_atual += resultado
 
     # Atualiza saldo se motor estiver disponível
@@ -830,15 +856,16 @@ def adicionar_operacao(tipo, valor, resultado):
     # Adiciona logs visuais para o painel
     resultado_texto = f"+${resultado:.2f}" if resultado > 0 else f"${resultado:.2f}"
     status_texto = "[LUCRO]" if resultado > 0 else "[PERDA]"
+    ativo_texto = f" ({ativo})" if ativo else ""
 
     adicionar_log_painel(
-        f"{status_texto} {tipo} finalizada: {resultado_texto} | Total: ${lucro_atual:.2f}",
+        f"{status_texto} {tipo}{ativo_texto} finalizada: {resultado_texto} | Total: ${lucro_atual:.2f}",
         "success" if resultado > 0 else "error",
     )
 
     # Log para tempo real também
     adicionar_log_tempo_real(
-        f"[TRADE] {tipo} finalizada: {resultado_texto} (Total: ${lucro_atual:.2f})",
+        f"[TRADE] {tipo}{ativo_texto} finalizada: {resultado_texto} (Total: ${lucro_atual:.2f})",
         "success" if resultado > 0 else "warning",
     )
 
@@ -2213,6 +2240,69 @@ def status_robo():
 
         status_real_ativo = bool(robo_ativo and motor_rodando and not motor_session_stopped)
 
+        def _safe_float(val, default=0.0):
+            try:
+                if isinstance(val, (int, float)):
+                    return float(val)
+                if isinstance(val, str):
+                    return float(val)
+                return default
+            except Exception:
+                return default
+
+        def _safe_int(val, default=0):
+            try:
+                if isinstance(val, (int, float)):
+                    return int(val)
+                if isinstance(val, str) and val.isdigit():
+                    return int(val)
+                return default
+            except Exception:
+                return default
+
+        # Fonte Financeira Única (Issue #23.A)
+        if motor and hasattr(motor, "lucro_realizado_sessao"):
+            lucro_valor = _safe_float(motor.lucro_realizado_sessao, lucro_valor)
+
+        # Operações ativas reais serializadas (Issue #23.B)
+        operacoes_ativas_list = []
+        if motor and hasattr(motor, "operacoes_abertas") and isinstance(motor.operacoes_abertas, dict):
+            with getattr(motor, "lock", threading.Lock()):
+                for cid, op in motor.operacoes_abertas.items():
+                    if isinstance(op, dict):
+                        tempo_aberto = time.time() - _safe_float(op.get("timestamp_abertura"), time.time())
+                        operacoes_ativas_list.append({
+                            "contract_id": str(cid),
+                            "transaction_id": op.get("transaction_id"),
+                            "ativo": str(op.get("ativo", par_atual)),
+                            "tipo": str(op.get("tipo", "TURBO")),
+                            "valor": _safe_float(op.get("valor", op.get("preco_entrada", 0.35)), 0.35),
+                            "preco_entrada": _safe_float(op.get("preco_entrada", 0.35), 0.35),
+                            "timestamp_abertura": op.get("timestamp_abertura"),
+                            "duracao": _safe_int(op.get("duracao", 15), 15),
+                            "status": str(op.get("status", "MONITORANDO")),
+                            "profit_atual": _safe_float(op.get("profit_atual", 0.0), 0.0),
+                            "is_valid_to_sell": _safe_int(op.get("is_valid_to_sell", 0), 0),
+                            "tempo_aberto": round(tempo_aberto, 1),
+                            "ultimo_update": _safe_float(op.get("ultimo_update", time.time()), time.time()),
+                        })
+
+        # Cálculo dinâmico de meta e stake derivado da banca (Issue #23.E)
+        try:
+            from config.config import calcular_meta_sessao, calcular_valor_operacao
+        except ImportError:
+            from src.config.config import calcular_meta_sessao, calcular_valor_operacao
+
+        modo_str_atual = str(modo_operacao or "iniciante")
+        meta_calculada = calcular_meta_sessao(saldo_valor, modo_str_atual)
+        meta_efetiva = float(meta_diaria) if (meta_diaria is not None and float(meta_diaria) > 0) else meta_calculada
+        valor_teorico, valor_efetivo, stake_elevado = calcular_valor_operacao(meta_efetiva, minimo_contrato=0.35)
+
+        banca_inicial = _safe_float(getattr(motor, "saldo_inicial_sessao", saldo_valor), saldo_valor) if motor else saldo_valor
+        consec_losses = _safe_int(getattr(motor, "consecutive_losses", 0), 0) if motor else 0
+        saldo_teorico = _safe_float(getattr(motor, "saldo_teorico_reconciliado", saldo_valor), saldo_valor) if motor else saldo_valor
+        lucro_sess = _safe_float(getattr(motor, "lucro_realizado_sessao", lucro_valor), lucro_valor) if motor else lucro_valor
+
         response_data = {
             "ativo": status_real_ativo,
             "motor_rodando": motor_rodando,
@@ -2221,11 +2311,21 @@ def status_robo():
             "ultimo_erro_deriv": ultimo_erro_deriv,
             "ultimo_estagio_execucao": ultimo_estagio,
             "contadores_funil": contadores_funil,
-            "modo": str(modo_operacao or "iniciante"),
-            "meta": float(meta_diaria or 20.0),
+            "modo": modo_str_atual,
+            "meta": meta_efetiva,
+            "meta_calculada": meta_calculada,
+            "meta_efetiva": meta_efetiva,
+            "valor_operacao_teorico": valor_teorico,
+            "valor_operacao_efetivo": valor_efetivo,
+            "stake_elevado_pelo_minimo": stake_elevado,
+            "banca_inicial": banca_inicial,
             "lucro": lucro_valor,
             "saldo": saldo_valor,
             "operacoes": int(contador_operacoes),
+            "operacoes_ativas": operacoes_ativas_list,
+            "consecutive_losses": consec_losses,
+            "saldo_teorico_reconciliado": saldo_teorico,
+            "lucro_realizado_sessao": lucro_sess,
             "status_operacao": str(status_operacao or "parado"),
             "mensagem_log": str(ultima_mensagem or "Sistema pronto"),
             "ativo_atual": ativo_info,
@@ -2371,11 +2471,32 @@ def api_stops_status():
 
 @app.route("/historico")
 def historico():
-    """Rota para histórico de operações"""
+    """Rota para histórico de operações reais (Issue #23.B)"""
     try:
-        return jsonify({"status": "ok", "historico": []})
+        global historico_operacoes
+        historico_reverso = list(reversed(historico_operacoes))
+        return jsonify({"status": "ok", "historico": historico_reverso})
     except Exception as e:
         logger.error(f"Erro ao obter histórico: {e}")
+        return jsonify({"status": "erro", "mensagem": str(e)}), 500
+
+
+@app.route("/limpar_historico", methods=["POST"])
+def limpar_historico():
+    """Rota para limpar histórico de operações local"""
+    try:
+        global historico_operacoes, contador_operacoes, lucro_atual
+        historico_operacoes = []
+        contador_operacoes = 0
+        lucro_atual = 0.0
+        salvar_historico()
+        if motor:
+            motor.historico_operacoes = []
+            motor.lucro_realizado_sessao = 0.0
+            motor.lucro_acumulado_sessao = 0.0
+        return jsonify({"status": "ok", "mensagem": "Histórico limpo com sucesso"})
+    except Exception as e:
+        logger.error(f"Erro ao limpar histórico: {e}")
         return jsonify({"status": "erro", "mensagem": str(e)}), 500
 
 

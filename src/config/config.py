@@ -457,7 +457,31 @@ CONFIG_ESTRATEGIA_TURBO = {
     }
 }
 
-# Limites canônicos de concorrência por perfil (Issue #20)
+# Percentuais canônicos de meta por modo (Issue #23.E)
+PERCENTUAL_META_POR_MODO = {
+    "iniciante": 0.20,
+    "intermediario": 0.50,
+    "conservador": 0.50,
+    "agressivo": 1.00,
+}
+
+def calcular_meta_sessao(saldo: float, modo: Optional[str] = "iniciante") -> float:
+    """Calcula a meta da sessão a partir da banca real e do perfil."""
+    modo_norm = normalizar_modo_operacao(modo)
+    pct = PERCENTUAL_META_POR_MODO.get(modo_norm, 0.20)
+    return round(float(saldo) * pct, 2)
+
+def calcular_valor_operacao(meta: float, minimo_contrato: float = 0.35) -> Tuple[float, float, bool]:
+    """
+    Retorna (valor_operacao_teorico, valor_operacao_efetivo, foi_elevado_pelo_minimo).
+    Fórmula: 1% da meta da sessão, respeitando o mínimo real do contrato Deriv.
+    """
+    valor_teorico = round(float(meta) * 0.01, 2)
+    valor_efetivo = max(valor_teorico, float(minimo_contrato))
+    foi_elevado = valor_efetivo > valor_teorico
+    return valor_teorico, valor_efetivo, foi_elevado
+
+# Limites canônicos de concorrência por perfil (Issue #20 / #23)
 LIMITES_CONCORRENCIA_POR_MODO = {
     "iniciante": 3,
     "intermediario": 5,
@@ -488,7 +512,7 @@ def obter_limite_posicoes(modo: Optional[str] = None) -> int:
     """
     if not modo:
         return LIMITES_CONCORRENCIA_POR_MODO["iniciante"]
-    m = str(modo).strip().lower()
+    m = normalizar_modo_operacao(modo)
     return LIMITES_CONCORRENCIA_POR_MODO.get(m, LIMITES_CONCORRENCIA_POR_MODO["iniciante"])
 
 MODOS_OPERACAO_SCALPING = {
@@ -514,8 +538,8 @@ MODOS_OPERACAO_SCALPING = {
 # CONFIGURAÇÃO DO MICRO-SCALPER SELETIVO (Issues #2, #3, #4, #20)
 # ==============================================================================
 MICRO_SCALPER_CONFIG = {
-    # Concorrência seletiva 3/5/10 por perfil (Issue #20)
-    "max_open_positions": 10,
+    # Concorrência máxima global de 3 posições no modo rápido (Issue #23)
+    "max_open_positions": 3,
     "allow_martingale": False,
     "max_martingale_steps": 0,
     "martingale_multiplier": 1.0,
@@ -589,6 +613,9 @@ Config.MICRO_SCALPER = MICRO_SCALPER_CONFIG
 Config.LIMITES_CONCORRENCIA_POR_MODO = LIMITES_CONCORRENCIA_POR_MODO
 Config.obter_limite_posicoes = staticmethod(obter_limite_posicoes)
 Config.normalizar_modo_operacao = staticmethod(normalizar_modo_operacao)
-Config.MAX_OPEN_POSITIONS = 10
+Config.MAX_OPEN_POSITIONS = 3
+Config.PERCENTUAL_META_POR_MODO = PERCENTUAL_META_POR_MODO
+Config.calcular_meta_sessao = staticmethod(calcular_meta_sessao)
+Config.calcular_valor_operacao = staticmethod(calcular_valor_operacao)
 
 

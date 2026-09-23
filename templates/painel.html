@@ -237,6 +237,12 @@
               inputmode="decimal"
             />
           </div>
+          <div class="banca-info-badge" id="banca-info-badge" style="display: none;">
+            <span class="banca-info-item">Banca Inicial: <strong id="info-banca-inicial">--</strong></span>
+            <span class="banca-info-item">Meta Sessão: <strong id="info-meta-efetiva">--</strong></span>
+            <span class="banca-info-item">Entrada (1%): <strong id="info-stake-efetivo">--</strong></span>
+            <span class="banca-info-alerta" id="info-stake-aviso" style="display: none;">(Ajustado ao mín. $0.35)</span>
+          </div>
         </div>
         <button
           id="bot-control-btn"
@@ -324,8 +330,8 @@
               class="icone-historico ativo"
               id="btn-historico-atual"
               onclick="trocarAba('tabela')"
-              title="Histórico da operação atual"
-              aria-label="Ver histórico da operação atual"
+              title="Operações Abertas / Tempo Real"
+              aria-label="Ver operações abertas em tempo real"
             >
               📄
             </button>
@@ -333,22 +339,22 @@
               class="icone-historico"
               id="btn-historico-completo"
               onclick="trocarAba('historico-completo')"
-              title="Todos os históricos"
-              aria-label="Ver todos os históricos"
+              title="Histórico Geral do Dia"
+              aria-label="Ver histórico completo do dia"
             >
               📊
             </button>
           </div>
 
-          <h2 class="titulo-historico">Histórico de Operações</h2>
+          <h2 class="titulo-historico">Operações & Histórico <span id="contador-abertas-header" style="font-size: 0.85em; color: #4CAF50;">(0/3)</span></h2>
 
           <div class="acoes-direita">
             <button
               class="icone-historico"
               id="btn-graficos"
               onclick="trocarAba('grafico')"
-              title="Gráficos e detalhes"
-              aria-label="Ver gráficos e detalhes"
+              title="Gráficos de Performance"
+              aria-label="Ver gráficos de performance"
             >
               📈
             </button>
@@ -356,7 +362,7 @@
               class="icone-historico"
               id="btn-logs"
               onclick="trocarAba('logs')"
-              title="Logs em tempo real"
+              title="Logs em Tempo Real"
               aria-label="Ver logs em tempo real"
             >
               📋
@@ -366,7 +372,7 @@
               id="btn-limpar"
               onclick="trocarAba('limpar')"
               title="Limpar Histórico"
-              aria-label="Limpar histórico"
+              aria-label="Limpar histórico de operações"
             >
               🗑️
             </button>
@@ -471,7 +477,7 @@
                 <th scope="col">Ativo</th>
                 <th scope="col">Tipo</th>
                 <th scope="col">Entrada</th>
-                <th scope="col">Status</th>
+                <th scope="col">Status / P&L</th>
               </tr>
             </thead>
             <tbody id="historico-tabela-body">
@@ -1395,253 +1401,170 @@
           });
       }
 
-      // Função para atualizar lucro e resultados
-      function atualizarResumoFinanceiro() {
-        // Primeiro tenta a API de performance
-        fetch("/api/performance")
-          .then((response) => response.json())
-          .then((data) => {
-            console.log("Dados da API performance:", data);
+      // ==============================================================
+      // CONFLUÊNCIA FINANCEIRA & ANIMAÇÃO PROGRESSIVA (Issue #23.D)
+      // ==============================================================
+      const activeFinancialAnimations = {};
 
-            if (data.status === "success" || data.lucro_atual !== undefined) {
-              // Atualiza saldo usando ID correto (mantém fonte normal)
-              const saldoElement = document.getElementById("saldo-valor");
-              if (saldoElement && (data.saldo_atual !== undefined || data.saldo !== undefined)) {
-                const saldo = data.saldo_atual || data.saldo || 0;
-                saldoElement.textContent = saldo.toFixed(2);
-              }
+      function animarValorProgressivo(elementId, valorAlvo, isCurrency = true, isLucro = false) {
+        const el = document.getElementById(elementId);
+        if (!el) return;
 
-              // Atualiza lucro usando ID correto
-              const lucroElement = document.getElementById("lucro-valor");
-              if (lucroElement && (data.lucro_total !== undefined || data.lucro_atual !== undefined)) {
-                const lucro = data.lucro_total || data.lucro_atual || 0;
-                lucroElement.textContent = lucro.toFixed(2);
-                lucroElement.className = `lucro-valor ${
-                  lucro >= 0 ? "positivo" : "negativo"
-                }`;
-              }
+        const alvo = parseFloat(valorAlvo);
+        if (isNaN(alvo)) return;
 
-              // Atualiza meta
-              const metaElement = document.getElementById("meta-valor");
-              const metaInput = document.getElementById("meta");
-              if (metaElement && metaInput) {
-                metaElement.textContent = `/${metaInput.value || 0}`;
-              }
+        if (activeFinancialAnimations[elementId]) {
+          cancelAnimationFrame(activeFinancialAnimations[elementId].rafId);
+        }
 
-              // Atualiza contador de operações na aba de histórico
-              const opsCount = document.getElementById("operacoes-count");
-              if (opsCount && data.total_operacoes !== undefined) {
-                opsCount.textContent = data.total_operacoes;
-              }
+        const textoAtual = el.textContent.replace(/[^0-9.-]/g, "");
+        let valorAtual = parseFloat(textoAtual);
+        if (isNaN(valorAtual)) valorAtual = alvo;
 
-              // Atualiza win rate na aba de histórico
-              const winRateElement = document.getElementById("win-rate-sessao");
-              if (winRateElement && data.win_rate !== undefined) {
-                winRateElement.textContent = `${data.win_rate.toFixed(1)}%`;
-                winRateElement.className = data.win_rate >= 70 ? "positivo" : "negativo";
-              }
-            }
-          })
-          .catch((error) => {
-            console.error("Erro na API performance, tentando status_robo:", error);
-
-            // Fallback: usa status_robo
-            fetch("/status_robo")
-              .then((response) => response.json())
-              .then((data) => {
-                console.log("Dados do status_robo:", data);
-
-                // Atualiza saldo
-                const saldoElement = document.getElementById("saldo-valor");
-                if (saldoElement && data.saldo !== undefined) {
-                  saldoElement.textContent = data.saldo.toFixed(2);
-                  saldoElement.className = "saldo-valor";
-                }
-
-                // Atualiza lucro
-                const lucroElement = document.getElementById("lucro-valor");
-                if (lucroElement && data.lucro !== undefined) {
-                  lucroElement.textContent = data.lucro.toFixed(2);
-                  lucroElement.className = `lucro-valor ${
-                    data.lucro >= 0 ? "positivo" : "negativo"
-                  }`;
-                }
-              })
-              .catch((error2) => {
-                console.error("Erro também no status_robo:", error2);
-              });
-          });
-      }
-
-      // Função para atualizar status do ciclo operacional nas bolinhas
-      function atualizarStatusBolinhasCiclo(etapa) {
-        // etapa: 'idle' | 'analisando' | 'abrindo' | 'finalizado'
-        const bAnalisando = document.getElementById("bolinha-analisando");
-        const bAbrindo = document.getElementById("bolinha-abrindo");
-        const bFinalizado = document.getElementById("bolinha-finalizado");
-
-        [bAnalisando, bAbrindo, bFinalizado].forEach((b) => {
-          if (b) {
-            b.classList.remove("ativo", "processando");
+        if (Math.abs(valorAtual - alvo) < 0.005) {
+          el.textContent = alvo.toFixed(2);
+          if (isLucro) {
+            el.className = `lucro-valor ${alvo > 0 ? "positivo" : (alvo < 0 ? "negativo" : "")}`;
           }
-        });
-
-        if (etapa === "analisando" && bAnalisando) {
-          bAnalisando.classList.add("ativo");
-        } else if (etapa === "abrindo") {
-          if (bAnalisando) bAnalisando.classList.add("ativo");
-          if (bAbrindo) bAbrindo.classList.add("processando");
-        } else if (etapa === "finalizado") {
-          if (bAnalisando) bAnalisando.classList.add("ativo");
-          if (bAbrindo) bAbrindo.classList.add("ativo");
-          if (bFinalizado) bFinalizado.classList.add("ativo");
-        }
-      }
-
-      function atualizarStatusBolinhas(roboAtivo) {
-        if (roboAtivo) {
-          atualizarStatusBolinhasCiclo("analisando");
-        } else {
-          atualizarStatusBolinhasCiclo("idle");
-        }
-      }
-
-      // Função para exibir operação em andamento na tabela superior
-      function exibirOperacaoEmAndamento(operacao) {
-        const tabelaBody = document.getElementById("historico-tabela-body");
-        if (!tabelaBody) return;
-
-        const agora = new Date();
-        const dataStr = agora.toLocaleDateString("pt-BR");
-        const horaStr = agora.toLocaleTimeString("pt-BR");
-        const ativo = operacao.ativo || "1HZ75V";
-        const tipo = (operacao.tipo || "CALL").toUpperCase();
-        const valor = parseFloat(operacao.valor || 0.35).toFixed(2);
-
-        tabelaBody.innerHTML = `
-          <tr id="linha-operacao-ativa">
-            <td>${dataStr}</td>
-            <td>${horaStr}</td>
-            <td><strong>${ativo}</strong></td>
-            <td><span class="tipo-${tipo.toLowerCase()}">${tipo}</span></td>
-            <td>$${valor}</td>
-            <td><span style="color: #2196F3; font-weight: bold;">Executando...</span></td>
-          </tr>
-        `;
-
-        atualizarStatusBolinhasCiclo("abrindo");
-      }
-
-      // Função para finalizar operação: adiciona ao histórico geral e apaga da tabela superior
-      function finalizarOperacaoNaInterface(operacao) {
-        const tabelaCompleta = document.getElementById("historico-completo-body");
-        const tabelaAtual = document.getElementById("historico-tabela-body");
-
-        const agora = new Date();
-        const dataStr = agora.toLocaleDateString("pt-BR");
-        const horaStr = agora.toLocaleTimeString("pt-BR");
-        const ativo = operacao.ativo || "1HZ75V";
-        const tipo = (operacao.tipo || "CALL").toUpperCase();
-        const valor = parseFloat(operacao.valor || 0.35).toFixed(2);
-        const resultado = parseFloat(operacao.resultado || operacao.resultado_real || 0.0);
-        const classeResultado = resultado >= 0 ? "positivo" : "negativo";
-
-        // 1. Grava no histórico geral (completo)
-        if (tabelaCompleta) {
-          const novaLinha = document.createElement("tr");
-          novaLinha.innerHTML = `
-            <td>${dataStr}</td>
-            <td>${horaStr}</td>
-            <td>${ativo}</td>
-            <td>${tipo}</td>
-            <td title="Valor da entrada">$${valor}</td>
-            <td class="resultado ${classeResultado}">$${resultado.toFixed(2)}</td>
-          `;
-          tabelaCompleta.insertBefore(novaLinha, tabelaCompleta.firstChild);
+          return;
         }
 
-        // 2. Apaga a operação da tabela superior conforme instrução
-        if (tabelaAtual) {
-          tabelaAtual.innerHTML = `
+        // Efeito de iluminação: ganho verde sutil, perda vermelho suave
+        if (isLucro || elementId === "saldo-valor") {
+          if (alvo > valorAtual) {
+            el.classList.remove("flash-loss");
+            el.classList.add("glow-gain");
+            setTimeout(() => el.classList.remove("glow-gain"), 800);
+          } else if (alvo < valorAtual) {
+            el.classList.remove("glow-gain");
+            el.classList.add("flash-loss");
+            setTimeout(() => el.classList.remove("flash-loss"), 800);
+          }
+        }
+
+        const diferenca = alvo - valorAtual;
+        const duracao = 450; // ms
+        const inicio = performance.now();
+
+        function passo(agora) {
+          const decorrido = agora - inicio;
+          const progresso = Math.min(decorrido / duracao, 1.0);
+          const fator = 1 - (1 - progresso) * (1 - progresso); // easeOut
+          const intermediario = valorAtual + diferenca * fator;
+
+          el.textContent = intermediario.toFixed(2);
+          if (isLucro) {
+            el.className = `lucro-valor ${intermediario > 0 ? "positivo" : (intermediario < 0 ? "negativo" : "")}`;
+          }
+
+          if (progresso < 1.0) {
+            activeFinancialAnimations[elementId].rafId = requestAnimationFrame(passo);
+          } else {
+            el.textContent = alvo.toFixed(2);
+            if (isLucro) {
+              el.className = `lucro-valor ${alvo > 0 ? "positivo" : (alvo < 0 ? "negativo" : "")}`;
+            }
+            delete activeFinancialAnimations[elementId];
+          }
+        }
+
+        activeFinancialAnimations[elementId] = {
+          rafId: requestAnimationFrame(passo),
+          alvo: alvo,
+        };
+      }
+
+      // ==============================================================
+      // RENDERIZAÇÃO DE OPERAÇÕES ATIVAS EM TEMPO REAL (Issue #23.B / #23.C)
+      // ==============================================================
+      function renderizarOperacoesAtivas(operacoes) {
+        const tbody = document.getElementById("historico-tabela-body");
+        const contadorHeader = document.getElementById("contador-abertas-header");
+        if (!tbody) return;
+
+        const count = operacoes ? operacoes.length : 0;
+        if (contadorHeader) {
+          contadorHeader.textContent = `(${count}/3)`;
+          contadorHeader.style.color = count > 0 ? "#00E676" : "#78909C";
+        }
+
+        if (!operacoes || operacoes.length === 0) {
+          tbody.innerHTML = `
             <tr id="linha-sem-operacao">
               <td colspan="6" style="text-align: center; color: #888; padding: 12px;">Nenhuma operação em andamento</td>
             </tr>
           `;
+          return;
         }
 
-        // 3. Atualiza bolinhas: finalizado acende e depois reseta
-        atualizarStatusBolinhasCiclo("finalizado");
-        setTimeout(() => {
-          if (roboAtivo) {
-            atualizarStatusBolinhasCiclo("analisando");
-          } else {
-            atualizarStatusBolinhasCiclo("idle");
+        let html = "";
+        operacoes.forEach((op) => {
+          const profit = parseFloat(op.profit_atual || 0.0);
+          const profitClass = profit > 0 ? "positivo" : (profit < 0 ? "negativo" : "");
+          const profitSign = profit >= 0 ? "+" : "";
+          const profitStr = `${profitSign}$${profit.toFixed(2)}`;
+          const tipo = (op.tipo || "TURBO").toUpperCase();
+          const tipoClass = tipo.includes("CALL") ? "badge-call" : (tipo.includes("PUT") ? "badge-put" : "badge-turbo");
+          const status = op.status || "MONITORANDO";
+          const tempoAberto = op.tempo_aberto !== undefined ? `${parseFloat(op.tempo_aberto).toFixed(1)}s` : "";
+
+          // Data e Hora de abertura
+          let dataStr = "--";
+          let horaStr = "--";
+          if (op.timestamp_abertura) {
+            const dt = new Date(op.timestamp_abertura * 1000);
+            dataStr = dt.toLocaleDateString("pt-BR");
+            horaStr = dt.toLocaleTimeString("pt-BR");
+          } else if (op.timestamp) {
+            const parts = String(op.timestamp).split(" ");
+            dataStr = parts[0] || "--";
+            horaStr = parts[1] || "--";
           }
-        }, 2500);
+
+          const preco = parseFloat(op.preco_entrada || op.valor || 0.35).toFixed(2);
+
+          html += `
+            <tr class="linha-operacao-ativa" id="op-ativa-${op.contract_id}">
+              <td>${dataStr}</td>
+              <td>${horaStr}</td>
+              <td><strong>${op.ativo || "1HZ75V"}</strong></td>
+              <td><span class="badge ${tipoClass}">${tipo}</span></td>
+              <td>$${preco}</td>
+              <td class="resultado ${profitClass}">
+                <strong>${profitStr}</strong>
+                <span class="badge-status-op ${status.toLowerCase()}">${status}${tempoAberto ? " (" + tempoAberto + ")" : ""}</span>
+              </td>
+            </tr>
+          `;
+        });
+
+        tbody.innerHTML = html;
       }
 
-      // Função para adicionar resultado na tabela (redireciona para finalização limpa)
-      function adicionarResultadoTabela(operacao) {
-        finalizarOperacaoNaInterface(operacao);
-      }
+      // ==============================================================
+      // ATUALIZAÇÃO DO STATUS GERAL & POLLING CENTRALIZADO (Issue #23)
+      // ==============================================================
+      let ultimoEstagioAnterior = null;
+      let settledHighlightTimer = null;
 
-      // Função para mover histórico atual para histórico completo
-      function moverHistoricoParaCompleto() {
-        const tabelaAtual = document.getElementById("historico-tabela-body");
-        const tabelaCompleta = document.getElementById("historico-completo-body");
-
-        if (tabelaAtual && tabelaCompleta && tabelaAtual.children.length > 0) {
-          const linhaAtiva = document.getElementById("linha-operacao-ativa");
-          if (linhaAtiva) {
-            tabelaAtual.innerHTML = `
-              <tr id="linha-sem-operacao">
-                <td colspan="6" style="text-align: center; color: #888; padding: 12px;">Nenhuma operação em andamento</td>
-              </tr>
-            `;
-          }
-        }
-      }
-
-      // Função para adicionar log informativo
-      function adicionarLogInformativo(mensagem) {
-        const logTemp = document.getElementById('log-temp');
-        if (!logTemp) return;
-
-        // Atualiza o log simples
-        logTemp.innerHTML = `
-          <span class="log-emoji">📊</span>
-          <span class="log-texto">${mensagem}</span>
-        `;
-      }
-
-      // Função para atualizar status do rodapé
-      function atualizarStatusRodape() {
+      function atualizarStatusGeral() {
         fetch("/status_robo")
           .then((response) => response.json())
           .then((data) => {
-            const statusTexto = document.getElementById("status-texto");
-            const statusDot = document.getElementById("status-dot-conexao");
+            const botEstaAtivo = Boolean(data.ativo);
+            roboAtivo = botEstaAtivo;
 
-            if (statusTexto && statusDot) {
-              const conectadoDeriv = Boolean(
-                data.motor_status && data.motor_status.conectado
-              );
-              if (conectadoDeriv) {
-                statusTexto.textContent = "Conectado";
-                statusDot.className = "status-dot pequeno conectado";
-              } else {
-                statusTexto.textContent = "Desconectado";
-                statusDot.className = "status-dot pequeno desconectado";
-              }
+            // 1. Botão de Controle (Icone e Estado estável)
+            const botaoControle = document.getElementById("bot-control-btn");
+            if (botaoControle && !botaoControle.disabled) {
+              botaoControle.innerHTML = botEstaAtivo ? "⛔ Parar Robô" : "🚀 Iniciar Robô";
+              botaoControle.classList.toggle("ativo", botEstaAtivo);
             }
 
-            // Sincroniza estado de recolhimento dos seletores com o estado do robô
+            // 2. Seletores recolhidos suavemente
             const modoMetaWrapper = document.querySelector(".modo-meta-wrapper");
             const modoSelect = document.getElementById("modo");
             const metaInput = document.getElementById("meta");
-            const botaoControle = document.getElementById("bot-control-btn");
-            const botEstaAtivo = Boolean(data.ativo);
-
             if (modoMetaWrapper) {
               if (botEstaAtivo && !modoMetaWrapper.classList.contains("recolhido")) {
                 modoMetaWrapper.classList.add("recolhido");
@@ -1654,13 +1577,102 @@
               }
             }
 
-            if (botaoControle && !botaoControle.disabled) {
-              roboAtivo = botEstaAtivo;
-              botaoControle.innerHTML = botEstaAtivo ? "⛔ Parar Robô" : "🚀 Iniciar Robô";
-              botaoControle.classList.toggle("ativo", botEstaAtivo);
+            // 3. Saldo e Lucro com Animação Progressiva
+            if (data.saldo !== undefined) {
+              animarValorProgressivo("saldo-valor", data.saldo, true, false);
+            }
+            if (data.lucro !== undefined) {
+              animarValorProgressivo("lucro-valor", data.lucro, true, true);
             }
 
-            // Atualiza Banner de Notícias / Telemetria em Tempo Real
+            // 4. Meta no cabeçalho
+            const metaElement = document.getElementById("meta-valor");
+            const metaVal = data.meta_efetiva !== undefined ? data.meta_efetiva : (metaInput ? metaInput.value : 20);
+            if (metaElement) {
+              metaElement.textContent = `/${metaVal}`;
+            }
+
+            // 5. Badge de Informações da Banca / Meta / Stake
+            const bancaBadge = document.getElementById("banca-info-badge");
+            const infoBanca = document.getElementById("info-banca-inicial");
+            const infoMeta = document.getElementById("info-meta-efetiva");
+            const infoStake = document.getElementById("info-stake-efetivo");
+            const infoStakeAviso = document.getElementById("info-stake-aviso");
+
+            if (bancaBadge && data.banca_inicial !== undefined) {
+              bancaBadge.style.display = "flex";
+              if (infoBanca) infoBanca.textContent = `$${parseFloat(data.banca_inicial).toFixed(2)}`;
+              if (infoMeta) infoMeta.textContent = `$${parseFloat(data.meta_efetiva || metaVal).toFixed(2)}`;
+              if (infoStake) infoStake.textContent = `$${parseFloat(data.valor_operacao_efetivo || 0.35).toFixed(2)}`;
+              if (infoStakeAviso) {
+                infoStakeAviso.style.display = data.stake_elevado_pelo_minimo ? "inline" : "none";
+              }
+            }
+
+            // 6. Operações ativas em tempo real
+            renderizarOperacoesAtivas(data.operacoes_ativas || []);
+
+            // 7. Steppers do ciclo (Analisando, Abrindo, Finalizado)
+            const bAnalisando = document.getElementById("bolinha-analisando");
+            const bAbrindo = document.getElementById("bolinha-abrindo");
+            const bFinalizado = document.getElementById("bolinha-finalizado");
+
+            const numAbertas = data.operacoes_ativas ? data.operacoes_ativas.length : 0;
+            const estagio = data.ultimo_estagio_execucao || "PARADO";
+
+            if (bAnalisando) {
+              if (botEstaAtivo) {
+                bAnalisando.className = "bolinha ativo pisca";
+              } else {
+                bAnalisando.className = "bolinha";
+              }
+            }
+
+            if (bAbrindo) {
+              if (numAbertas > 0 || estagio === "BUY_SENT" || estagio === "BUY_CONFIRMED") {
+                bAbrindo.className = "bolinha ativo processando";
+              } else {
+                bAbrindo.className = "bolinha";
+              }
+            }
+
+            if (bFinalizado) {
+              if (estagio === "SETTLED" && ultimoEstagioAnterior !== "SETTLED") {
+                bFinalizado.className = "bolinha ativo";
+                clearTimeout(settledHighlightTimer);
+                settledHighlightTimer = setTimeout(() => {
+                  if (bFinalizado) bFinalizado.className = "bolinha";
+                }, 2500);
+              }
+            }
+            ultimoEstagioAnterior = estagio;
+
+            // 8. Notificação de Parada de Sessão (SESSION STOP)
+            if (data.session_stopped && data.session_stop_reason) {
+              const logTemp = document.getElementById("log-temp");
+              if (logTemp) {
+                logTemp.innerHTML = `
+                  <span class="log-emoji">🛑</span>
+                  <span class="log-texto"><strong>Sessão Parada:</strong> ${data.session_stop_reason}</span>
+                `;
+              }
+            }
+
+            // 9. Status de Conexão no Rodapé
+            const statusTexto = document.getElementById("status-texto");
+            const statusDot = document.getElementById("status-dot-conexao");
+            if (statusTexto && statusDot) {
+              const conectadoDeriv = Boolean(data.motor_status && data.motor_status.conectado);
+              if (conectadoDeriv) {
+                statusTexto.textContent = "Conectado";
+                statusDot.className = "status-dot pequeno conectado";
+              } else {
+                statusTexto.textContent = "Desconectado";
+                statusDot.className = "status-dot pequeno desconectado";
+              }
+            }
+
+            // 10. Banner de Scanner Live
             const bannerBadgeLive = document.getElementById("banner-badge-live");
             const bannerBadgeTexto = document.getElementById("banner-badge-texto");
             const bannerAtivoTag = document.getElementById("banner-ativo-tag");
@@ -1685,84 +1697,42 @@
                 bannerBadgeTexto.textContent = "SCANNER EM PAUSA";
               }
             }
-
-            if (bannerAtivoTag) {
-              bannerAtivoTag.textContent = `${ativoScan} (1s)`;
-            }
-
-            if (bannerScoreValor) {
-              bannerScoreValor.textContent = `${scoreAtual.toFixed(1)} / ${scoreMin.toFixed(0)}`;
-            }
-
+            if (bannerAtivoTag) bannerAtivoTag.textContent = `${ativoScan} (1s)`;
+            if (bannerScoreValor) bannerScoreValor.textContent = `${scoreAtual.toFixed(1)} / ${scoreMin.toFixed(0)}`;
             if (bannerBarraProgresso) {
               const pct = Math.min(100, Math.max(0, Math.round((scoreAtual / scoreMin) * 100)));
               bannerBarraProgresso.style.width = `${pct}%`;
-              if (pct >= 90) {
-                bannerBarraProgresso.style.background = "linear-gradient(90deg, #10b981, #00E676)";
-              } else if (pct >= 60) {
-                bannerBarraProgresso.style.background = "linear-gradient(90deg, #ffc107, #f59e0b)";
-              } else {
-                bannerBarraProgresso.style.background = "linear-gradient(90deg, #3b82f6, #6366f1)";
-              }
+              if (pct >= 90) bannerBarraProgresso.style.background = "linear-gradient(90deg, #10b981, #00E676)";
+              else if (pct >= 60) bannerBarraProgresso.style.background = "linear-gradient(90deg, #ffc107, #f59e0b)";
+              else bannerBarraProgresso.style.background = "linear-gradient(90deg, #3b82f6, #6366f1)";
             }
-
             if (bannerIcone) {
-              if (estadoAtual === "SINAL_CONFIRMADO" || estadoAtual === "COMPRANDO") {
-                bannerIcone.textContent = "🚀";
-              } else if (estadoAtual === "POSICAO_ABERTA") {
-                bannerIcone.textContent = "📈";
-              } else if (estadoAtual === "AGUARDANDO_REVERSAO" || estadoAtual === "EXTREMO_DETECTADO") {
-                bannerIcone.textContent = "⚡";
-              } else if (botEstaAtivo) {
-                bannerIcone.textContent = "🔍";
-              } else {
-                bannerIcone.textContent = "⏸️";
-              }
+              if (estadoAtual === "SINAL_CONFIRMADO" || estadoAtual === "COMPRANDO") bannerIcone.textContent = "🚀";
+              else if (estadoAtual === "POSICAO_ABERTA") bannerIcone.textContent = "📈";
+              else if (estadoAtual === "AGUARDANDO_REVERSAO" || estadoAtual === "EXTREMO_DETECTADO") bannerIcone.textContent = "⚡";
+              else if (botEstaAtivo) bannerIcone.textContent = "🔍";
+              else bannerIcone.textContent = "⏸️";
             }
-
             if (bannerTextoPrincipal) {
-              if (!botEstaAtivo) {
-                bannerTextoPrincipal.textContent = "Robô pronto para operar nos ativos de 1 segundo (VIX 1s). Clique em Iniciar.";
-              } else {
-                bannerTextoPrincipal.textContent = `[${ativoScan}] ${motivoAtual}`;
-              }
+              if (!botEstaAtivo) bannerTextoPrincipal.textContent = "Robô pronto para operar nos ativos de 1 segundo (VIX 1s). Clique em Iniciar.";
+              else bannerTextoPrincipal.textContent = `[${ativoScan}] ${motivoAtual}`;
             }
 
+            // 11. Atualiza Gestão de Riscos se disponível
             if (data.micro_scalper) {
               const scalperStatus = document.getElementById("scalper-status");
               const scalperScore = document.getElementById("scalper-score");
               const scalperMotivo = document.getElementById("scalper-motivo");
-              if (scalperStatus) {
-                const estado = data.micro_scalper.estado_atual || "NORMAL";
-                scalperStatus.textContent = `ESTADO: ${estado}`;
-                if (estado === "SINAL_CONFIRMADO" || estado === "COMPRANDO" || estado === "POSICAO_ABERTA") {
-                  scalperStatus.style.color = "#00E676";
-                } else if (estado === "EXTREMO_DETECTADO" || estado === "AGUARDANDO_REVERSAO") {
-                  scalperStatus.style.color = "#FFD600";
-                } else if (estado === "SAINDO") {
-                  scalperStatus.style.color = "#00B0FF";
-                } else if (estado === "COOLDOWN") {
-                  scalperStatus.style.color = "#FF9100";
-                } else {
-                  scalperStatus.style.color = "#78909C";
-                }
-              }
-              if (scalperScore) {
-                scalperScore.textContent = `Score: ${data.micro_scalper.ultimo_score || 0}/${scoreMin.toFixed(0)}`;
-              }
+              if (scalperStatus) scalperStatus.textContent = `ESTADO: ${data.micro_scalper.estado_atual || "NORMAL"}`;
+              if (scalperScore) scalperScore.textContent = `Score: ${data.micro_scalper.ultimo_score || 0}/${scoreMin.toFixed(0)}`;
               if (scalperMotivo) {
-                const motivo = data.micro_scalper.ultimo_motivo_recusa || "Aguardando oportunidade";
-                scalperMotivo.textContent = motivo.length > 60 ? motivo.substring(0, 57) + "..." : motivo;
-                scalperMotivo.title = motivo;
+                const mot = data.micro_scalper.ultimo_motivo_recusa || "Aguardando confluência";
+                scalperMotivo.textContent = mot.length > 60 ? mot.substring(0, 57) + "..." : mot;
               }
             }
           })
-          .catch((error) => {
-            console.error("Erro ao atualizar status do rodapé:", error);
-            const statusTexto = document.getElementById("status-texto");
-            if (statusTexto) {
-              statusTexto.textContent = "Erro";
-            }
+          .catch((err) => {
+            console.error("Erro ao atualizar status geral:", err);
           });
       }
 
@@ -1850,8 +1820,8 @@
         const botao = document.getElementById("bot-control-btn");
         console.log("Botão encontrado:", botao);
 
-        // Atualiza resumo financeiro a cada 3 segundos
-        setInterval(atualizarResumoFinanceiro, 3000);
+        // Atualiza status geral, saldo, operações ativas e telemetria a cada 1.5s
+        setInterval(atualizarStatusGeral, 1500);
 
         // Atualiza logs em tempo real a cada 2 segundos
         setInterval(atualizarLogsTempoReal, 2000);
@@ -1860,16 +1830,9 @@
         setInterval(atualizarStatusStops, 5000);
 
         // Primeira atualização imediata
-        atualizarResumoFinanceiro();
+        atualizarStatusGeral();
         atualizarLogsTempoReal();
         atualizarStatusStops();
-        atualizarStatusRodape();
-
-        // Inicializa bolinhas como amarelas (robô parado)
-        atualizarStatusBolinhas(false);
-
-        // Atualiza status do rodapé a cada 5 segundos
-        setInterval(atualizarStatusRodape, 5000);
       });
 
       // Função para resetar lucro
@@ -1879,7 +1842,7 @@
           .then(response => response.json())
           .then(data => {
             console.log('Histórico limpo:', data);
-            atualizarResumoFinanceiro();
+            atualizarStatusGeral();
             // Limpa tabela
             const tabela = document.getElementById('historico-tabela-body');
             if (tabela) tabela.innerHTML = '';

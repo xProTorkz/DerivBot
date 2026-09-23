@@ -737,11 +737,17 @@ class Motor:
         self.operacoes_ativas_count = 0
         self.protecao_ativa = False
 
-        # Controle de parada de sessão (SESSION STOP - Issue #20)
+        # Controle de parada de sessão (SESSION STOP - Issue #20 / #23)
         self.session_stopped = False
         self.session_stop_reason = None
         self.cooldowns_por_ativo = {}
         self.lucro_acumulado_sessao = 0.0
+        self.lucro_realizado_sessao = 0.0
+        self.saldo_inicial_sessao = 0.0
+        self.saldo_teorico_reconciliado = 0.0
+        self.contratos_liquidados_sessao = set()
+        self.consecutive_losses = 0
+        self.max_perdas_consecutivas = 1
         self.ultimo_erro_deriv = None
         self.ultimo_estagio_execucao = "PARADO"
         self.ultimo_motivo_bloqueio_risco = None
@@ -1290,17 +1296,22 @@ class Motor:
                     duracao_op = float(passthrough.get("duration", 15))
                     self.operacoes_abertas[contract_id] = {
                         "id": contract_id,
+                        "contract_id": str(contract_id),
                         "ativo": symbol,
                         "preco_entrada": buy_price,
                         "valor": buy_price,
                         "duracao": duracao_op,
                         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "tipo": tipo_contrato,
+                        "tipo": tipo_contrato or "TURBO",
                         "transaction_id": transaction_id,
                         "timestamp_abertura": time.time(),
                         "positive_updates": 0,
                         "motivo_saida": "",
+                        "status": "ABERTO",
+                        "profit_atual": 0.0,
+                        "is_valid_to_sell": 0,
                         "fechamento_automatico": False,
+                        "ultimo_update": time.time(),
                     }
 
                     if transaction_id and hasattr(self, "transacoes_pendentes"):
@@ -1371,21 +1382,22 @@ class Motor:
                     profit = float(contract.get("profit", 0.0))
                     tempo_aberto = time.time() - operacao.get("timestamp_abertura", time.time())
 
-                    cfg_saida = getattr(config, "MICRO_SCALPER_CONFIG", {}).get("saida", {})
-                    min_exit_profit = cfg_saida.get("min_exit_profit", 0.02)
-                    min_pos_updates = cfg_saida.get("min_positive_updates", 2)
-                    max_hold_s = cfg_saida.get("max_hold_seconds", 45)
-
-                    # Contagem de updates positivos
-                    if profit >= min_exit_profit:
+                    # Atualiza telemetria da operação ativa em tempo real (Issue #23.B / #23.C)
+                    operacao["profit_atual"] = profit
+                    operacao["is_valid_to_sell"] = is_valid_to_sell
+                    operacao["status"] = "MONITORANDO"
+                    operacao["ultimo_update"] = time.time()
+                    if profit > 0:
                         operacao["positive_updates"] = operacao.get("positive_updates", 0) + 1
-                    else:
-                        operacao["positive_updates"] = 0
+                    self.ultimo_estagio_execucao = "MONITORING"
 
-                    # REGRA 1: SAÍDA NO PRIMEIRO LUCRO LÍQUIDO CONFIRMADO
-                    if operacao.get("positive_updates", 0) >= min_pos_updates and is_valid_to_sell == 1:
+                    cfg_micro = getattr(config, "MICRO_SCALPER_CONFIG", {})
+                    max_hold_s = cfg_micro.get("saida_rapida", {}).get("tempo_max_segundos", 45)
+
+                    # REGRA 1: SAÍDA NO PRIMEIRO LUCRO LÍQUIDO VENDÁVEL (Issue #23.F)
+                    if profit > 0 and is_valid_to_sell == 1:
                         self.log_unificado(
-                            f"🎯 PRIMEIRO LUCRO LÍQUIDO CONFIRMADO! Venda antecipada para {raw_contract_id} "
+                            f"🎯 PRIMEIRO LUCRO LÍQUIDO VENDÁVEL! Venda antecipada para {raw_contract_id} "
                             f"com lucro de +${profit:.4f} (após {tempo_aberto:.1f}s)",
                             tipo="info",
                             categoria="trade",
@@ -1395,24 +1407,27 @@ class Motor:
                             f"Primeiro lucro atingido: +${profit:.4f}",
                         )
                         operacao["motivo_saida"] = "FIRST_POSITIVE_PROFIT"
+                        operacao["status"] = "VENDENDO"
+                        self.ultimo_estagio_execucao = "SELL_SENT"
                         self.fechar_operacao(raw_contract_id)
 
-                    # REGRA 2: TIMEOUT MÁXIMO DE SEGURANÇA
+                    # REGRA 2: TEMPO MÁXIMO DE RETENÇÃO (MAX_HOLD_TIMEOUT)
                     elif tempo_aberto >= max_hold_s and is_valid_to_sell == 1:
                         self.log_unificado(
-                            f"⏱️ Timeout de retenção ({tempo_aberto:.1f}s >= {max_hold_s}s) para {raw_contract_id}. "
-                            f"Encerrando operação (Profit: ${profit:.4f})...",
+                            f"⏱️ Tempo máximo de retenção ({tempo_aberto:.1f}s >= {max_hold_s}s) atingido para {raw_contract_id}. Encerrando...",
                             tipo="warning",
                             categoria="trade",
                         )
                         state_machine_micro_scalper.transitar(
                             MicroScalperState.SAINDO,
-                            f"Timeout retenção atingido ({max_hold_s}s)",
+                            f"Max hold atingido ({tempo_aberto:.1f}s)",
                         )
                         operacao["motivo_saida"] = "MAX_HOLD_TIMEOUT"
+                        operacao["status"] = "VENDENDO"
+                        self.ultimo_estagio_execucao = "SELL_SENT"
                         self.fechar_operacao(raw_contract_id)
 
-                    # REGRA 3: STOPS TRADICIONAIS
+                    # REGRA 3: STOPS TRADICIONAIS CONFIGURADOS
                     else:
                         verificacao_stop = self.sistema_stops.verificar_stops_operacao(
                             raw_contract_id, profit
@@ -1428,10 +1443,25 @@ class Motor:
                                 verificacao_stop.get("razao", "Stop"),
                             )
                             operacao["motivo_saida"] = "STOP_DISPARADO"
+                            operacao["status"] = "VENDENDO"
+                            self.ultimo_estagio_execucao = "SELL_SENT"
                             self._fechar_operacao_por_stop(raw_contract_id, verificacao_stop)
 
                 # Se a operação foi finalizada (is_sold == 1):
                 elif is_sold == 1:
+                    # IDEMPOTÊNCIA ESTRITA (Issue #23.A): Uma liquidação é processada uma única vez por contract_id
+                    if not hasattr(self, "contratos_liquidados_sessao"):
+                        self.contratos_liquidados_sessao = set()
+
+                    if raw_contract_id in self.contratos_liquidados_sessao or cid_str in self.contratos_liquidados_sessao:
+                        self.logger.debug(f"Contrato {raw_contract_id} já liquidado nesta sessão. Ignorando evento repetido.")
+                        return
+
+                    self.contratos_liquidados_sessao.add(raw_contract_id)
+                    self.contratos_liquidados_sessao.add(cid_str)
+                    if cid_int:
+                        self.contratos_liquidados_sessao.add(cid_int)
+
                     lucro = float(contract.get("profit", 0.0))
                     motivo_saida = (operacao.get("motivo_saida") if operacao else "") or "CONTRATO_EXPIRADO"
                     ativo_op = (operacao.get("ativo") if operacao else None) or self.par_atual
@@ -1444,7 +1474,7 @@ class Motor:
                         except Exception as e:
                             self.logger.debug(f"Erro ao enviar forget para {sub_id}: {e}")
 
-                    # Registra na máquina de estados do ativo e global, e ativa cooldown do ativo
+                    # Registra na máquina de estados do ativo e global, e ativa cooldown suave do ativo
                     if not hasattr(self, "cooldowns_por_ativo"):
                         self.cooldowns_por_ativo = {}
                     self.cooldowns_por_ativo[ativo_op] = time.time()
@@ -1462,23 +1492,58 @@ class Motor:
                         f"Pós-operação (Resultado: ${lucro:+.2f})",
                     )
 
+                    status_final_str = "WIN" if lucro > 0 else ("LOSS" if lucro < 0 else "EMPATE")
+                    self.ultimo_estagio_execucao = "SETTLED"
+
                     with self.lock:
                         preco_entrada = operacao.get("preco_entrada", 0.0) if operacao else float(contract.get("buy_price", 0.35))
+                        timestamp_abertura_str = operacao.get("timestamp") if operacao else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        timestamp_fechamento_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        tipo_op_str = operacao.get("tipo", "TURBO") if operacao else "TURBO"
+                        val_op = float(operacao.get("valor") or operacao.get("preco_entrada") or 0.35) if operacao else 0.35
+
                         resultado = {
                             "id": raw_contract_id,
+                            "contract_id": str(raw_contract_id),
+                            "transaction_id": operacao.get("transaction_id") if operacao else None,
                             "ativo": ativo_op,
                             "preco_entrada": preco_entrada,
                             "preco_saida": float(contract.get("sell_price", 0.0)),
                             "lucro": lucro,
+                            "resultado_real": lucro,
                             "motivo_saida": motivo_saida,
-                            "timestamp_abertura": operacao.get("timestamp") if operacao else datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            "timestamp_fechamento": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            "tipo": operacao.get("tipo", "TURBO") if operacao else "TURBO",
+                            "status_final": status_final_str,
+                            "timestamp_abertura": timestamp_abertura_str,
+                            "timestamp_fechamento": timestamp_fechamento_str,
+                            "tipo": tipo_op_str,
+                            "valor": val_op,
                         }
                         self.historico_operacoes.append(resultado)
+
                         if "balance_after" in contract:
                             self.saldo = float(contract["balance_after"])
 
+                        # Reconciliação financeira canônica (Issue #23.A)
+                        self.lucro_realizado_sessao = getattr(self, "lucro_realizado_sessao", 0.0) + lucro
+                        self.lucro_acumulado_sessao = self.lucro_realizado_sessao
+                        saldo_inicial_sess = getattr(self, "saldo_inicial_sessao", self.saldo_inicial) or self.saldo_inicial
+                        saldo_teorico = saldo_inicial_sess + self.lucro_realizado_sessao
+                        self.saldo_teorico_reconciliado = saldo_teorico
+
+                        dif_reconc = abs(self.saldo - saldo_teorico)
+                        if dif_reconc > 0.01:
+                            self.logger.info(
+                                f"📊 [RECONCILIAÇÃO] Saldo API: ${self.saldo:.2f} | Teórico: ${saldo_teorico:.2f} | Dif: ${dif_reconc:.2f}"
+                            )
+
+                        # Remove da lista de operações abertas e stops
+                        self.operacoes_abertas.pop(raw_contract_id, None)
+                        self.operacoes_abertas.pop(cid_int, None)
+                        self.operacoes_abertas.pop(cid_str, None)
+                        self.sistema_stops.remover_stop_operacao(raw_contract_id)
+                        self.sistema_stops.remover_stop_operacao(cid_str)
+
+                        # Notifica main.py com schema completo (Issue #23.B)
                         try:
                             import sys
                             mod_main = sys.modules.get("src.main") or sys.modules.get("main")
@@ -1488,24 +1553,23 @@ class Motor:
                                 except ImportError:
                                     import main as mod_main
                             if mod_main and hasattr(mod_main, "adicionar_operacao"):
-                                val_op = float(operacao.get("valor") or operacao.get("preco_entrada") or 0.35) if operacao else 0.35
-                                tipo_op = operacao.get("tipo", "CALL") if operacao else "CALL"
                                 mod_main.adicionar_operacao(
-                                    tipo=tipo_op,
+                                    tipo=tipo_op_str,
                                     valor=val_op,
                                     resultado=lucro,
+                                    contract_id=str(raw_contract_id),
+                                    transaction_id=operacao.get("transaction_id") if operacao else None,
+                                    ativo=ativo_op,
+                                    motivo_saida=motivo_saida,
+                                    hora_abertura=timestamp_abertura_str,
+                                    hora_fechamento=timestamp_fechamento_str,
+                                    status_final=status_final_str,
                                 )
                         except Exception as e:
                             self.logger.warning(f"Erro ao notificar operação no main: {e}")
 
-                        self.operacoes_abertas.pop(raw_contract_id, None)
-                        self.operacoes_abertas.pop(cid_int, None)
-                        self.operacoes_abertas.pop(cid_str, None)
-                        self.sistema_stops.remover_stop_operacao(raw_contract_id)
-                        self.sistema_stops.remover_stop_operacao(cid_str)
-
-                    resultado_texto = "LUCRO" if lucro >= 0 else "PERDA"
-                    tipo_log = "success" if lucro >= 0 else "erro"
+                    resultado_texto = "LUCRO" if lucro > 0 else ("PERDA" if lucro < 0 else "EMPATE")
+                    tipo_log = "success" if lucro > 0 else ("erro" if lucro < 0 else "info")
                     self.log_unificado(
                         f"🏁 Operação {raw_contract_id} ({ativo_op}) finalizada com {resultado_texto}: ${lucro:+.2f} (Saldo atual: ${self.saldo:.2f})",
                         tipo=tipo_log,
@@ -1513,27 +1577,43 @@ class Motor:
                     )
 
                     # ==============================================================
-                    # SESSION STOP: PARADA DE SESSÃO IMEDIATA (Issue #20)
-                    # - PRIMEIRA PERDA REALIZADA (lucro <= 0)
-                    # - META ATINGIDA (lucro_total >= meta)
+                    # REGRA CANÔNICA DE PERDAS CONSECUTIVAS E META (Issue #23.F)
+                    # - 1ª perda: continua
+                    # - Ganho: reseta contador para 0
+                    # - 2ª perda consecutiva: SESSION STOP
+                    # - Meta atingida: SESSION STOP
                     # ==============================================================
                     if lucro <= 0:
-                        self.session_stopped = True
-                        self.session_stop_reason = (
-                            f"PRIMEIRA_PERDA_REALIZADA: Operação {raw_contract_id} ({ativo_op}) fechou com perda (${lucro:+.4f})"
-                        )
-                        self.logger.warning(
-                            f"🛑 [SESSION STOP] {self.session_stop_reason}. Novas entradas bloqueadas! "
-                            f"Contratos abertos restantes ({len(self.operacoes_abertas)}) continuarão sendo monitorados até liquidação."
-                        )
-                    else:
-                        self.lucro_acumulado_sessao = getattr(self, "lucro_acumulado_sessao", 0.0) + lucro
-                        lucro_total = self.obter_saldo() - self.saldo_inicial
-                        take_profit = getattr(config, "TAKE_PROFIT", self.meta_diaria)
-                        if self.meta_diaria > 0 and (lucro_total >= take_profit or self.lucro_acumulado_sessao >= self.meta_diaria):
+                        self.consecutive_losses = getattr(self, "consecutive_losses", 0) + 1
+                        limite_perdas = getattr(self, "max_perdas_consecutivas", 1)
+                        if self.consecutive_losses >= limite_perdas:
+                            self.session_stopped = True
+                            if limite_perdas == 1:
+                                self.session_stop_reason = (
+                                    f"PRIMEIRA_PERDA_REALIZADA: Operação {raw_contract_id} ({ativo_op}) fechou com perda (${lucro:+.4f})"
+                                )
+                            else:
+                                self.session_stop_reason = (
+                                    f"DUAS_PERDAS_CONSECUTIVAS: Limite de {limite_perdas} perdas consecutivas atingido (${lucro:+.2f})"
+                                )
+                            self.logger.warning(
+                                f"🛑 [SESSION STOP] {self.session_stop_reason}. Novas entradas bloqueadas! "
+                                f"Contratos abertos restantes ({len(self.operacoes_abertas)}) continuarão sendo monitorados até liquidação."
+                            )
+                        else:
+                            self.logger.warning(
+                                f"⚠️ [PERDA REGISTRADA] Operação {raw_contract_id} fechou com perda (${lucro:+.2f}). "
+                                f"Perdas consecutivas: {self.consecutive_losses}/{limite_perdas}"
+                            )
+                    elif lucro > 0:
+                        self.consecutive_losses = 0
+                        # Checa se atingiu meta da sessão
+                        meta_alvo = getattr(self, "meta_diaria", 20.0)
+                        lucro_sess = self.lucro_realizado_sessao
+                        if meta_alvo > 0 and lucro_sess >= meta_alvo:
                             self.session_stopped = True
                             self.session_stop_reason = (
-                                f"META_ATINGIDA: Lucro acumulado ${lucro_total:+.2f} atingiu a meta de ${self.meta_diaria:.2f}"
+                                f"META_ATINGIDA: Lucro realizado ${lucro_sess:+.2f} atingiu a meta de ${meta_alvo:.2f}"
                             )
                             self.meta_atingida = True
                             self.logger.info(
@@ -1771,12 +1851,12 @@ class Motor:
         self.ultimo_score = score
         self.ultimo_motivo_recusa = motivo_recusa
 
-        # Volume de entrada escalonado por perfil
-        volume = 0.35
-        if modo in ["conservador", "intermediario"]:
-            volume = 0.50
-        elif modo == "agressivo":
-            volume = 1.00
+        # Volume de entrada derivado da meta da sessão (Issue #23.E):
+        # Fórmula: 1% da meta da sessão, respeitando o mínimo exigido pelo contrato Deriv
+        meta_base = float(meta) if (meta is not None and float(meta) > 0) else float(getattr(self, "meta_diaria", 20.0))
+        min_contrato = float(self._obter_config_ativo(ativo_alvo).get("min_stake", 0.35))
+        valor_teorico = round(meta_base * 0.01, 2)
+        volume = max(valor_teorico, min_contrato)
 
         indicadores_resumo = {
             "rsi": snapshot.get("rsi", 50.0),
@@ -2671,8 +2751,14 @@ class Motor:
         """
         self.session_stopped = False
         self.session_stop_reason = None
-        self.lucro_acumulado_sessao = 0.0
         self.saldo_inicial = self.obter_saldo()
+        self.saldo_inicial_sessao = self.saldo_inicial
+        self.lucro_acumulado_sessao = 0.0
+        self.lucro_realizado_sessao = 0.0
+        self.saldo_teorico_reconciliado = self.saldo_inicial_sessao
+        self.contratos_liquidados_sessao = set()
+        self.consecutive_losses = 0
+        self.max_perdas_consecutivas = 2
         self.meta_atingida = False
         self.rodando = True
         self.ultimo_erro_deriv = None
@@ -2719,17 +2805,26 @@ class Motor:
         return True
 
     def parar(self):
-        """Para o motor de trading"""
-        self.rodando = False
+        """Para o motor de trading graciosamente (Issue #23)"""
         self.session_stopped = True
         self.session_stop_reason = "MANUAL_STOP: Parado pelo usuário"
         self.ultimo_estagio_execucao = "PARADO"
 
-        # Fecha operações ativas
-        for op_id in list(self.operacoes_abertas.keys()):
-            self.fechar_operacao(op_id)
-
-        self.logger.info("Motor parado")
+        num_abertas = len(self.operacoes_abertas)
+        if num_abertas > 0:
+            self.logger.info(
+                f"🛑 [PARADA MANUAL GRACIOSA] Novas entradas bloqueadas. "
+                f"Aguardando {num_abertas} operação(ões) aberta(s) encerrarem com lucro ou naturalmente na Deriv."
+            )
+            self.log_unificado(
+                f"🛑 [PARADA GRACIOSA] Novas entradas bloqueadas. Aguardando encerramento de {num_abertas} operação(ões)...",
+                tipo="aviso",
+                categoria="sistema",
+            )
+        else:
+            self.rodando = False
+            self.logger.info("Motor parado (sem operações pendentes)")
+            self.log_unificado("⏹️ Motor parado pelo usuário.", tipo="info", categoria="sistema")
 
     def set_modo(self, modo: str):
         """Define modo de operação (demo/real)"""

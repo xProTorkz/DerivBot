@@ -1816,3 +1816,125 @@ body {
 .log-entry .message {
   color: #fff;
 }
+
+/* ==============================================================
+   ESTILOS ISSUE #23: CONFLUÊNCIA VISUAL, FINANCEIRA E OPERACIONAL
+   ============================================================== */
+
+/* Badges e Status das Operações Ativas */
+.badge {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.badge-call {
+  background: rgba(76, 175, 80, 0.2);
+  color: #4CAF50;
+  border: 1px solid rgba(76, 175, 80, 0.4);
+}
+
+.badge-put {
+  background: rgba(244, 67, 54, 0.2);
+  color: #F44336;
+  border: 1px solid rgba(244, 67, 54, 0.4);
+}
+
+.badge-turbo {
+  background: rgba(33, 150, 243, 0.2);
+  color: #2196F3;
+  border: 1px solid rgba(33, 150, 243, 0.4);
+}
+
+.badge-status-op {
+  font-size: 0.68rem;
+  padding: 2px 6px;
+  border-radius: 3px;
+  margin-left: 6px;
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.badge-status-op.monitorando {
+  background: rgba(255, 193, 7, 0.15);
+  color: #FFC107;
+  border: 1px solid rgba(255, 193, 7, 0.35);
+}
+
+.badge-status-op.vendendo {
+  background: rgba(33, 150, 243, 0.18);
+  color: #00E5FF;
+  border: 1px solid rgba(0, 229, 255, 0.4);
+}
+
+.linha-operacao-ativa {
+  background: rgba(255, 255, 255, 0.02);
+  border-left: 3px solid #2196F3;
+  transition: background 0.2s ease;
+}
+
+.linha-operacao-ativa:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* Animações financeiras progressivas (#23.D) */
+.glow-gain {
+  animation: pulseGain 0.8s ease-out;
+}
+
+.flash-loss {
+  animation: pulseLoss 0.8s ease-out;
+}
+
+@keyframes pulseGain {
+  0% { text-shadow: 0 0 14px rgba(76, 175, 80, 0.95); transform: scale(1.03); color: #00E676; }
+  100% { text-shadow: none; transform: scale(1); }
+}
+
+@keyframes pulseLoss {
+  0% { text-shadow: 0 0 14px rgba(244, 67, 54, 0.95); transform: scale(1.03); color: #FF5252; }
+  100% { text-shadow: none; transform: scale(1); }
+}
+
+/* Card Glow, iluminação e bordas com gradiente sutil (#23.G) */
+.info-bar, .modo-meta-wrapper, #barra-status, .historico {
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45), 0 0 15px rgba(0, 0, 0, 0.25) !important;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.info-bar:hover, .modo-meta-wrapper:hover, #barra-status:hover, .historico:hover {
+  border-color: rgba(255, 255, 255, 0.15) !important;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.55), 0 0 20px rgba(255, 255, 255, 0.03) !important;
+}
+
+/* Info de Banca, Meta e Stake Derivados (#23.E) */
+.banca-info-badge {
+  font-size: 0.78rem;
+  color: #B0BEC5;
+  margin-top: 6px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.banca-info-item strong {
+  color: #ECEFF1;
+}
+
+.banca-info-alerta {
+  color: #FFC107;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+

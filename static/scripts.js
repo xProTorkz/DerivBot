@@ -153,8 +153,9 @@ document.addEventListener("DOMContentLoaded", function () {
     return;
   }
 
-  // De-duplicação: Se iniciarRoboSeguro já estiver definido no HTML, evita múltiplos handlers
-  if (!window.iniciarRoboSeguro) {
+  // O controle de clique é gerenciado exclusivamente por iniciarRoboSeguro() no painel.html
+  // Evita listeners concorrentes que causavam alternância indevida de ícones e estados
+  if (botaoControle && !botaoControle.hasAttribute("onclick") && !window.iniciarRoboSeguro) {
     botaoControle.addEventListener("click", async () => {
       console.log("🔥 BOTÃO CLICADO! Iniciando processo...");
 
@@ -1174,49 +1175,49 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   function carregarHistoricoCompleto() {
-    // Implementação para carregar histórico completo
-    fetch("/api/historico/estatisticas")
+    fetch("/historico")
       .then((res) => res.json())
-      .then((data) => {
-        if (data.status === "ok") {
-          const stats = data.estatisticas;
-          document.getElementById("historico-completo").innerHTML = `
-            <h3>Estatísticas Gerais</h3>
-            <div style="background: #1e1e1e; border-radius: 8px; padding: 15px; margin-top: 10px;">
-              <p>Total de operações: <strong>${
-                stats.total_operacoes
-              }</strong></p>
-              <p>Operações com ganho: <strong style="color: var(--verde-claro)">${
-                stats.operacoes_ganho
-              }</strong></p>
-              <p>Operações com perda: <strong style="color: var(--vermelho-claro)">${
-                stats.operacoes_perda
-              }</strong></p>
-              <p>Assertividade: <strong>${stats.assertividade.toFixed(
-                1
-              )}%</strong></p>
-              <p>Lucro total: <strong style="color: ${
-                stats.lucro_total >= 0
-                  ? "var(--verde-claro)"
-                  : "var(--vermelho-claro)"
-              }">$${stats.lucro_total.toFixed(2)}</strong></p>
-              <p>Média por operação: <strong style="color: ${
-                stats.media_lucro >= 0
-                  ? "var(--verde-claro)"
-                  : "var(--vermelho-claro)"
-              }">$${stats.media_lucro.toFixed(2)}</strong></p>
-            </div>
+      .then((operacoes) => {
+        const tbody = document.getElementById("historico-completo-body");
+        if (!tbody) return;
+
+        if (!operacoes || operacoes.length === 0) {
+          tbody.innerHTML = `
+            <tr>
+              <td colspan="6" style="text-align: center; color: #888; padding: 14px;">Nenhuma operação finalizada nesta sessão.</td>
+            </tr>
           `;
-        } else {
-          document.getElementById("historico-completo").innerHTML = `
-            <p style="color: #ff444f;">Erro ao carregar estatísticas: ${data.mensagem}</p>
-          `;
+          return;
         }
+
+        let html = "";
+        operacoes.forEach((op) => {
+          const res = parseFloat(op.resultado_real !== undefined ? op.resultado_real : (op.lucro || 0.0));
+          const resClass = res > 0 ? "positivo" : (res < 0 ? "negativo" : "");
+          const resSign = res >= 0 ? "+" : "";
+          const ativo = op.ativo || "1HZ75V";
+          const tipo = (op.tipo || "TURBO").toUpperCase();
+          const tipoClass = tipo.includes("CALL") ? "badge-call" : (tipo.includes("PUT") ? "badge-put" : "badge-turbo");
+          const dataStr = op.data || "--";
+          const horaStr = op.hora_fechamento || op.hora_abertura || op.hora || "--";
+          const valor = parseFloat(op.valor || 0.35).toFixed(2);
+          const motivo = op.motivo_saida ? `title="Motivo da saída: ${op.motivo_saida}"` : "";
+
+          html += `
+            <tr ${motivo}>
+              <td>${dataStr}</td>
+              <td>${horaStr}</td>
+              <td><strong>${ativo}</strong></td>
+              <td><span class="badge ${tipoClass}">${tipo}</span></td>
+              <td>$${valor}</td>
+              <td class="resultado ${resClass}"><strong>${resSign}$${res.toFixed(2)}</strong></td>
+            </tr>
+          `;
+        });
+        tbody.innerHTML = html;
       })
       .catch((err) => {
-        document.getElementById("historico-completo").innerHTML = `
-          <p style="color: #ff444f;">Erro ao carregar estatísticas: ${err.message}</p>
-        `;
+        console.error("Erro ao carregar histórico completo:", err);
       });
   }
 
