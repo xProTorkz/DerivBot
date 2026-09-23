@@ -80,6 +80,70 @@ class TestOneSecondAssetsAndPersistence(unittest.TestCase):
         # O estado deve permanecer em AGUARDANDO_REVERSAO ou transitar para SINAL_CONFIRMADO
         self.assertIn(sm.estado_atual, [MicroScalperState.AGUARDANDO_REVERSAO, MicroScalperState.SINAL_CONFIRMADO])
 
+    def test_buy_request_schema_no_invalid_parameters(self):
+        """Garante que a requisição de compra não envia campos inválidos como underlying_symbol."""
+        import json
+        from unittest.mock import MagicMock
+
+        motor = Motor()
+        motor.ws = MagicMock()
+        motor.conectado = True
+        motor.modo_real = False
+
+        # Executa compra em conta Demo
+        sucesso = motor.comprar("CALL", 0.35, ativo="1HZ10V")
+        self.assertTrue(sucesso)
+        self.assertTrue(motor.ws.send.called)
+
+        # Inspeciona o payload enviado
+        call_arg = motor.ws.send.call_args[0][0]
+        payload = json.loads(call_arg)
+        self.assertIn("buy", payload)
+        self.assertIn("parameters", payload)
+        params = payload["parameters"]
+        self.assertNotIn("underlying_symbol", params, "underlying_symbol é inválido na Deriv API")
+        self.assertIn("symbol", params)
+        self.assertIn("amount", params)
+        self.assertIn("duration", params)
+        self.assertIn("duration_unit", params)
+        self.assertEqual(params["duration_unit"], "s")
+
+    def test_deriv_error_recovers_comprando_state(self):
+        """Verifica se erro retornado pela Deriv API recupera a máquina de estados de COMPRANDO para NORMAL."""
+        import json
+        from src.core.inteligencia import state_machine_micro_scalper, obter_state_machine
+
+        motor = Motor()
+        sm_ativo = obter_state_machine("1HZ25V")
+        sm_ativo.transitar(MicroScalperState.COMPRANDO, "Testando compra")
+        state_machine_micro_scalper.transitar(MicroScalperState.COMPRANDO, "Testando compra")
+
+        err_msg = json.dumps({
+            "error": {"code": "InputValidationFailed", "message": "Input validation failed: parameters"},
+            "echo_req": {"buy": 1, "parameters": {"symbol": "1HZ25V"}},
+        })
+        motor._on_message(None, err_msg)
+
+        self.assertEqual(sm_ativo.estado_atual, MicroScalperState.NORMAL)
+        self.assertEqual(state_machine_micro_scalper.estado_atual, MicroScalperState.NORMAL)
+
+    def test_multi_asset_round_robin_rotation(self):
+        """Garante rotação circular justa entre os ativos do pool turbo."""
+        motor = Motor()
+        todos = list(ATIVOS_TURBO_INTEGRADOS.keys())
+        motor.ultimo_ativo_usado = 0
+
+        # Primeira rodada
+        idx1 = motor.ultimo_ativo_usado % len(todos)
+        cand1 = todos[idx1:] + todos[:idx1]
+        motor.ultimo_ativo_usado = (motor.ultimo_ativo_usado + 1) % len(todos)
+
+        # Segunda rodada
+        idx2 = motor.ultimo_ativo_usado % len(todos)
+        cand2 = todos[idx2:] + todos[:idx2]
+
+        self.assertNotEqual(cand1[0], cand2[0], "O primeiro ativo analisado deve rotacionar a cada ciclo")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1168,6 +1168,15 @@ class Motor:
                 )
                 self.ultimo_erro = f"[{err_code}] {err_msg}"
 
+                # Recupera e destrava a state machine se estava em COMPRANDO
+                param_symbol = data.get("echo_req", {}).get("parameters", {}).get("symbol")
+                if param_symbol:
+                    sm_err = obter_state_machine(param_symbol)
+                    if sm_err.estado_atual == MicroScalperState.COMPRANDO:
+                        sm_err.transitar(MicroScalperState.NORMAL, f"Erro Deriv: {err_code}")
+                if state_machine_micro_scalper.estado_atual == MicroScalperState.COMPRANDO:
+                    state_machine_micro_scalper.transitar(MicroScalperState.NORMAL, f"Erro Deriv: {err_code}")
+
             # Processamento de abertura de contratos
             if "buy" in data and data["buy"]:
                 contract_id = data["buy"]["contract_id"]
@@ -1178,10 +1187,12 @@ class Motor:
 
                 symbol = data.get("echo_req", {}).get("parameters", {}).get("symbol", self.par_atual)
                 with self.lock:
+                    buy_price = float(data["buy"].get("buy_price", 0.35))
                     self.operacoes_abertas[contract_id] = {
                         "id": contract_id,
                         "ativo": symbol,
-                        "preco_entrada": data["buy"]["buy_price"],
+                        "preco_entrada": buy_price,
+                        "valor": buy_price,
                         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         "tipo": data.get("echo_req", {})
                         .get("parameters", {})
@@ -1358,14 +1369,22 @@ class Motor:
                                 self.saldo = float(contract["balance_after"])
 
                             try:
-                                import main
-                                main.adicionar_operacao(
-                                    tipo=operacao.get("tipo", "UNKNOWN"),
-                                    valor=operacao.get("valor", 0),
-                                    resultado=lucro,
-                                )
+                                import sys
+                                mod_main = sys.modules.get("src.main") or sys.modules.get("main")
+                                if not mod_main:
+                                    try:
+                                        from src import main as mod_main
+                                    except ImportError:
+                                        import main as mod_main
+                                if mod_main and hasattr(mod_main, "adicionar_operacao"):
+                                    val_op = float(operacao.get("valor") or operacao.get("preco_entrada") or 0.35)
+                                    mod_main.adicionar_operacao(
+                                        tipo=operacao.get("tipo", "UNKNOWN"),
+                                        valor=val_op,
+                                        resultado=lucro,
+                                    )
                             except Exception as e:
-                                self.logger.debug(f"Erro ao notificar operação no main: {e}")
+                                self.logger.warning(f"Erro ao notificar operação no main: {e}")
 
                             del self.operacoes_abertas[contract_id]
                             self.sistema_stops.remover_stop_operacao(contract_id)
@@ -1715,11 +1734,14 @@ class Motor:
                     "session_stopped": True,
                 }
 
-            # 1. Scanner multi-ativo sobre ATIVOS_TURBO_INTEGRADOS
-            ativos_candidatos = list(ATIVOS_TURBO_INTEGRADOS.keys())
-            if self.par_atual in ativos_candidatos:
-                ativos_candidatos.remove(self.par_atual)
-                ativos_candidatos.insert(0, self.par_atual)
+            # 1. Scanner multi-ativo sobre ATIVOS_TURBO_INTEGRADOS com rotação dinâmica (Issue #20)
+            todos_candidatos = list(ATIVOS_TURBO_INTEGRADOS.keys())
+            if not hasattr(self, "ultimo_ativo_usado"):
+                self.ultimo_ativo_usado = 0
+            # Rotação circular justa entre os ativos para garantir micro-scalping multi-ativo
+            idx_rot = self.ultimo_ativo_usado % len(todos_candidatos)
+            ativos_candidatos = todos_candidatos[idx_rot:] + todos_candidatos[:idx_rot]
+            self.ultimo_ativo_usado = (self.ultimo_ativo_usado + 1) % len(todos_candidatos)
 
             analise = None
             melhor_analise_sem_sinal = None
@@ -1824,6 +1846,7 @@ class Motor:
             sucesso = self.comprar(tipo_operacao, valor_entrada, ativo=ativo_sinal)
 
             if sucesso:
+                self.par_atual = ativo_sinal
                 self.logger.info(
                     f"🚀 ENTRADA EXECUTADA! {tipo_operacao} em {ativo_sinal} - ${valor_entrada:.2f} - "
                     f"Score: {analise.get('score', 0.0):.1f} - {analise.get('razao')}"
@@ -2034,13 +2057,12 @@ class Motor:
 
                 # Configura requisição para contrato turbo de 15 segundos
                 if ativo_config.get("tipo_contrato") == "turbo":
-                    # Contrato turbo de 15 segundos
+                    # Contrato turbo de 15 segundos (sem campos ilegais na Deriv API)
                     req = {
                         "buy": 1,
                         "parameters": {
                             "contract_type": contract_type,
                             "symbol": simbolo,
-                            "underlying_symbol": simbolo,
                             "amount": valor,
                             "basis": "stake",
                             "duration": 15,  # 15 segundos
@@ -2062,7 +2084,6 @@ class Motor:
                                 "CALL", "MULTUP"
                             ).replace("PUT", "MULTDOWN"),
                             "symbol": simbolo,
-                            "underlying_symbol": simbolo,
                             "amount": valor,
                             "basis": "stake",
                             "multiplier": multiplier,
@@ -2499,13 +2520,19 @@ class Motor:
 
             # Envia log para a UI
             try:
-                import main
-
-                main.adicionar_log_tempo_real("Sistema inteligente iniciado", "success")
-                main.adicionar_log_tempo_real(
-                    f"Analisando {self.par_atual} para scalping", "info"
-                )
-            except:
+                import sys
+                mod_main = sys.modules.get("src.main") or sys.modules.get("main")
+                if not mod_main:
+                    try:
+                        from src import main as mod_main
+                    except ImportError:
+                        import main as mod_main
+                if mod_main and hasattr(mod_main, "adicionar_log_tempo_real"):
+                    mod_main.adicionar_log_tempo_real("Sistema inteligente iniciado", "success")
+                    mod_main.adicionar_log_tempo_real(
+                        f"Analisando múltiplos ativos ({len(self.ativos_ativos)}) para scalping", "info"
+                    )
+            except Exception:
                 pass
 
             # Marca como rodando

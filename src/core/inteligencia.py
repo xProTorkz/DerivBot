@@ -511,7 +511,7 @@ class ReversalConfirmator:
         razao = (
             f"Reversão confirmada ({ticks_aprovados} ticks favoráveis, slope: {inclinacao_curta:.3f})"
             if confirmado
-            else f"Aguardando reversão: ticks favoráveis={ticks_consecutivos}/{min_ticks}, rejeição={rejeicao_extremo}"
+            else f"Aguardando reversão: ticks favoráveis={ticks_aprovados}/{min_ticks}, rejeição={rejeicao_extremo}"
         )
 
         return {
@@ -820,6 +820,13 @@ def analisar_micro_scalping(
             ativo = dados_ou_snapshot.get("ativo") or dados_ou_snapshot.get("simbolo")
 
         sm = state_machine or obter_state_machine(ativo)
+
+        # Destrava automática caso tenha ficado em COMPRANDO por mais de 8s (falha de rede / timeout)
+        agora_check = time.time()
+        if sm.estado_atual == MicroScalperState.COMPRANDO and (agora_check - sm.tempo_mudanca_estado) > 8.0:
+            sm.transitar(MicroScalperState.NORMAL, "Recuperação automática de timeout em COMPRANDO")
+        if state_machine_micro_scalper.estado_atual == MicroScalperState.COMPRANDO and (agora_check - state_machine_micro_scalper.tempo_mudanca_estado) > 8.0:
+            state_machine_micro_scalper.transitar(MicroScalperState.NORMAL, "Recuperação automática de timeout em COMPRANDO")
 
         # 1. Checagem de meta diária atingida
         if meta > 0 and lucro_atual >= meta:
