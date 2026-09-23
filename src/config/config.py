@@ -45,9 +45,11 @@ class Config:
         "file_output": True,
     }
 
-    # Configurações da API Deriv
+    # Configurações da API Deriv (Modelo Novo: Single PAT + OTP)
+    DERIV_API_BASE = os.getenv("DERIV_API_BASE", "https://api.derivws.com")
+    DERIV_APP_ID = os.getenv("DERIV_APP_ID", "")
+    DERIV_PAT = os.getenv("DERIV_PAT", "")
     DERIV_WEBSOCKET_URL = os.getenv("DERIV_WEBSOCKET_URL", "wss://red.derivws.com/websockets/v3")
-    DERIV_APP_ID = os.getenv("DERIV_APP_ID", "34tz2Eo08gxzaLEvdMwad")
 
     # Configurações do servidor Flask
     FLASK_HOST = os.getenv("FLASK_HOST", "127.0.0.1")
@@ -247,50 +249,81 @@ class Config:
         "fade_logs_antigos": True,
     }
 
+    @classmethod
+    def obter_deriv_pat(cls):
+        """Retorna o token PAT configurado via .env, tokens.json ou licencas.json"""
+        if cls.DERIV_PAT and str(cls.DERIV_PAT).strip():
+            return str(cls.DERIV_PAT).strip()
+        tokens = cls.carregar_tokens()
+        if tokens.get("deriv_pat"):
+            return str(tokens["deriv_pat"]).strip()
+        lic_file = os.path.join(cls.DATA_DIR, "licencas.json")
+        if os.path.exists(lic_file):
+            try:
+                with open(lic_file, "r") as f:
+                    lics = json.load(f)
+                    for l in lics.values():
+                        pat = (
+                            l.get("deriv_pat")
+                            or l.get("token_deriv_demo")
+                            or l.get("token_deriv_real")
+                        )
+                        if pat:
+                            return str(pat).strip()
+            except Exception:
+                pass
+        return ""
+
+    @classmethod
+    def obter_deriv_app_id(cls):
+        """Retorna o DERIV_APP_ID configurado via .env"""
+        return str(cls.DERIV_APP_ID).strip() if cls.DERIV_APP_ID else os.getenv("DERIV_APP_ID", "")
+
     @staticmethod
     def carregar_tokens():
         """
-        Carrega os tokens salvos
+        Carrega o token Deriv salvo (Modelo Canônico: deriv_pat).
 
         Returns:
-            dict: Tokens salvos
+            dict: Dicionário contendo 'deriv_pat' e retrocompatibilidade
         """
         tokens_file = os.path.join(Config.DATA_DIR, "tokens.json")
 
         if os.path.exists(tokens_file):
             try:
                 with open(tokens_file, "r") as f:
-                    return json.load(f)
+                    data = json.load(f)
+                    # Migração transparente se contiver campos legados
+                    if "deriv_pat" not in data:
+                        pat_antigo = data.get("token_deriv") or data.get("token_demo") or data.get("token_real")
+                        if pat_antigo:
+                            data["deriv_pat"] = pat_antigo
+                    return data
             except Exception as e:
                 logging.error(f"Erro ao carregar tokens: {e}")
 
-        return {"token_real": None, "token_demo": None}
+        return {"deriv_pat": None}
 
     @staticmethod
-    def salvar_tokens(token_real=None, token_demo=None):
+    def salvar_tokens(deriv_pat=None, **kwargs):
         """
-        Salva os tokens
+        Salva o PAT único da Deriv.
 
         Args:
-            token_real: Token da conta real
-            token_demo: Token da conta demo
-
-        Returns:
-            bool: True se salvou com sucesso, False caso contrário
+            deriv_pat: Personal Access Token (PAT) único
+            **kwargs: Suporte temporário a argumentos legados para compatibilidade
         """
         tokens = Config.carregar_tokens()
 
-        if token_real:
-            tokens["token_real"] = token_real
-
-        if token_demo:
-            tokens["token_demo"] = token_demo
+        token_a_salvar = deriv_pat or kwargs.get("token_demo") or kwargs.get("token_real") or kwargs.get("token_deriv")
+        if token_a_salvar:
+            tokens["deriv_pat"] = str(token_a_salvar).strip()
 
         tokens_file = os.path.join(Config.DATA_DIR, "tokens.json")
 
         try:
             with open(tokens_file, "w") as f:
-                json.dump(tokens, f)
+                json.dump(tokens, f, indent=2)
             return True
         except Exception as e:
             logging.error(f"Erro ao salvar tokens: {e}")

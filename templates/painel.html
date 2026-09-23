@@ -66,8 +66,10 @@
 
           <!-- Menu de Opções (Dropdown) -->
           <div class="dropdown-menu" id="dropdown-conta">
-            {% if session.get('token_demo') and session.get('tipo_conta') !=
-            'demo' %}
+            {% set tem_demo = (has_demo if has_demo is defined else (session.get('has_demo') or (session.get('deriv_accounts') | selectattr('account_type', 'equalto', 'demo') | list | length > 0 if session.get('deriv_accounts') else (session.get('token_demo') is not none and session.get('token_demo') != '')))) %}
+            {% set tem_real = (has_real if has_real is defined else (session.get('has_real') or (session.get('deriv_accounts') | selectattr('account_type', 'equalto', 'real') | list | length > 0 if session.get('deriv_accounts') else (session.get('token_real') is not none and session.get('token_real') != '')))) %}
+
+            {% if tem_demo and (tipo_conta != 'demo' and session.get('tipo_conta') != 'demo') %}
             <button
               type="button"
               class="dropdown-btn"
@@ -75,8 +77,9 @@
             >
               <i class="fas fa-vial"></i> Trocar para Demo
             </button>
-            {% endif %} {% if session.get('token_real') and
-            session.get('tipo_conta') != 'real' %}
+            {% endif %}
+
+            {% if tem_real and (tipo_conta != 'real' and session.get('tipo_conta') != 'real') %}
             <button
               type="button"
               class="dropdown-btn"
@@ -84,24 +87,16 @@
             >
               <i class="fas fa-dollar-sign"></i> Trocar para Real
             </button>
-            {% endif %} {% if not session.get('token_demo') or not
-            session.get('token_real') %}
-            <button
-              type="button"
-              class="dropdown-btn"
-              onclick="adicionarToken()"
-            >
-              <i class="fas fa-plus"></i> Adicionar Token
-            </button>
-            {% endif %} {% if not session.get('token_demo') and not
-            session.get('token_real') %}
+            {% endif %}
+
+            {% if not tem_demo and not tem_real %}
             <button
               type="button"
               class="dropdown-btn"
               style="color: #888; cursor: not-allowed"
               disabled
             >
-              <i class="fas fa-info-circle"></i> Nenhum token adicional
+              <i class="fas fa-info-circle"></i> Nenhuma conta adicional
             </button>
             {% endif %}
           </div>

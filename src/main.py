@@ -464,133 +464,82 @@ def salvar_licencas(licencas):
         logger.error(f"Erro ao salvar licenças: {e}")
 
 
-def verificar_token(token):
-    """Verifica se o token é válido"""
+def verificar_token(token, app_id=None):
+    """Verifica se o token PAT é válido usando a nova API REST oficial da Deriv"""
     if not token:
         return False, "Token não fornecido"
 
     try:
-        # Carrega as licenças para obter dados corretos da conta
-        licencas = carregar_licencas()
-        conta_id = None
-        tipo_conta = None
-        saldo = None
+        from core.deriv_api import (
+            DerivAPIClient,
+            DerivAuthError,
+            DerivPermissionError,
+            DerivAccountNotFoundError,
+            DerivAPIError,
+        )
+        from config.config import Config
 
-        # Procura o token nas licenças para obter dados corretos
-        for licenca in licencas.values():
-            if licenca.get("token_deriv_real") == token:
-                conta_id = licenca.get("deriv_real")
-                tipo_conta = "real"
-                # Tenta obter saldo real da API
-                # API removida - usando motor
-                if motor and motor.conectado:
-                    resultado_saldo = {"status": "ok", "saldo": motor.obter_saldo()}
-                    if resultado_saldo.get("status") == "ok":
-                        saldo = resultado_saldo["saldo"]
-                    else:
-                        saldo = 0.0  # Saldo padrão se não conseguir obter
-                else:
-                    saldo = 0.0
-                break
-            elif licenca.get("token_deriv_demo") == token:
-                conta_id = licenca.get("deriv_demo")
-                tipo_conta = "demo"
-                # Tenta obter saldo real da API
-                # API removida - usando motor
-                if motor and motor.conectado:
-                    resultado_saldo = {"status": "ok", "saldo": motor.obter_saldo()}
-                    if resultado_saldo.get("status") == "ok":
-                        saldo = resultado_saldo["saldo"]
-                    else:
-                        saldo = 10000.0  # Saldo padrão demo se não conseguir obter
-                else:
-                    saldo = 10000.0
-                break
+        resolved_app_id = app_id or Config.obter_deriv_app_id()
+        base_url = Config.DERIV_API_BASE
+        client = DerivAPIClient(base_url=base_url)
 
-        # Se não encontrou nas licenças, tenta validar diretamente com a API
-        if not conta_id:
-            # Tenta conectar diretamente com o token para validar
-            try:
-                # Cria uma instância temporária do motor para validar o token
-                from core.motor import Motor
+        contas = client.listar_contas(token, resolved_app_id)
+        if not contas:
+            return False, "Nenhuma conta vinculada encontrada no token PAT."
 
-                motor_temp = Motor()
-                if motor_temp.conectar(token):
-                    # Aguarda um pouco para garantir que a autorização foi processada
-                    import time
-
-                    time.sleep(3)  # Aumentei para 3 segundos
-
-                    # Usa a nova função para obter o ID da conta
-                    conta_id = motor_temp.obter_id_conta()
-                    if conta_id:
-                        logger.info(f"[OK] ID da conta obtido da API: {conta_id}")
-                        saldo = motor_temp.obter_saldo()
-                        logger.info(f"[OK] Saldo obtido da API: {saldo}")
-                    else:
-                        conta_id = f"account_{token[:8]}"  # Fallback
-                        logger.warning("[AVISO] ID da conta não obtido da API")
-                        saldo = 0.0
-
-                    tipo_conta = "real" if not token.startswith("demo") else "demo"
-                    if not saldo:
-                        saldo = 0.0
-                    motor_temp.desconectar()
-                else:
-                    return False, "Token inválido ou sem permissões adequadas"
-            except Exception as e:
-                logger.error(f"Erro ao validar token diretamente: {e}")
-                return False, "Token inválido"
-
-        # Retorna dados da licença
+        conta_padrao = client.selecionar_conta_padrao(contas, preferir_real=False)
         return True, {
             "status": "ok",
-            "conta_id": conta_id,
-            "conta_nome": "Usuário",
-            "conta_tipo": tipo_conta,
-            "saldo": saldo,
+            "conta_id": conta_padrao["account_id"],
+            "conta_nome": "Usuário Deriv",
+            "conta_tipo": conta_padrao["account_type"],
+            "saldo": conta_padrao.get("balance", 0.0),
+            "contas": contas,
         }
-
+    except DerivAuthError:
+        return False, "Token PAT inválido ou não autorizado."
+    except DerivPermissionError:
+        return False, "O token não possui a permissão necessária (trade)."
+    except DerivAccountNotFoundError as e:
+        return False, str(e)
+    except DerivAPIError as e:
+        return False, f"Erro na API Deriv: {e}"
     except Exception as e:
-        logger.error(f"Erro ao verificar token: {e}")
+        logger.error(f"Erro ao verificar token PAT: {e}")
         return False, str(e)
 
 
-def inicializar_api(token):
-    """Inicializa o Motor com o token fornecido"""
+def inicializar_api(token, account_id=None, account_type=None, app_id=None):
+    """Inicializa o Motor com o token fornecido e conta alvo"""
     global motor, saldo_atual, status_motor
-    # SEMPRE cria o motor, mesmo se der erro
-    motor = None
     status_motor = "conectando"
     try:
         from core.motor import Motor
 
-        motor = Motor()
+        if motor is None:
+            motor = Motor()
+        else:
+            motor.desconectar()
+
         if token:
-            conectado = motor.conectar(token)
+            conectado = motor.conectar(
+                token=token,
+                account_id=account_id,
+                account_type=account_type,
+                app_id=app_id,
+            )
             if conectado:
                 status_motor = "conectado"
-                logger.info("[MOTOR] CONECTADO COM SUCESSO")
-
-                # Tenta obter saldo inicial
-                try:
-                    import time
-
-                    time.sleep(2)  # Aguarda conexão estabilizar
-                    saldo_inicial = motor.obter_saldo()
-                    if saldo_inicial:
-                        saldo_atual = saldo_inicial
-                        logger.info(f"[MOTOR] Saldo inicial obtido: {saldo_inicial}")
-                    else:
-                        logger.warning("[MOTOR] Não foi possível obter saldo inicial")
-                except Exception as e:
-                    logger.error(f"Erro ao obter saldo inicial: {e}")
-
-                logger.info("[MOTOR] TURBO INICIALIZADO COM SUCESSO")
+                saldo_atual = getattr(motor, "saldo", 0.0)
+                logger.info(
+                    f"[MOTOR] CONECTADO COM SUCESSO (Conta: {getattr(motor, 'account_id', 'N/A')})"
+                )
                 return True
             else:
                 status_motor = "erro"
-                logger.error("[MOTOR] Falha ao conectar motor com token")
+                logger.error(
+                    f"[MOTOR] Falha ao conectar motor com token: {getattr(motor, 'ultimo_erro', 'desconhecido')}"
+                )
                 return False
         else:
             status_motor = "erro"
@@ -599,7 +548,6 @@ def inicializar_api(token):
     except Exception as motor_error:
         status_motor = "erro"
         logger.error(f"[MOTOR] Erro ao inicializar motor: {motor_error}")
-        # Cria motor básico mesmo com erro
         return False
 
 
@@ -691,14 +639,30 @@ def verificar_autenticacao_automatica():
 
 
 def obter_tokens_da_licenca(licenca):
-    """Obtém os tokens da licença"""
-    token_real = licenca.get("token_deriv_real")
-    token_demo = licenca.get("token_deriv_demo")
-    return token_real, token_demo
+    """Obtém os tokens da licença com compatibilidade para PAT único"""
+    pat = (
+        licenca.get("deriv_pat")
+        or licenca.get("token_deriv_demo")
+        or licenca.get("token_deriv_real")
+    )
+    return pat, pat
+
+
+def obter_pat_da_licenca(licenca):
+    """Obtém o PAT da licença ou configuração com fallback de compatibilidade"""
+    pat = (
+        licenca.get("deriv_pat")
+        or licenca.get("token_deriv_demo")
+        or licenca.get("token_deriv_real")
+    )
+    if not pat:
+        from config.config import Config
+        pat = Config.obter_deriv_pat()
+    return pat
 
 
 def sincronizar_tokens_sessao():
-    """Garante que a sessão do usuário sempre reflita os tokens válidos da licença salva"""
+    """Garante que a sessão do usuário sempre reflita o PAT válido e contas da licença salva"""
     codigo_licenca = session.get("codigo_licenca")
     licencas = carregar_licencas()
     licenca = None
@@ -712,23 +676,54 @@ def sincronizar_tokens_sessao():
         session["codigo_licenca"] = licenca.get("codigo_licenca")
 
     if licenca:
-        token_real = licenca.get("token_deriv_real", "")
-        token_demo = licenca.get("token_deriv_demo", "")
+        from config.config import Config
+
+        pat = (
+            licenca.get("deriv_pat")
+            or session.get("deriv_pat")
+            or licenca.get("token_deriv_demo")
+            or licenca.get("token_deriv_real")
+            or Config.obter_deriv_pat()
+        )
+        if pat and pat != "a1b2c3d4e5f6g7h8":
+            session["deriv_pat"] = pat
+            session["token"] = pat
+            session["token_demo"] = pat
+            session["token_real"] = pat
+
         tipo_conta = session.get("tipo_conta", "demo")
+        session["tipo_conta"] = tipo_conta
 
-        if token_real and token_real != "a1b2c3d4e5f6g7h8":
-            session["token_real"] = token_real
-        if token_demo and token_demo != "a1b2c3d4e5f6g7h8":
-            session["token_demo"] = token_demo
+        # Se não tem contas na sessão, tenta carregar se houver PAT
+        if not session.get("deriv_accounts") and pat and pat != "a1b2c3d4e5f6g7h8":
+            try:
+                from core.deriv_api import DerivAPIClient
 
-        token_atual = token_real if tipo_conta == "real" else token_demo
-        if token_atual and token_atual != "a1b2c3d4e5f6g7h8":
-            session["token"] = token_atual
+                app_id = Config.obter_deriv_app_id()
+                client = DerivAPIClient(base_url=Config.DERIV_API_BASE)
+                contas = client.listar_contas(pat, app_id)
+                session["deriv_accounts"] = contas
+            except Exception as e:
+                logger.warning(f"Não foi possível sincronizar contas na sessão: {e}")
 
-        if tipo_conta == "real" and licenca.get("deriv_real"):
-            session["deriv_account"] = licenca["deriv_real"]
-        elif licenca.get("deriv_demo"):
-            session["deriv_account"] = licenca["deriv_demo"]
+        contas = session.get("deriv_accounts", [])
+        if contas:
+            conta_atual = next(
+                (c for c in contas if c.get("account_type") == tipo_conta), None
+            )
+            if conta_atual:
+                session["deriv_account_id"] = conta_atual.get("account_id")
+                session["deriv_account"] = conta_atual.get("account_id")
+                session["deriv_account_type"] = tipo_conta
+                if "balance" in conta_atual and session.get("saldo") is None:
+                    session["saldo"] = float(conta_atual["balance"])
+        else:
+            if tipo_conta == "real" and licenca.get("deriv_real"):
+                session["deriv_account"] = licenca["deriv_real"]
+                session["deriv_account_id"] = licenca["deriv_real"]
+            elif licenca.get("deriv_demo"):
+                session["deriv_account"] = licenca["deriv_demo"]
+                session["deriv_account_id"] = licenca["deriv_demo"]
 
 
 
@@ -906,43 +901,45 @@ def index():
             f"[SUCESSO] Login automático aprovado para licença {licenca_auto.get('codigo_licenca')}"
         )
 
-        # Obtém tokens da licença
-        token_real, token_demo = obter_tokens_da_licenca(licenca_auto)
+        # Obtém PAT da licença
+        pat = obter_pat_da_licenca(licenca_auto)
 
-        if token_real or token_demo:
+        if pat:
             from config.config import Config
-            modo_real_padrao = getattr(Config, "MODO_REAL_PADRAO", False)
+            from core.deriv_api import DerivAPIClient
 
-            if token_demo and not modo_real_padrao:
-                tipo_conta = "demo"
-                token_ativo = token_demo
-            elif token_real:
-                tipo_conta = "real"
-                token_ativo = token_real
-            else:
-                tipo_conta = "demo"
-                token_ativo = token_demo
+            app_id = Config.obter_deriv_app_id()
+            client = DerivAPIClient(base_url=Config.DERIV_API_BASE)
 
-            # Configura sessão automaticamente
-            session["token"] = token_ativo
-            session["tipo_conta"] = tipo_conta
-            session["codigo_licenca"] = licenca_auto["codigo_licenca"]
-            session["deriv_account"] = licenca_auto.get(
-                f"deriv_{tipo_conta}", f"account_{token_ativo[:8]}"
-            )
-            session["token_real"] = token_real if token_real else ""
-            session["token_demo"] = token_demo if token_demo else ""
-            session["saldo"] = 0
+            try:
+                contas = client.listar_contas(pat, app_id)
+                conta_padrao = client.selecionar_conta_padrao(contas, preferir_real=False)
+                tipo_conta = conta_padrao["account_type"]
+                acc_id = conta_padrao["account_id"]
+                saldo = float(conta_padrao.get("balance", 0.0))
 
-            # Inicializa a API com o token ativo
-            inicializar_api(token_ativo)
+                session["token"] = pat
+                session["deriv_pat"] = pat
+                session["tipo_conta"] = tipo_conta
+                session["codigo_licenca"] = licenca_auto["codigo_licenca"]
+                session["deriv_account"] = acc_id
+                session["deriv_account_id"] = acc_id
+                session["deriv_account_type"] = tipo_conta
+                session["deriv_accounts"] = contas
+                session["saldo"] = saldo
+                session["token_real"] = pat if any(c.get("account_type") == "real" for c in contas) else ""
+                session["token_demo"] = pat
 
-            logger.info(
-                f"[OK] Login automático realizado com sucesso - Licença: {licenca_auto['codigo_licenca']}, Modo: {tipo_conta}"
-            )
-            return redirect(url_for("painel"))
+                inicializar_api(pat, account_id=acc_id, account_type=tipo_conta, app_id=app_id)
+
+                logger.info(
+                    f"[OK] Login automático realizado com sucesso - Licença: {licenca_auto['codigo_licenca']}, Conta: {acc_id} ({tipo_conta})"
+                )
+                return redirect(url_for("painel"))
+            except Exception as e:
+                logger.warning(f"Falha ao validar contas no login automático: {e}")
         else:
-            logger.warning("[AVISO] Licença encontrada mas tokens não disponíveis")
+            logger.warning("[AVISO] Licença encontrada mas token PAT não disponível")
 
     # Se não conseguiu login automático, mostra tela de login pré-preenchida com dados locais
     logger.info("Login automático não disponível - redirecionando para login manual")
@@ -950,22 +947,39 @@ def index():
     return render_template(
         "login.html",
         codigo_licenca=dados_salvos["codigo_licenca"],
-        token_deriv_demo=dados_salvos["token_deriv_demo"],
-        token_deriv_real=dados_salvos["token_deriv_real"],
+        deriv_pat=dados_salvos["deriv_pat"],
+        token_deriv_demo=dados_salvos.get("token_deriv_demo", ""),
+        token_deriv_real=dados_salvos.get("token_deriv_real", ""),
     )
 
 
 def obter_dados_login_salvos():
-    """Retorna código de licença e tokens salvos localmente para pré-preenchimento facilitado"""
+    """Retorna código de licença e PAT salvo localmente para pré-preenchimento facilitado"""
+    from config.config import Config
+
     licencas = carregar_licencas()
+    pat_config = Config.obter_deriv_pat()
     for l in licencas.values():
         if l.get("status") == "ativa" or l.get("codigo_licenca"):
+            pat = (
+                l.get("deriv_pat")
+                or pat_config
+                or l.get("token_deriv_demo")
+                or l.get("token_deriv_real")
+                or ""
+            )
             return {
                 "codigo_licenca": l.get("codigo_licenca", ""),
-                "token_deriv_demo": l.get("token_deriv_demo", ""),
-                "token_deriv_real": l.get("token_deriv_real", ""),
+                "deriv_pat": pat,
+                "token_deriv_demo": pat,
+                "token_deriv_real": pat,
             }
-    return {"codigo_licenca": "", "token_deriv_demo": "", "token_deriv_real": ""}
+    return {
+        "codigo_licenca": "",
+        "deriv_pat": pat_config or "",
+        "token_deriv_demo": pat_config or "",
+        "token_deriv_real": pat_config or "",
+    }
 
 
 def validar_codigo_licenca(codigo_licenca):
@@ -1001,7 +1015,7 @@ def obter_conta_id_do_token(token):
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
-    """Rota de login com validação de licença"""
+    """Rota de login com validação de licença e PAT único da Deriv"""
     if request.method == "GET":
         # Limpa a sessão e mostra tela de login pré-preenchida com dados salvos
         session.clear()
@@ -1009,277 +1023,145 @@ def login():
         return render_template(
             "login.html",
             codigo_licenca=dados_salvos["codigo_licenca"],
-            token_deriv_demo=dados_salvos["token_deriv_demo"],
-            token_deriv_real=dados_salvos["token_deriv_real"],
+            deriv_pat=dados_salvos["deriv_pat"],
+            token_deriv_demo=dados_salvos.get("token_deriv_demo", ""),
+            token_deriv_real=dados_salvos.get("token_deriv_real", ""),
         )
 
-    token_real = request.form.get("token_deriv_real", "").strip()
-    token_demo = request.form.get("token_deriv_demo", "").strip()
     codigo_licenca = request.form.get("codigo_licenca", "").strip()
+    pat = (
+        request.form.get("deriv_pat", "").strip()
+        or request.form.get("token_deriv_demo", "").strip()
+        or request.form.get("token_deriv_real", "").strip()
+    )
 
     def render_login_erro(msg):
         return render_template(
             "login.html",
             erro=msg,
             codigo_licenca=codigo_licenca,
-            token_deriv_demo=token_demo,
-            token_deriv_real=token_real,
+            deriv_pat=pat,
+            token_deriv_demo=pat,
+            token_deriv_real=pat,
         )
 
     logger.info(
-        f"[LOGIN] TENTATIVA DE LOGIN - Código: {codigo_licenca}, Token: {token_real[:10]}..."
+        f"[LOGIN] TENTATIVA DE LOGIN - Código: {codigo_licenca}, Token PAT: {pat[:8]}..."
+        if pat
+        else f"[LOGIN] TENTATIVA DE LOGIN - Código: {codigo_licenca}, Sem PAT"
     )
 
     # Verifica se o código de licença foi fornecido
     if not codigo_licenca:
         return render_login_erro("Código de licença é obrigatório")
 
-    # Verifica se pelo menos um token foi fornecido
-    if not token_real and not token_demo:
-        return render_login_erro(
-            "Informe pelo menos um Token da Deriv (Demo ou Real)"
-        )
+    # Verifica se o token PAT foi fornecido
+    if not pat:
+        return render_login_erro("Informe o Token PAT da Deriv")
 
     # Valida o formato do código de licença
     if not validar_codigo_licenca(codigo_licenca):
         return render_login_erro("Código de licença inválido")
 
-    # Validação básica do formato dos tokens fornecidos
-    if token_real and len(token_real) < 10:
-        return render_login_erro(
-            "Token real deve ter pelo menos 10 caracteres"
-        )
-    if token_demo and len(token_demo) < 10:
-        return render_login_erro(
-            "Token demo deve ter pelo menos 10 caracteres"
-        )
+    # Validação básica de comprimento
+    if len(pat) < 10:
+        return render_login_erro("Token PAT deve ter pelo menos 10 caracteres")
 
     # Carrega licenças existentes
     licencas = carregar_licencas()
-    logger.info(f"[DEBUG] DEBUG: Licenças carregadas: {list(licencas.keys())}")
-    logger.info(f"[DEBUG] DEBUG: Procurando código: '{codigo_licenca}'")
-
     licenca = None
     licenca_key = None
 
-    # Procura licença existente pelo código
     for key, l in licencas.items():
-        codigo_na_licenca = l.get("codigo_licenca")
-        logger.info(
-            f"[DEBUG] DEBUG: Comparando '{codigo_licenca}' com '{codigo_na_licenca}'"
-        )
-        if codigo_na_licenca == codigo_licenca:
+        if l.get("codigo_licenca") == codigo_licenca:
             licenca = l
             licenca_key = key
-            logger.info(f"[OK] Licença existente encontrada: {codigo_licenca}")
             break
 
     if not licenca:
-        logger.error(
-            f"[ERRO] DEBUG: Licença '{codigo_licenca}' não encontrada nas licenças: {list(licencas.keys())}"
-        )
-        return render_template(
-            "login.html", erro=f"Código de licença '{codigo_licenca}' não encontrado"
-        )
-
-    # Licença existe - atualiza dados
-    logger.info(f"Licença encontrada: {codigo_licenca}")
+        return render_login_erro(f"Código de licença '{codigo_licenca}' não encontrado")
 
     hwid_atual = obter_hwid()
     ip_atual = obter_ip()
 
-    # Atualiza HWID e IP se estiverem vazios (primeiro acesso)
     if not licenca.get("hwid"):
         licenca["hwid"] = hwid_atual
-        logger.info(f"HWID vinculado: {hwid_atual}")
-
     if not licenca.get("ip"):
         licenca["ip"] = ip_atual
-        logger.info(f"IP vinculado: {ip_atual}")
 
-    # Atualiza tokens fornecidos (usuário pode trocar tokens livremente)
-    if token_real:
-        licenca["token_deriv_real"] = token_real
-    if token_demo:
-        licenca["token_deriv_demo"] = token_demo
+    # Valida PAT e descobre contas via Deriv API REST oficial
+    from config.config import Config
+    from core.deriv_api import (
+        DerivAPIClient,
+        DerivAuthError,
+        DerivPermissionError,
+        DerivAccountNotFoundError,
+        DerivAPIError,
+    )
 
-    # Obtém o ID da conta real se token real fornecido
-    if token_real:
-        try:
-            logger.info(
-                f"[DEBUG] Tentando obter ID da conta real para token: {token_real[:10]}..."
-            )
+    app_id = Config.obter_deriv_app_id()
+    client = DerivAPIClient(base_url=Config.DERIV_API_BASE)
 
-            # Usa a função verificar_token que já funciona
-            valido, resultado = verificar_token(token_real)
-            if valido and resultado:
-                conta_id = resultado.get("conta_id", "")
-                if (
-                    conta_id and conta_id != f"account_{token_real[:8]}"
-                ):  # Verifica se não é ID temporário
-                    licenca["deriv_real"] = conta_id
-                    logger.info(f"[OK] ID da conta real obtido e salvo: {conta_id}")
+    try:
+        contas = client.listar_contas(pat, app_id)
+        if not contas:
+            return render_login_erro("Nenhuma conta vinculada encontrada no token PAT.")
 
-                    # Atualiza saldo se disponível
-                    saldo = resultado.get("saldo", 0)
-                    if saldo:
-                        logger.info(f"[OK] Saldo da conta: {saldo}")
-                else:
-                    # Se não conseguiu obter ID real, força uma nova tentativa
-                    logger.warning(
-                        "[AVISO] ID da conta não obtido ou é temporário, tentando novamente..."
-                    )
+        # REGRA INVIOLÁVEL: Demo é sempre a conta padrão
+        conta_padrao = client.selecionar_conta_padrao(contas, preferir_real=False)
+    except DerivAuthError:
+        return render_login_erro("Token PAT inválido ou não autorizado.")
+    except DerivPermissionError:
+        return render_login_erro("O token não possui a permissão necessária (trade).")
+    except DerivAccountNotFoundError as e:
+        return render_login_erro(str(e))
+    except DerivAPIError as e:
+        return render_login_erro(f"Erro na API Deriv: {str(e)}")
+    except Exception as e:
+        logger.error(f"Erro inesperado ao validar token PAT: {e}")
+        return render_login_erro(f"Erro ao validar token PAT: {str(e)}")
 
-                    # Tenta conectar diretamente para forçar obtenção do ID
-                    from core.motor import Motor
+    # Atualiza licença com os dados descobertos
+    licenca["deriv_pat"] = pat
+    licenca["token_deriv_demo"] = pat
+    licenca["token_deriv_real"] = pat
+    for c in contas:
+        if c.get("account_type") == "demo":
+            licenca["deriv_demo"] = c.get("account_id")
+            licenca["saldo_demo"] = c.get("balance", 0.0)
+        elif c.get("account_type") == "real":
+            licenca["deriv_real"] = c.get("account_id")
+            licenca["saldo_real"] = c.get("balance", 0.0)
 
-                    motor_temp = Motor()
-                    if motor_temp.conectar(token_real):
-                        import time
-
-                        time.sleep(5)  # Aguarda mais tempo
-
-                        # Primeiro tenta o método normal
-                        conta_id_real = motor_temp.obter_id_conta()
-                        if not conta_id_real:
-                            # Se não funcionou, força uma nova requisição
-                            logger.info(
-                                "[RECONECTANDO] Tentando método forçado para obter ID real..."
-                            )
-                            conta_id_real = motor_temp.obter_id_conta_forcado()
-
-                        if conta_id_real:
-                            licenca["deriv_real"] = conta_id_real
-                            logger.info(
-                                f"[OK] ID da conta real obtido na segunda tentativa: {conta_id_real}"
-                            )
-
-                            # Obtém e salva o saldo da conta real
-                            try:
-                                saldo_real = motor_temp.obter_saldo()
-                                if saldo_real:
-                                    licenca["saldo_real"] = saldo_real
-                                    logger.info(f"[SALDO] Saldo real salvo: {saldo_real}")
-                            except Exception as e:
-                                logger.error(f"Erro ao obter saldo real: {e}")
-                        else:
-                            logger.error(
-                                "[ERRO] Não foi possível obter ID real da conta mesmo com método forçado"
-                            )
-
-                        motor_temp.desconectar()
-                    else:
-                        logger.error(
-                            "[ERRO] Não foi possível conectar para obter ID da conta"
-                        )
-            else:
-                logger.warning(f"[AVISO] Não foi possível validar o token: {resultado}")
-        except Exception as e:
-            logger.error(f"[ERRO] Erro ao obter ID da conta real: {e}")
-
-    # Obtém o ID da conta demo se token demo foi fornecido
-    if token_demo:
-        try:
-            logger.info(
-                f"[DEBUG] Tentando obter ID da conta demo para token: {token_demo[:10]}..."
-            )
-
-            # Tenta conectar diretamente para obter o ID da conta demo
-            from core.motor import Motor
-
-            motor_temp = Motor()
-            if motor_temp.conectar(token_demo):
-                import time
-
-                time.sleep(3)  # Aguarda conexão
-
-                # Primeiro tenta o método normal
-                conta_id_demo = motor_temp.obter_id_conta()
-                if not conta_id_demo:
-                    # Se não funcionou, força uma nova requisição
-                    logger.info(
-                        "[RECONECTANDO] Tentando método forçado para obter ID demo..."
-                    )
-                    conta_id_demo = motor_temp.obter_id_conta_forcado()
-
-                if conta_id_demo:
-                    licenca["deriv_demo"] = conta_id_demo
-                    logger.info(
-                        f"[OK] ID da conta demo obtido e salvo: {conta_id_demo}"
-                    )
-
-                    # Obtém e salva o saldo da conta demo
-                    try:
-                        saldo_demo = motor_temp.obter_saldo()
-                        if saldo_demo:
-                            licenca["saldo_demo"] = saldo_demo
-                            logger.info(f"[SALDO] Saldo demo salvo: {saldo_demo}")
-                    except Exception as e:
-                        logger.error(f"Erro ao obter saldo demo: {e}")
-                else:
-                    logger.error("[ERRO] Não foi possível obter ID da conta demo")
-
-                motor_temp.desconectar()
-            else:
-                logger.error(
-                    "[ERRO] Não foi possível conectar para obter ID da conta demo"
-                )
-        except Exception as e:
-            logger.error(f"[ERRO] Erro ao obter ID da conta demo: {e}")
-
-    # Atualiza data de último acesso
     licenca["ultimo_acesso"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    # Salva alterações
     licencas[licenca_key] = licenca
     salvar_licencas(licencas)
 
-    logger.info(f"Licença atualizada: {codigo_licenca}")
+    # Configuração de sessão (DEMO padrão para segurança)
+    tipo_conta_padrao = conta_padrao["account_type"]
+    acc_id = conta_padrao["account_id"]
+    saldo = float(conta_padrao.get("balance", 0.0))
 
-    # Configuração de conta padrão: prioriza Demo para segurança (Issue #6)
-    from config.config import Config
-    modo_real_padrao = getattr(Config, "MODO_REAL_PADRAO", False)
-
-    if token_demo and not modo_real_padrao:
-        tipo_conta_padrao = "demo"
-        token_ativo = token_demo
-    elif token_real:
-        tipo_conta_padrao = "real"
-        token_ativo = token_real
-    else:
-        tipo_conta_padrao = "demo"
-        token_ativo = token_demo
-
-    # Marca a sessão como permanente
     session.permanent = True
-
-    # Salva informações na sessão
     session["codigo_licenca"] = codigo_licenca
-    session["token"] = token_ativo
+    session["deriv_pat"] = pat
+    session["token"] = pat
     session["tipo_conta"] = tipo_conta_padrao
-    session["token_real"] = token_real if token_real else ""
-    session["token_demo"] = token_demo if token_demo else ""
+    session["deriv_account"] = acc_id
+    session["deriv_account_id"] = acc_id
+    session["deriv_account_type"] = tipo_conta_padrao
+    session["deriv_accounts"] = contas
+    session["saldo"] = saldo
+    session["token_demo"] = pat
+    session["token_real"] = pat if any(c.get("account_type") == "real" for c in contas) else ""
 
-    # Usa o ID da conta correspondente se disponível
-    if tipo_conta_padrao == "real" and licenca.get("deriv_real"):
-        session["deriv_account"] = licenca["deriv_real"]
-        logger.info(f"[OK] Usando conta real: {licenca['deriv_real']}")
-    elif licenca.get("deriv_demo"):
-        session["deriv_account"] = licenca["deriv_demo"]
-        logger.info(f"[OK] Usando conta demo: {licenca['deriv_demo']}")
-    else:
-        session["deriv_account"] = f"account_{token_ativo[:8]}"
-    # Define saldo inicial baseado na licença
-    session["saldo"] = float(licenca.get(f"saldo_{tipo_conta_padrao}", 10000.0 if tipo_conta_padrao == "demo" else 0.0))
-
-    # Inicializa a API com o token ativo
-    inicializar_api(token_ativo)
+    # Inicializa API com motor conectado via OTP
+    inicializar_api(pat, account_id=acc_id, account_type=tipo_conta_padrao, app_id=app_id)
 
     logger.info(
-        f"Login realizado com sucesso - Licença: {codigo_licenca}, Modo: {tipo_conta_padrao}"
+        f"Login realizado com sucesso - Licença: {codigo_licenca}, Conta: {acc_id} ({tipo_conta_padrao})"
     )
 
-    # Redireciona para o painel
     return redirect(url_for("painel"))
 
 
@@ -1310,32 +1192,15 @@ def painel():
                 break
 
     # Prepara dados para o template
-    from config.config import Config
-    tipo_conta = session.get(
-        "tipo_conta", "demo" if not getattr(Config, "MODO_REAL_PADRAO", False) else "real"
-    )
+    tipo_conta = session.get("tipo_conta", "demo")
     saldo = session.get("saldo", 0)
-
-    # Debug: Verifica tokens na sessão
-    token_real = session.get("token_real", "")
-    token_demo = session.get("token_demo", "")
-    logger.info(
-        f"[DEBUG] Token Real: {'OK' if token_real else 'VAZIO'} | Token Demo: {'OK' if token_demo else 'VAZIO'}"
-    )
-    logger.info(f"[DEBUG] Tipo Conta: {tipo_conta} | Licença: {codigo_licenca}")
 
     # Informações da licença
     if licenca:
         codigo_licenca = licenca.get("codigo_licenca", "N/A")
-        plano = licenca.get("plano", "vitalicio")  # Usa o plano real da licença
-        validade = licenca.get(
-            "validade", "VITALICIO"
-        )  # Usa a validade real da licença
-        logger.info(
-            f"[OK] Licença encontrada no painel: {codigo_licenca} - Plano: {plano} - Validade: {validade}"
-        )
+        plano = licenca.get("plano", "vitalicio")
+        validade = licenca.get("validade", "VITALICIO")
     else:
-        # Se não encontrou a licença, há um problema - redireciona para login
         logger.error(
             f"[ERRO] Licença não encontrada no painel para código: {session.get('codigo_licenca')}"
         )
@@ -1344,16 +1209,27 @@ def painel():
 
     # Se motor não foi inicializado nesta instância mas o usuário tem token válido, tenta inicializar com controle de frequência
     global motor, ultimo_reconnect_ts
-    token_sessao = session.get("token")
+    token_sessao = session.get("deriv_pat") or session.get("token")
     agora = time.time()
     if token_sessao and token_sessao != "a1b2c3d4e5f6g7h8":
-        if (motor is None or not getattr(motor, "conectado", False)) and (agora - globals().get("ultimo_reconnect_ts", 0.0) > 30):
+        if (motor is None or not getattr(motor, "conectado", False)) and (
+            agora - globals().get("ultimo_reconnect_ts", 0.0) > 30
+        ):
             globals()["ultimo_reconnect_ts"] = agora
-            logger.info("[PAINEL] Inicializando motor para sessão existente...")
+            acc_id = session.get("deriv_account_id") or session.get("deriv_account")
+            logger.info(f"[PAINEL] Inicializando motor para sessão existente ({acc_id})...")
             try:
-                inicializar_api(token_sessao)
+                inicializar_api(token_sessao, account_id=acc_id, account_type=tipo_conta)
             except Exception as e:
                 logger.error(f"[PAINEL] Falha ao inicializar motor: {e}")
+
+    contas_sessao = session.get("deriv_accounts", [])
+    has_demo = any(c.get("account_type") == "demo" for c in contas_sessao) or bool(
+        session.get("token_demo")
+    )
+    has_real = any(c.get("account_type") == "real" for c in contas_sessao) or bool(
+        session.get("token_real")
+    )
 
     return render_template(
         "painel.html",
@@ -1363,6 +1239,8 @@ def painel():
         plano=plano,
         validade=validade,
         historico=historico_operacoes[-10:] if historico_operacoes else [],
+        has_demo=has_demo,
+        has_real=has_real,
     )
 
 
@@ -1968,7 +1846,11 @@ def toggle_bot():
             if not motor or not getattr(motor, "conectado", False):
                 logger.info("[MOTOR] Motor desconectado ao iniciar robô. Inicializando com token da sessão...")
                 try:
-                    inicializar_api(token_sessao)
+                    inicializar_api(
+                        token_sessao,
+                        account_id=session.get("deriv_account_id"),
+                        account_type=session.get("tipo_conta", "demo"),
+                    )
                     time.sleep(1.0)
                 except Exception as e:
                     logger.error(f"[MOTOR] Erro ao reconectar motor para toggle_bot: {e}")
@@ -2025,7 +1907,11 @@ def toggle_bot():
                     # Conecta com o token da sessão
                     token_atual = session.get("token")
                     if token_atual:
-                        motor.conectar(token_atual)
+                        motor.conectar(
+                            token=token_atual,
+                            account_id=session.get("deriv_account_id"),
+                            account_type=session.get("tipo_conta", "demo"),
+                        )
 
                 # Configura modo e meta
                 motor.modo_operacao = modo
@@ -2507,73 +2393,102 @@ def api_saldo_atual():
 
 @app.route("/selecionar_conta", methods=["POST"])
 def selecionar_conta():
-    """Rota para alternar entre conta real e demo"""
+    """Rota para alternar entre conta real e demo via PAT e OTP dinâmico"""
     try:
         sincronizar_tokens_sessao()
-        # Verifica autenticação
-        if "token" not in session:
+        pat = session.get("deriv_pat") or session.get("token")
+        if not pat:
             return jsonify({"status": "erro", "mensagem": "Não autenticado"}), 401
 
-        data = request.get_json()
-        # Aceita tanto 'tipo_conta' quanto 'tipo' para compatibilidade
-        tipo_conta = data.get("tipo_conta") or data.get("tipo", "real")
+        data = request.get_json() or {}
+        tipo_conta = str(data.get("tipo_conta") or data.get("tipo", "demo")).lower().strip()
 
         if tipo_conta not in ["real", "demo"]:
             return (
-                jsonify({"status": "erro", "mensagem": "Tipo de conta inválido"}),
+                jsonify({
+                    "status": "erro",
+                    "mensagem": "Tipo de conta inválido. Escolha 'demo' ou 'real'.",
+                }),
                 400,
             )
 
-        # Obtém tokens da sessão
-        token_real = session.get("token_real", "")
-        token_demo = session.get("token_demo", "")
+        from config.config import Config
+        from core.deriv_api import DerivAPIClient
 
-        if tipo_conta == "real" and not token_real:
+        app_id = Config.obter_deriv_app_id()
+        client = DerivAPIClient(base_url=Config.DERIV_API_BASE)
+
+        # Obtém contas conhecidas
+        contas = session.get("deriv_accounts")
+        if not contas:
+            try:
+                contas = client.listar_contas(pat, app_id)
+                session["deriv_accounts"] = contas
+            except Exception as e:
+                logger.error(f"Erro ao listar contas na troca de conta: {e}")
+                return (
+                    jsonify({
+                        "status": "erro",
+                        "mensagem": f"Falha ao consultar contas na Deriv: {e}",
+                    }),
+                    400,
+                )
+
+        # Localiza conta correspondente ao tipo desejado
+        conta_selecionada = None
+        for c in contas:
+            if c.get("account_type") == tipo_conta:
+                conta_selecionada = c
+                break
+
+        if not conta_selecionada:
             return (
-                jsonify({"status": "erro", "mensagem": "Token real não disponível"}),
+                jsonify({
+                    "status": "erro",
+                    "mensagem": f"Nenhuma conta {tipo_conta.upper()} encontrada vinculada a este token PAT.",
+                }),
                 400,
             )
 
-        if tipo_conta == "demo" and not token_demo:
-            return (
-                jsonify({"status": "erro", "mensagem": "Token demo não disponível"}),
-                400,
-            )
+        target_id = conta_selecionada["account_id"]
+        target_balance = float(conta_selecionada.get("balance", 0.0))
 
         # Atualiza sessão
         session["tipo_conta"] = tipo_conta
-        token_ativo = token_real if tipo_conta == "real" else token_demo
-        session["token"] = token_ativo
+        session["deriv_account_id"] = target_id
+        session["deriv_account"] = target_id
+        session["deriv_account_type"] = tipo_conta
+        session["saldo"] = target_balance
+        session["token"] = pat
 
-        # Obtém ID da conta da licença
-        licencas = carregar_licencas()
-        codigo_licenca = session.get("codigo_licenca")
-
-        for licenca in licencas.values():
-            if licenca.get("codigo_licenca") == codigo_licenca:
-                if tipo_conta == "real":
-                    session["deriv_account"] = licenca.get(
-                        "deriv_real", f"account_{token_real[:8]}"
-                    )
-                else:
-                    session["deriv_account"] = licenca.get(
-                        "deriv_demo", f"account_{token_demo[:8]}"
-                    )
-                break
-
-        # Reinicializa motor com novo token
+        # Reconecta motor com novo OTP para a conta escolhida
+        global motor
         if motor:
             try:
                 motor.desconectar()
-                motor.conectar(token_ativo)
-                logger.info(f"[RECONECTANDO] Motor reconectado com conta {tipo_conta}")
+                conectado = motor.conectar(
+                    token=pat,
+                    account_id=target_id,
+                    account_type=tipo_conta,
+                    app_id=app_id,
+                )
+                if conectado:
+                    logger.info(
+                        f"[TROCA DE CONTA] Motor reconectado com sucesso para {tipo_conta.upper()} ({target_id})"
+                    )
+                else:
+                    logger.warning(
+                        f"[TROCA DE CONTA] Falha na conexão do motor: {getattr(motor, 'ultimo_erro', '')}"
+                    )
             except Exception as e:
-                logger.error(f"Erro ao reconectar motor: {e}")
+                logger.error(f"Erro ao reconectar motor na troca de conta: {e}")
 
         return jsonify(
             {
                 "status": "ok",
                 "tipo_conta": tipo_conta,
+                "account_id": target_id,
+                "saldo": target_balance,
                 "mensagem": f"Conta {tipo_conta} selecionada com sucesso",
             }
         )

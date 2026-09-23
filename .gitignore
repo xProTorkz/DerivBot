@@ -85,3 +85,4 @@ test_*.py
 *_test.py
 tests/temp/
 !tests/test_micro_scalper.py
+!tests/test_deriv_auth.py

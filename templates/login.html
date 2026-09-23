@@ -83,32 +83,18 @@
         </div>
 
         <div class="form-group">
-          <label for="token_deriv_demo">Token Deriv Demo (Recomendado para Início)</label>
+          <label for="deriv_pat">Token Deriv / Personal Access Token (PAT)</label>
           <input
             type="text"
-            id="token_deriv_demo"
-            name="token_deriv_demo"
-            placeholder="Token da conta demo para testes"
-            value="{{ token_deriv_demo or '' }}"
+            id="deriv_pat"
+            name="deriv_pat"
+            placeholder="Cole seu token PAT da Deriv (ex: pat_...)"
+            value="{{ deriv_pat or '' }}"
+            required
             autocomplete="off"
           />
           <small style="color: #4caf50; font-size: 12px">
-            🧪 Recomendado: Para testes 100% seguros sem risco financeiro
-          </small>
-        </div>
-
-        <div class="form-group">
-          <label for="token_deriv_real">Token Deriv Real (Opcional)</label>
-          <input
-            type="text"
-            id="token_deriv_real"
-            name="token_deriv_real"
-            placeholder="Token da conta real (opcional)"
-            value="{{ token_deriv_real or '' }}"
-            autocomplete="off"
-          />
-          <small style="color: #888; font-size: 12px">
-            💰 Opcional: Apenas quando desejar ativar conta real
+            ✨ Um único token dá acesso às contas Demo e Real vinculadas à sua conta Deriv.
           </small>
         </div>
 
@@ -185,11 +171,8 @@
     <script>
       // Validação do formulário
       document.querySelector("form").addEventListener("submit", function (e) {
-        const tokenDemo = document
-          .getElementById("token_deriv_demo")
-          .value.trim();
-        const tokenReal = document
-          .getElementById("token_deriv_real")
+        const derivPat = document
+          .getElementById("deriv_pat")
           .value.trim();
         const codigoLicenca = document
           .getElementById("codigo_licenca")
@@ -202,9 +185,9 @@
           return;
         }
 
-        if (!tokenReal && !tokenDemo) {
+        if (!derivPat) {
           e.preventDefault();
-          alert("❌ Por favor, forneça pelo menos um token (Demo ou Real).");
+          alert("❌ Por favor, forneça o Token PAT da Deriv.");
           return;
         }
 
@@ -216,22 +199,16 @@
 
         // Se tudo estiver OK, mostra loading
         const btn = document.querySelector(".btn-ativar");
-        btn.innerHTML = "🔄 Conectando...";
+        btn.innerHTML = "🔄 Validando credenciais...";
         btn.disabled = true;
       });
 
       // Foco automático no primeiro campo
       document.getElementById("codigo_licenca").focus();
 
-      // Formatação automática dos tokens (remove espaços)
+      // Formatação automática do token (remove espaços)
       document
-        .getElementById("token_deriv_demo")
-        .addEventListener("input", function (e) {
-          e.target.value = e.target.value.replace(/\s/g, "");
-        });
-
-      document
-        .getElementById("token_deriv_real")
+        .getElementById("deriv_pat")
         .addEventListener("input", function (e) {
           e.target.value = e.target.value.replace(/\s/g, "");
         });

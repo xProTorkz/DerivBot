@@ -59,6 +59,26 @@ except ImportError:
         MicroScalperState,
     )
 
+try:
+    from src.core.deriv_api import (
+        DerivAPIClient,
+        DerivAPIError,
+        DerivAuthError,
+        DerivPermissionError,
+        DerivAccountNotFoundError,
+        sanitizar_url_ws,
+    )
+except ImportError:
+    from core.deriv_api import (
+        DerivAPIClient,
+        DerivAPIError,
+        DerivAuthError,
+        DerivPermissionError,
+        DerivAccountNotFoundError,
+        sanitizar_url_ws,
+    )
+
+
 
 class SistemaStops:
     """Sistema avançado de stops (stop loss e take profit)"""
@@ -803,91 +823,136 @@ class Motor:
 
         return True, "Aprovado pelo Gateway de Risco"
 
-    def conectar(self, token=None):
-        """Conecta com a API da Deriv usando o token fornecido ou o token já configurado."""
-        if token:
-            return self._conectar_com_token(token)
-        elif self.token:
-            return self._conectar_com_token(self.token)
-        else:
-            self.logger.error("Nenhum token fornecido para conexão")
+    def conectar(
+        self,
+        token: Optional[str] = None,
+        account_id: Optional[str] = None,
+        account_type: Optional[str] = None,
+        app_id: Optional[str] = None,
+    ) -> bool:
+        """
+        Conecta com a API da Deriv usando o novo fluxo oficial (Single PAT + OTP WebSocket).
+        Substitui o fluxo legado de 2 tokens independentes.
+        """
+        pat = token or self.token
+        if not pat:
+            from config.config import Config
+            pat = Config.obter_deriv_pat()
+
+        if not pat or not str(pat).strip():
+            self.ultimo_erro = "Token PAT da Deriv não configurado"
+            self.logger.error("Token PAT da Deriv não configurado")
             return False
 
-    def _conectar_com_pat(self, token: str) -> bool:
+        return self._conectar_com_pat(
+            pat=str(pat).strip(),
+            account_id=account_id,
+            account_type=account_type,
+            app_id=app_id,
+        )
+
+    def _conectar_com_pat(
+        self,
+        pat: str,
+        account_id: Optional[str] = None,
+        account_type: Optional[str] = None,
+        app_id: Optional[str] = None,
+    ) -> bool:
         """Conecta com a nova API da Deriv usando Personal Access Token (PAT) e OTP."""
         try:
-            import urllib.request
-            self.token = token
-            app_id = getattr(config, "DERIV_APP_ID", "34tz2Eo08gxzaLEvdMwad")
+            self.token = pat
 
-            # 1. Consulta contas ativas na nova API REST
-            accounts_url = "https://api.derivws.com/trading/v1/options/accounts"
-            req_acc = urllib.request.Request(
-                accounts_url,
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Deriv-App-ID": str(app_id),
-                    "Accept": "application/json",
-                },
+            # 1. Resolve app_id
+            resolved_app_id = (
+                app_id
+                or getattr(self, "app_id", None)
+                or getattr(config, "DERIV_APP_ID", None)
             )
-            with urllib.request.urlopen(req_acc, timeout=10) as resp:
-                acc_data = json.loads(resp.read().decode())
-                contas = acc_data.get("data", [])
+            if not resolved_app_id:
+                from config.config import Config
+                resolved_app_id = Config.obter_deriv_app_id()
+
+            if not resolved_app_id or not str(resolved_app_id).strip():
+                self.ultimo_erro = "DERIV_APP_ID não configurado"
+                self.logger.error("DERIV_APP_ID não configurado")
+                return False
+
+            self.app_id = str(resolved_app_id).strip()
+            base_url = getattr(config, "DERIV_API_BASE", "https://api.derivws.com")
+            client = DerivAPIClient(base_url=base_url)
+
+            # 2. Descobre contas vinculadas se account_id não foi pré-definido
+            contas = []
+            try:
+                contas = client.listar_contas(self.token, self.app_id)
+                self.contas_disponiveis = contas
+            except Exception as ex_list:
+                self.logger.error(f"Erro ao listar contas Deriv: {ex_list}")
+                self.ultimo_erro = str(ex_list)
+                return False
 
             if not contas:
-                self.logger.error("Nenhuma conta encontrada para o token PAT")
                 self.ultimo_erro = "Nenhuma conta vinculada ao token PAT"
+                self.logger.error(self.ultimo_erro)
                 return False
 
-            # Seleciona conta desejada (demo ou real)
-            modo_desejado = getattr(self, "tipo_conta", "demo")
+            # Determina o tipo de conta desejado (DEMO por padrão; REAL exige solicitação explícita)
+            tipo_desejado = account_type or getattr(self, "tipo_conta", "demo")
             modo_real = getattr(config, "MODO_REAL_PADRAO", False)
-            if not modo_real and modo_desejado != "real":
-                conta_alvo = next((c for c in contas if c.get("account_type") == "demo"), contas[0])
-            else:
-                conta_alvo = next((c for c in contas if c.get("account_type") == "real"), contas[0])
+            preferir_real = (tipo_desejado == "real" or modo_real)
+
+            try:
+                conta_alvo = client.selecionar_conta_padrao(
+                    contas,
+                    preferir_real=preferir_real,
+                    account_id_especifico=account_id,
+                )
+            except DerivAccountNotFoundError as ex_acc:
+                self.logger.error(f"Seleção de conta falhou: {ex_acc}")
+                self.ultimo_erro = str(ex_acc)
+                return False
 
             account_id = conta_alvo["account_id"]
-            self.id_conta_real = account_id
+            tipo_desejado = conta_alvo["account_type"]
             self.saldo = float(conta_alvo.get("balance", 0.0))
             self.saldo_inicial = self.saldo
+
+            self.account_id = account_id
+            self.id_conta_real = account_id
+            self.account_type = tipo_desejado
+            self.tipo_conta = tipo_desejado
+
             self.logger.info(
-                f"[PAT] Conta selecionada: {account_id} ({conta_alvo.get('account_type')}) - Saldo: ${self.saldo:.2f}"
+                f"[PAT] Conta selecionada: {account_id} ({tipo_desejado}) - Saldo: ${self.saldo:.2f}"
             )
 
-            # 2. Gera OTP para o WebSocket autenticado
-            otp_url = f"https://api.derivws.com/trading/v1/options/accounts/{account_id}/otp"
-            req_otp = urllib.request.Request(
-                otp_url,
-                data=b"{}",
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Deriv-App-ID": str(app_id),
-                    "Content-Type": "application/json",
-                    "Accept": "application/json",
-                },
-                method="POST",
-            )
-            with urllib.request.urlopen(req_otp, timeout=10) as resp:
-                otp_res = json.loads(resp.read().decode())
-                ws_url = otp_res.get("data", {}).get("url")
-
-            if not ws_url:
-                self.logger.error("Falha ao obter URL com OTP da Deriv")
-                self.ultimo_erro = "Falha ao gerar OTP para conexão WebSocket"
+            # 3. Solicita OTP de uso único para a conta selecionada
+            try:
+                ws_url = self._obter_nova_url_ws_autenticada(account_id=account_id)
+            except Exception as ex_otp:
+                self.logger.error(f"Falha ao obter OTP da Deriv: {ex_otp}")
+                self.ultimo_erro = str(ex_otp)
                 return False
 
+            if not ws_url:
+                self.ultimo_erro = "Falha ao obter URL com OTP da Deriv"
+                return False
+
+            # 4. Conecta diretamente na URL WebSocket retornada com OTP
             self.desconectar()
-            self.logger.info(f"[PAT] Conectando ao WebSocket autenticado...")
+            self.logger.info(
+                f"[PAT] Conectando ao WebSocket autenticado para conta {account_id} ({tipo_desejado})..."
+            )
 
             def _on_open_pat(ws):
                 self.logger.info("WebSocket PAT conectado com sucesso!")
                 self.conectado = True
                 try:
+                    # Assina saldo e ticks imediatamente (sem enviar authorize)
                     self.ws.send(json.dumps({"balance": 1, "subscribe": 1}))
                     self._inscrever_ticks()
                 except Exception as ex:
-                    self.logger.error(f"Erro ao inscrever ticks PAT: {ex}")
+                    self.logger.error(f"Erro ao inicializar subscrições WebSocket PAT: {ex}")
 
             self.ws = websocket.WebSocketApp(
                 ws_url,
@@ -906,11 +971,14 @@ class Motor:
 
             for _ in range(20):
                 if self.conectado:
-                    self.logger.info(f"Conexão PAT estabelecida com sucesso. Saldo: ${self.saldo:.2f}")
+                    self.logger.info(
+                        f"Conexão PAT estabelecida com sucesso. Conta: {self.account_id} | Saldo: ${self.saldo:.2f}"
+                    )
                     return True
                 time.sleep(0.5)
 
-            self.logger.error("Timeout ao conectar via PAT.")
+            self.logger.error("Timeout ao conectar via WebSocket PAT.")
+            self.ultimo_erro = "Timeout ao conectar via WebSocket PAT"
             return False
 
         except Exception as e:
@@ -918,70 +986,12 @@ class Motor:
             self.ultimo_erro = f"Erro na autenticação PAT: {e}"
             return False
 
-    def _conectar_com_token(self, token):
-        """Conecta com a API da Deriv usando o token fornecido.
-
-        Args:
-            token: Token de autorização da Deriv
-
-        Returns:
-            bool: True se conectou com sucesso, False caso contrário
-        """
-        if str(token).startswith("pat_"):
-            return self._conectar_com_pat(token)
-
-        try:
-            self.token = token
-            ws_base = getattr(config, "DERIV_WEBSOCKET_URL", "wss://red.derivws.com/websockets/v3")
-            app_id = getattr(config, "DERIV_APP_ID", "34tz2Eo08gxzaLEvdMwad")
-            ws_url = f"{ws_base}?app_id={app_id}"
-
-            # Fecha conexão existente se houver
-            self.desconectar()
-
-            # Configura nova conexão
-            self.logger.info(f"Iniciando conexão com Deriv API ({ws_url})")
-            self.ws = websocket.WebSocketApp(
-                ws_url,
-                on_open=self._on_open,
-                on_message=self._on_message,
-                on_error=self._on_error,
-                on_close=self._on_close,
-            )
-
-            # Reseta contadores de reconexão
-            self.tentativas_reconexao = 0
-            self.reconectado_recentemente = False
-
-            # Roda o WebSocket em uma thread separada
-            wst = threading.Thread(target=self.ws.run_forever)
-            wst.daemon = True
-            wst.start()
-
-            # Aguarda autenticação (máximo 10s)
-            for _ in range(20):
-                if self.conectado:
-                    self.logger.info("Conexão estabelecida com sucesso.")
-                    return True
-                time.sleep(0.5)
-
-            self.logger.error("Timeout ao conectar: sem resposta da API.")
-            return False
-        except Exception as e:
-            self.logger.error(f"Erro durante conexão: {str(e)}", exc_info=True)
-            self.ultimo_erro = f"Erro durante conexão: {str(e)}"
-            return False
-
-    def _on_open(self, ws):
-        """Callback quando a conexão WebSocket é aberta."""
-        try:
-            self.logger.info("Conexão WebSocket aberta, enviando autorização")
-            # Envia o token para autenticar
-            req = {"authorize": self.token}
-            ws.send(json.dumps(req))
-            self.ultima_mensagem_recebida = time.time()
-        except Exception as e:
-            self.logger.error(f"Erro no callback on_open: {str(e)}", exc_info=True)
+    def _obter_nova_url_ws_autenticada(self, account_id: Optional[str] = None) -> str:
+        """Obtém uma nova URL autenticada com OTP de uso único para conexão ou reconexão."""
+        acc_id = account_id or getattr(self, "account_id", None)
+        base_url = getattr(config, "DERIV_API_BASE", "https://api.derivws.com")
+        client = DerivAPIClient(base_url=base_url)
+        return client.solicitar_otp(self.token, self.app_id, acc_id)
 
     def _on_message(self, _, message):
         """Callback para processar mensagens recebidas do WebSocket."""
@@ -1919,78 +1929,34 @@ class Motor:
 
     def obter_id_conta(self):
         """Retorna o ID da conta autenticada."""
-        try:
-            # Primeiro verifica se já temos o ID capturado automaticamente
-            if self.id_conta_real:
-                self.logger.info(f"✅ ID da conta já disponível: {self.id_conta_real}")
-                return self.id_conta_real
-
-            # Fallback: tenta obter da última resposta
-            if self.ultima_resposta and "authorize" in self.ultima_resposta:
-                auth_data = self.ultima_resposta["authorize"]
-                loginid = auth_data.get("loginid", None)
-                if loginid:
-                    self.id_conta_real = loginid  # Armazena para uso futuro
-                    self.logger.info(f"✅ ID real da conta obtido: {loginid}")
-                    return loginid
-                else:
-                    self.logger.warning(
-                        "⚠️ LoginID não encontrado na resposta de autorização"
-                    )
-            else:
-                self.logger.warning("⚠️ Resposta de autorização não disponível")
-            return None
-        except Exception as e:
-            self.logger.error(f"Erro ao obter ID da conta: {str(e)}")
-            return None
+        if getattr(self, "account_id", None):
+            return self.account_id
+        if self.id_conta_real:
+            return self.id_conta_real
+        return None
 
     def obter_id_conta_forcado(self):
-        """Força a obtenção do ID real da conta fazendo uma nova requisição."""
-        try:
-            import time
+        """Retorna o ID da conta ativa (PAT + OTP define o account_id na conexão)."""
+        acc_id = self.obter_id_conta()
+        if acc_id:
+            return acc_id
 
-            if not self.ws or self.ws.sock is None:
-                self.logger.error("WebSocket não conectado")
-                return None
-
-            # Envia uma nova requisição de autorização para forçar resposta
-            auth_request = {"authorize": self.token, "req_id": int(time.time() * 1000)}
-
-            self.logger.info(
-                "🔄 Forçando nova requisição de autorização para obter ID real..."
-            )
-            self.ws.send(json.dumps(auth_request))
-
-            # Aguarda resposta por até 10 segundos
-            timeout = 10
-            start_time = time.time()
-
-            while time.time() - start_time < timeout:
-                time.sleep(0.5)
-                # Verifica se o ID foi capturado automaticamente
-                if self.id_conta_real:
-                    self.logger.info(
-                        f"✅ ID real da conta obtido forçadamente: {self.id_conta_real}"
+        # Se ainda não houver, consulta via API REST oficial
+        if self.token and getattr(self, "app_id", None):
+            try:
+                base_url = getattr(config, "DERIV_API_BASE", "https://api.derivws.com")
+                client = DerivAPIClient(base_url=base_url)
+                contas = client.listar_contas(self.token, self.app_id)
+                if contas:
+                    conta = client.selecionar_conta_padrao(
+                        contas, preferir_real=(getattr(self, "tipo_conta", "demo") == "real")
                     )
-                    return self.id_conta_real
-
-                # Fallback: verifica resposta manual
-                if self.ultima_resposta and "authorize" in self.ultima_resposta:
-                    auth_data = self.ultima_resposta["authorize"]
-                    loginid = auth_data.get("loginid", None)
-                    if loginid:
-                        self.id_conta_real = loginid  # Armazena para uso futuro
-                        self.logger.info(
-                            f"✅ ID real da conta obtido forçadamente: {loginid}"
-                        )
-                        return loginid
-
-            self.logger.error("❌ Timeout ao tentar obter ID real da conta")
-            return None
-
-        except Exception as e:
-            self.logger.error(f"Erro ao forçar obtenção do ID da conta: {str(e)}")
-            return None
+                    self.account_id = conta["account_id"]
+                    self.id_conta_real = conta["account_id"]
+                    return self.account_id
+            except Exception as e:
+                self.logger.error(f"Erro ao obter ID da conta via API REST: {e}")
+        return None
 
     def definir_par(self, par: str) -> bool:
         """Altera o par de negociação atual."""
@@ -2069,8 +2035,12 @@ class Motor:
         def reconectar_inteligente():
             time.sleep(5)  # Aguarda 5 segundos
             try:
-                if self.conectar(self.token):
-                    self.logger.info("Reconexão inteligente bem-sucedida")
+                self.logger.info("[RECONEXAO] Solicitando novo OTP para reconexão...")
+                account_id = getattr(self, "account_id", None)
+                tipo_c = getattr(self, "tipo_conta", "demo")
+                app_id = getattr(self, "app_id", None)
+                if self.conectar(token=self.token, account_id=account_id, account_type=tipo_c, app_id=app_id):
+                    self.logger.info("Reconexão inteligente com novo OTP bem-sucedida")
                 else:
                     self.logger.warning("Reconexão inteligente falhou")
             except Exception as e:
