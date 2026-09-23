@@ -28,6 +28,7 @@ venv/
 env/
 ENV/
 .venv/
+.venv*/
 .env/
 
 # IDEs
@@ -76,14 +77,13 @@ Thumbs.db
 # Arquivos temporários do projeto
 temp/
 tmp/
+memoria_inteligencia/
 *.zip
 *.rar
 *.tar.gz
 
-# Arquivos de teste descartáveis
-test_*.py
-*_test.py
+# Arquivos de teste descartáveis (raiz)
+/test_*.py
+/*_test.py
 tests/temp/
-!tests/test_micro_scalper.py
-!tests/test_deriv_auth.py
-!tests/test_concurrency_risk.py
+!tests/*.py

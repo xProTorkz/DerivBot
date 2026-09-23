@@ -69,7 +69,7 @@ derivbot/
 ├── 📂 src/                         # Código fonte
 │   ├── 📄 main.py                  # Arquivo principal (MOVIDO)
 │   ├── 📂 config/                  # Configurações
-│   │   ├── 📄 .env                 # Variáveis de ambiente (MOVIDO)
+│   │   ├── 📄 .env.example         # Exemplo de variáveis de ambiente
 │   │   └── 📄 config.py            # Configurações do sistema
 │   ├── 📂 core/                    # Lógica principal
 │   │   ├── 📄 motor.py             # Motor de trading

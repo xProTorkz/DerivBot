@@ -21,11 +21,15 @@ import logging
 
 
 from datetime import datetime, timedelta
+from typing import Any
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify
 
 # Importações locais - Ajustadas para nova estrutura
 # Motor será importado dinamicamente quando necessário
-from config.config import Config
+try:
+    from src.config.config import Config
+except ImportError:
+    from config.config import Config
 from utils.gerador_licencas import (
     carregar_licencas,
     salvar_licencas,
@@ -41,6 +45,17 @@ logging.basicConfig(
     handlers=[logging.FileHandler("derivbot.log"), logging.StreamHandler()],
 )
 logger = logging.getLogger("DerivBot")
+
+
+def ofuscar_segredo(valor: Any, visiveis_inicio: int = 4, visiveis_fim: int = 2) -> str:
+    """Ofusca credenciais, licenças e tokens para exibição segura em logs"""
+    if not valor:
+        return ""
+    val_str = str(valor).strip()
+    if len(val_str) <= (visiveis_inicio + visiveis_fim):
+        return "***"
+    return f"{val_str[:visiveis_inicio]}***{val_str[-visiveis_fim:]}"
+
 
 # Diretório para armazenamento de dados - Ajustado para nova estrutura
 DATA_DIR = os.path.join(
@@ -441,7 +456,7 @@ def carregar_licencas():
         if os.path.exists(LICENCAS_FILE):
             with open(LICENCAS_FILE, "r", encoding="utf-8") as f:
                 licencas = json.load(f)
-                logger.info(f"Licenças carregadas: {list(licencas.keys())}")
+                logger.info(f"Licenças carregadas com sucesso: {len(licencas)} registro(s)")
                 return licencas
         else:
             logger.info("Arquivo de licenças não encontrado")
@@ -566,7 +581,7 @@ def verificar_autenticacao_automatica():
         logger.info(f"[DEBUG] Verificando {len(licencas)} licenças encontradas")
 
         for _, licenca in licencas.items():
-            logger.info(f"[DEBUG] Analisando licença: {licenca.get('codigo_licenca')}")
+            logger.info(f"[DEBUG] Analisando licença: {ofuscar_segredo(licenca.get('codigo_licenca'))}")
 
             # Verifica se a licença está ativa
             status = licenca.get("status")
@@ -622,12 +637,12 @@ def verificar_autenticacao_automatica():
             # Se pelo menos 2 dos 3 fatores conferem, permite login automático
             if fatores_conferidos >= 2:
                 logger.info(
-                    f"[SUCESSO] Autenticação automática aprovada para licença {licenca.get('codigo_licenca')}"
+                    f"[SUCESSO] Autenticação automática aprovada para licença {ofuscar_segredo(licenca.get('codigo_licenca'))}"
                 )
                 return licenca
             else:
                 logger.info(
-                    f"[ERRO] Fatores insuficientes ({fatores_conferidos}/3) para licença {licenca.get('codigo_licenca')}"
+                    f"[ERRO] Fatores insuficientes ({fatores_conferidos}/3) para licença {ofuscar_segredo(licenca.get('codigo_licenca'))}"
                 )
 
         logger.info("Nenhuma licença válida encontrada para autenticação automática")
@@ -1045,10 +1060,12 @@ def login():
             token_deriv_real=pat,
         )
 
+    licenca_log = ofuscar_segredo(codigo_licenca)
+    pat_log = ofuscar_segredo(pat)
     logger.info(
-        f"[LOGIN] TENTATIVA DE LOGIN - Código: {codigo_licenca}, Token PAT: {pat[:8]}..."
+        f"[LOGIN] TENTATIVA DE LOGIN - Código: {licenca_log}, Token PAT: {pat_log}"
         if pat
-        else f"[LOGIN] TENTATIVA DE LOGIN - Código: {codigo_licenca}, Sem PAT"
+        else f"[LOGIN] TENTATIVA DE LOGIN - Código: {licenca_log}, Sem PAT"
     )
 
     # Verifica se o código de licença foi fornecido
@@ -1285,12 +1302,18 @@ def verificar_acesso_admin():
 
     # Verificar licença autorizada
     codigo_licenca = session.get("codigo_licenca")
-    from config.config import Config
-    licencas_admin = getattr(Config, "ADMIN_LICENSES", ["DERIVBOT-82YM-E0VX"])
+    licencas_admin = Config.obter_admin_licenses()
 
-    if codigo_licenca not in licencas_admin:
+    if not licencas_admin:
         logger.warning(
-            f"Tentativa de acesso API admin não autorizado - Licença: {codigo_licenca}"
+            "[ADMIN] Acesso negado: nenhuma licença de administrador configurada no ambiente."
+        )
+        return False, "Acesso administrativo não configurado"
+
+    if not codigo_licenca or codigo_licenca not in licencas_admin:
+        licenca_ofuscada = ofuscar_segredo(codigo_licenca)
+        logger.warning(
+            f"Tentativa de acesso API admin não autorizado - Licença: {licenca_ofuscada}"
         )
         return False, "Acesso negado"
 
@@ -1717,7 +1740,7 @@ def public_generate_license():
         # Verificar se email foi enviado (informação já está na mensagem)
         email_enviado = "email enviado automaticamente" in mensagem.lower()
 
-        logger.info(f"Licença gerada via API: {codigo_licenca} para {email}")
+        logger.info(f"Licença gerada via API: {ofuscar_segredo(codigo_licenca)} para {email}")
 
         return jsonify(
             {

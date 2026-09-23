@@ -22,7 +22,15 @@ if os.path.exists(config_env):
     load_dotenv(config_env)
 
 
-class Config:
+class ConfigMeta(type):
+    """Metaclasse para expor propriedades dinâmicas no nível de classe de Config"""
+
+    @property
+    def ADMIN_LICENSES(cls) -> List[str]:
+        return cls.obter_admin_licenses()
+
+
+class Config(metaclass=ConfigMeta):
     # Versão do aplicativo
     VERSION = "2.0.0"
 
@@ -64,11 +72,36 @@ class Config:
     SESSION_TIMEOUT = 3600  # segundos
     PASSWORD_MIN_LENGTH = 8
     ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "")
-    ADMIN_LICENSES = [
-        lic.strip()
-        for lic in os.getenv("ADMIN_LICENSES", "DERIVBOT-82YM-E0VX").split(",")
-        if lic.strip()
-    ]
+
+    @classmethod
+    def obter_admin_licenses(cls) -> List[str]:
+        """
+        Obtém licenças administrativas exclusivamente de fontes seguras externas:
+        1. Variável de ambiente ADMIN_LICENSES (ex: 'LIC1,LIC2')
+        2. Arquivo local de configuração ignorado pelo Git (data/admin_config.json)
+        3. Fallback seguro: lista vazia [] (fail-closed, sem credenciais hardcoded)
+        """
+        env_val = os.getenv("ADMIN_LICENSES", "").strip()
+        if env_val:
+            return [lic.strip() for lic in env_val.split(",") if lic.strip()]
+
+        admin_cfg_path = os.path.join(cls.DATA_DIR, "admin_config.json")
+        if os.path.exists(admin_cfg_path):
+            try:
+                with open(admin_cfg_path, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+                    file_licenses = cfg.get("admin_licenses", [])
+                    if isinstance(file_licenses, list):
+                        return [str(l).strip() for l in file_licenses if str(l).strip()]
+            except Exception:
+                pass
+
+        return []
+
+    @property
+    def ADMIN_LICENSES(self) -> List[str]:
+        """Propriedade para instâncias de Config"""
+        return self.__class__.obter_admin_licenses()
 
     # Configurações de trading - DEMO POR PADRÃO (Issue #6)
     MODO_REAL_PADRAO = False  # Sempre inicia em DEMO por segurança

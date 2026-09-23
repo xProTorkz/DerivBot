@@ -489,8 +489,9 @@ class GeradorLicencasAdmin:
                 server.login(email_config["email_user"], email_config["email_pass"])
                 server.send_message(msg)
 
+            licenca_log = f"{codigo_licenca[:4]}***{codigo_licenca[-2:]}" if len(codigo_licenca) >= 6 else "***"
             logger.info(
-                f"Email enviado para {email_destino} - Licença: {codigo_licenca}"
+                f"Email enviado para {email_destino} - Licença: {licenca_log}"
             )
             return True, "Email enviado com sucesso"
 
