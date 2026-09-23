@@ -81,7 +81,7 @@ class TestOneSecondAssetsAndPersistence(unittest.TestCase):
         self.assertIn(sm.estado_atual, [MicroScalperState.AGUARDANDO_REVERSAO, MicroScalperState.SINAL_CONFIRMADO])
 
     def test_buy_request_schema_no_invalid_parameters(self):
-        """Garante que a requisição de compra não envia campos inválidos como underlying_symbol."""
+        """Garante que a requisição de compra envia proposta compatível com Deriv Options WS."""
         import json
         from unittest.mock import MagicMock
 
@@ -95,18 +95,45 @@ class TestOneSecondAssetsAndPersistence(unittest.TestCase):
         self.assertTrue(sucesso)
         self.assertTrue(motor.ws.send.called)
 
-        # Inspeciona o payload enviado
+        # Inspeciona o payload enviado (etapa 1: proposal)
         call_arg = motor.ws.send.call_args[0][0]
         payload = json.loads(call_arg)
-        self.assertIn("buy", payload)
-        self.assertIn("parameters", payload)
-        params = payload["parameters"]
-        self.assertNotIn("underlying_symbol", params, "underlying_symbol é inválido na Deriv API")
-        self.assertIn("symbol", params)
-        self.assertIn("amount", params)
-        self.assertIn("duration", params)
-        self.assertIn("duration_unit", params)
-        self.assertEqual(params["duration_unit"], "s")
+        self.assertIn("proposal", payload)
+        self.assertEqual(payload["proposal"], 1)
+        self.assertNotIn("underlying_symbol", payload, "underlying_symbol é inválido na Deriv API")
+        self.assertIn("symbol", payload)
+        self.assertIn("amount", payload)
+        self.assertIn("duration", payload)
+        self.assertIn("duration_unit", payload)
+        self.assertEqual(payload["duration_unit"], "s")
+        self.assertIn("passthrough", payload)
+        self.assertEqual(payload["passthrough"]["tipo_acao"], "executar_compra")
+
+    def test_proposal_response_triggers_buy(self):
+        """Garante que o recebimento de proposal dispara a compra imediata com proposal_id."""
+        import json
+        from unittest.mock import MagicMock
+
+        motor = Motor()
+        motor.ws = MagicMock()
+        motor.conectado = True
+        motor.modo_real = False
+
+        proposal_msg = json.dumps({
+            "proposal": {"id": "prop_test_12345", "ask_price": 0.35},
+            "passthrough": {
+                "tipo_acao": "executar_compra",
+                "simbolo": "1HZ10V",
+                "contract_type": "CALL",
+                "valor_max": 0.35,
+            },
+        })
+        motor._on_message(None, proposal_msg)
+
+        self.assertTrue(motor.ws.send.called)
+        buy_call = json.loads(motor.ws.send.call_args[0][0])
+        self.assertEqual(buy_call.get("buy"), "prop_test_12345")
+        self.assertEqual(buy_call.get("price"), 0.35)
 
     def test_deriv_error_recovers_comprando_state(self):
         """Verifica se erro retornado pela Deriv API recupera a máquina de estados de COMPRANDO para NORMAL."""

@@ -1177,15 +1177,47 @@ class Motor:
                 if state_machine_micro_scalper.estado_atual == MicroScalperState.COMPRANDO:
                     state_machine_micro_scalper.transitar(MicroScalperState.NORMAL, f"Erro Deriv: {err_code}")
 
+            # Processamento de resposta de proposta (fluxo de compra em 2 etapas para Deriv Options WS)
+            if "proposal" in data and data["proposal"]:
+                prop = data["proposal"]
+                proposal_id = prop.get("id")
+                ask_price = float(prop.get("ask_price", 0.0))
+                passthrough = data.get("passthrough") or {}
+
+                if passthrough.get("tipo_acao") == "executar_compra" and proposal_id:
+                    simbolo_prop = passthrough.get("simbolo", self.par_atual)
+                    self.logger.info(
+                        f"🎯 Proposta recebida ({proposal_id}) para {simbolo_prop} | "
+                        f"Ask: ${ask_price:.2f}. Executando compra na Deriv..."
+                    )
+                    preco_max = float(passthrough.get("valor_max", ask_price or 0.35))
+                    preco_compra = ask_price if (ask_price > 0 and ask_price <= preco_max * 1.10) else preco_max
+                    buy_req = {
+                        "buy": proposal_id,
+                        "price": preco_compra,
+                        "passthrough": passthrough,
+                    }
+                    self.ws.send(json.dumps(buy_req))
+
             # Processamento de abertura de contratos
             if "buy" in data and data["buy"]:
                 contract_id = data["buy"]["contract_id"]
 
                 transaction_id = None
-                if "passthrough" in data and data["passthrough"]:
-                    transaction_id = data["passthrough"].get("transaction_id")
+                passthrough = data.get("passthrough") or {}
+                if passthrough:
+                    transaction_id = passthrough.get("transaction_id")
 
-                symbol = data.get("echo_req", {}).get("parameters", {}).get("symbol", self.par_atual)
+                symbol = (
+                    passthrough.get("simbolo")
+                    or data.get("echo_req", {}).get("parameters", {}).get("symbol")
+                    or self.par_atual
+                )
+                tipo_contrato = (
+                    passthrough.get("contract_type")
+                    or data.get("echo_req", {}).get("parameters", {}).get("contract_type")
+                    or ""
+                )
                 with self.lock:
                     buy_price = float(data["buy"].get("buy_price", 0.35))
                     self.operacoes_abertas[contract_id] = {
@@ -1194,9 +1226,7 @@ class Motor:
                         "preco_entrada": buy_price,
                         "valor": buy_price,
                         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "tipo": data.get("echo_req", {})
-                        .get("parameters", {})
-                        .get("contract_type", ""),
+                        "tipo": tipo_contrato,
                         "transaction_id": transaction_id,
                         "timestamp_abertura": time.time(),
                         "positive_updates": 0,
@@ -2055,42 +2085,48 @@ class Motor:
                 # Prepara o request com ID de transação para rastreabilidade
                 transaction_id = f"turbo_{int(time.time())}"
 
-                # Configura requisição para contrato turbo de 15 segundos
+                # Configura requisição de proposta (etapa 1 do fluxo Deriv Options WS)
                 if ativo_config.get("tipo_contrato") == "turbo":
-                    # Contrato turbo de 15 segundos (sem campos ilegais na Deriv API)
+                    # Proposta para contrato turbo de 15 segundos
                     req = {
-                        "buy": 1,
-                        "parameters": {
+                        "proposal": 1,
+                        "amount": valor,
+                        "basis": "stake",
+                        "contract_type": contract_type,
+                        "currency": "USD",
+                        "duration": 15,  # 15 segundos
+                        "duration_unit": "s",  # segundos
+                        "symbol": simbolo,
+                        "passthrough": {
+                            "transaction_id": transaction_id,
+                            "tipo_acao": "executar_compra",
+                            "simbolo": simbolo,
                             "contract_type": contract_type,
-                            "symbol": simbolo,
-                            "amount": valor,
-                            "basis": "stake",
-                            "duration": 15,  # 15 segundos
-                            "duration_unit": "s",  # segundos
-                            "currency": "USD",
+                            "valor_max": valor,
                         },
-                        "price": valor,
-                        "passthrough": {"transaction_id": transaction_id},
                     }
                 else:
                     # Fallback para multiplier se turbo não disponível
                     multipliers_disponiveis = ativo_config.get("multipliers", [1, 2, 3])
-                    multiplier = min(multipliers_disponiveis)  # Usa o menor multiplier
+                    multiplier = min(multipliers_disponiveis)
 
                     req = {
-                        "buy": 1,
-                        "parameters": {
-                            "contract_type": contract_type.replace(
-                                "CALL", "MULTUP"
-                            ).replace("PUT", "MULTDOWN"),
-                            "symbol": simbolo,
-                            "amount": valor,
-                            "basis": "stake",
-                            "multiplier": multiplier,
-                            "currency": "USD",
+                        "proposal": 1,
+                        "amount": valor,
+                        "basis": "stake",
+                        "contract_type": contract_type.replace(
+                            "CALL", "MULTUP"
+                        ).replace("PUT", "MULTDOWN"),
+                        "symbol": simbolo,
+                        "multiplier": multiplier,
+                        "currency": "USD",
+                        "passthrough": {
+                            "transaction_id": transaction_id,
+                            "tipo_acao": "executar_compra",
+                            "simbolo": simbolo,
+                            "contract_type": contract_type,
+                            "valor_max": valor,
                         },
-                        "price": valor,
-                        "passthrough": {"transaction_id": transaction_id},
                     }
 
                 # Log da operação
