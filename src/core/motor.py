@@ -38,8 +38,10 @@ except ImportError:
 
 try:
     from src.config import config
+    from src.config.config import obter_limite_posicoes, normalizar_modo_operacao
 except ImportError:
     from config import config
+    from config.config import obter_limite_posicoes, normalizar_modo_operacao
 
 try:
     from src.core.catalogador import Catalogador, ATIVOS_TURBO_INTEGRADOS
@@ -50,12 +52,14 @@ try:
     from src.core.inteligencia import (
         analisar_micro_scalping,
         state_machine_micro_scalper,
+        obter_state_machine,
         MicroScalperState,
     )
 except ImportError:
     from core.inteligencia import (
         analisar_micro_scalping,
         state_machine_micro_scalper,
+        obter_state_machine,
         MicroScalperState,
     )
 
@@ -120,6 +124,13 @@ class SistemaStops:
                 "stop_loss_global_percent": 5.0,
                 "take_profit_global_percent": 10.0,
                 "trailing_stop_enabled": False,
+            },
+            "intermediario": {
+                "stop_loss_percent": 2.0,
+                "take_profit_percent": 4.0,
+                "stop_loss_global_percent": 8.0,
+                "take_profit_global_percent": 15.0,
+                "trailing_stop_enabled": True,
             },
             "conservador": {
                 "stop_loss_percent": 2.0,
@@ -352,6 +363,14 @@ class GestaoRiscos:
                 "max_drawdown": 3.0,
                 "max_sequencia_perdas": 3,
                 "intervalo_min_operacoes": 5.0,
+            },
+            "intermediario": {
+                "max_operacoes_simultaneas": 5,
+                "max_valor_operacao": 50.0,
+                "max_risco_diario": 8.0,
+                "max_drawdown": 5.0,
+                "max_sequencia_perdas": 4,
+                "intervalo_min_operacoes": 3.0,
             },
             "conservador": {
                 "max_operacoes_simultaneas": 5,
@@ -723,6 +742,12 @@ class Motor:
         self.operacoes_ativas_count = 0
         self.protecao_ativa = False
 
+        # Controle de parada de sessão (SESSION STOP - Issue #20)
+        self.session_stopped = False
+        self.session_stop_reason = None
+        self.cooldowns_por_ativo = {}
+        self.lucro_acumulado_sessao = 0.0
+
         # Configura stops baseado no modo inicial
         self.sistema_stops.configurar_stops_por_modo(self.modo_operacao)
         self.sistema_stops.saldo_inicial = self.saldo
@@ -783,27 +808,46 @@ class Motor:
         self.req_id_counter = getattr(self, "req_id_counter", 1) + 1
         return int(time.time() * 1000) % 100000000 + self.req_id_counter
 
-    def validar_gateway_risco(self, valor_ordem: float = 0.35) -> Tuple[bool, str]:
+    def validar_gateway_risco(self, valor_ordem: float = 0.35, ativo: Optional[str] = None) -> Tuple[bool, str]:
         """
-        GATEWAY DE RISCO INVIOLÁVEL (Issues #2, #3, #4).
+        GATEWAY DE RISCO INVIOLÁVEL (Issues #2, #3, #4, #20).
         Bloqueia qualquer execução se:
-        - Já existir 1 operação aberta (MAX_OPEN_POSITIONS = 1)
-        - Em período de cooldown pós-operação
+        - Sessão parada (SESSION STOP: meta atingida, perda realizada, erro ou kill switch)
+        - Limite de concorrência por perfil atingido (Iniciante 3, Intermediário 5, Agressivo 10)
+        - Ativo especificado em período de cooldown pós-operação (ou cooldown global)
         - Cotação / tick obsoleto (stale > 2.5s)
         - Saldo insuficiente
         - Meta diária atingida
         """
-        # 1. Posições abertas (MAX_OPEN_POSITIONS = 1)
-        if len(self.operacoes_abertas) >= 1:
-            return False, "Gateway Risco: Máximo de 1 operação simultânea ativa atingido"
+        # 0. Sessão parada
+        if getattr(self, "session_stopped", False):
+            motivo_stop = getattr(self, "session_stop_reason", "Sessão finalizada")
+            return False, f"Gateway Risco: Sessão parada ({motivo_stop})"
 
-        # 2. Cooldown pós-operação
+        # 1. Posições abertas (Limite seletivo 3 / 5 / 10 por perfil)
+        limite_max = obter_limite_posicoes(self.modo_operacao)
+        if len(self.operacoes_abertas) >= limite_max:
+            return False, f"Gateway Risco: Máximo de {limite_max} operações simultâneas atingido para o perfil '{self.modo_operacao}' ({len(self.operacoes_abertas)}/{limite_max})"
+
+        # 2. Cooldown pós-operação por ativo
         cfg_micro = getattr(config, "MICRO_SCALPER_CONFIG", {})
         cooldown_s = cfg_micro.get("cooldown", {}).get("tempo_minimo_segundos", 25)
-        tempo_desde_fechamento = time.time() - getattr(self, "ultimo_fechamento_ts", 0.0)
-        if getattr(self, "ultimo_fechamento_ts", 0.0) > 0 and tempo_desde_fechamento < cooldown_s:
-            restante = cooldown_s - tempo_desde_fechamento
-            return False, f"Gateway Risco: Em cooldown pós-operação ({restante:.1f}s restantes)"
+
+        simbolo = (ativo or self.par_atual).upper().strip() if (ativo or self.par_atual) else None
+        cooldowns = getattr(self, "cooldowns_por_ativo", {})
+        cooldown_ativo_ts = cooldowns.get(simbolo, 0.0) if simbolo else 0.0
+
+        if cooldown_ativo_ts > 0:
+            tempo_desde = time.time() - cooldown_ativo_ts
+            if tempo_desde < cooldown_s:
+                restante = cooldown_s - tempo_desde
+                return False, f"Gateway Risco: Ativo {simbolo} em cooldown pós-operação ({restante:.1f}s restantes)"
+        elif getattr(self, "ultimo_fechamento_ts", 0.0) > 0 and not ativo:
+            # Fallback para checagem global quando nenhum ativo específico foi fornecido
+            tempo_desde_fechamento = time.time() - self.ultimo_fechamento_ts
+            if tempo_desde_fechamento < cooldown_s:
+                restante = cooldown_s - tempo_desde_fechamento
+                return False, f"Gateway Risco: Em cooldown pós-operação ({restante:.1f}s restantes)"
 
         # 3. Frescor dos ticks (stale data)
         max_stale = cfg_micro.get("gateway_risco", {}).get("tempo_max_tick_stale_s", 2.5)
@@ -818,7 +862,7 @@ class Motor:
 
         # 5. Meta diária
         lucro_atual = self.obter_saldo() - self.saldo_inicial
-        if self.meta_diaria > 0 and lucro_atual >= self.meta_diaria:
+        if self.meta_diaria > 0 and (lucro_atual >= self.meta_diaria or getattr(self, "lucro_acumulado_sessao", 0.0) >= self.meta_diaria):
             return False, f"Gateway Risco: Meta diária de ${self.meta_diaria:.2f} já atingida"
 
         return True, "Aprovado pelo Gateway de Risco"
@@ -1077,9 +1121,11 @@ class Motor:
                 if "passthrough" in data and data["passthrough"]:
                     transaction_id = data["passthrough"].get("transaction_id")
 
+                symbol = data.get("echo_req", {}).get("parameters", {}).get("symbol", self.par_atual)
                 with self.lock:
                     self.operacoes_abertas[contract_id] = {
                         "id": contract_id,
+                        "ativo": symbol,
                         "preco_entrada": data["buy"]["buy_price"],
                         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         "tipo": data.get("echo_req", {})
@@ -1098,7 +1144,7 @@ class Motor:
                             self.transacoes_pendentes[transaction_id]["contract_id"] = contract_id
 
                 self.logger.info(
-                    f"✅ Operação {contract_id} confirmada na Deriv. Subscrevendo proposal_open_contract..."
+                    f"✅ Operação {contract_id} ({symbol}) confirmada na Deriv. Subscrevendo proposal_open_contract..."
                 )
 
                 # Subscreve para atualizações contínuas em tempo real
@@ -1109,9 +1155,16 @@ class Motor:
                     "req_id": self._proximo_req_id(),
                 }
                 self.ws.send(json.dumps(sub_req))
+                
+                # Atualiza state machine específica do ativo e global
+                sm_ativo = obter_state_machine(symbol)
+                sm_ativo.transitar(
+                    MicroScalperState.POSICAO_ABERTA,
+                    f"Contrato {contract_id} ({symbol}) aberto na Deriv",
+                )
                 state_machine_micro_scalper.transitar(
                     MicroScalperState.POSICAO_ABERTA,
-                    f"Contrato {contract_id} aberto na Deriv",
+                    f"Contrato {contract_id} ({symbol}) aberto na Deriv",
                 )
 
                 # Adiciona stops para a operação
@@ -1122,7 +1175,7 @@ class Motor:
                     .get("contract_type", "")
                 )
                 self.sistema_stops.adicionar_stop_operacao(
-                    contract_id, valor_entrada, tipo_operacao, self.par_atual
+                    contract_id, valor_entrada, tipo_operacao, symbol
                 )
 
             # Processamento de atualização/fechamento de contratos
@@ -1200,9 +1253,10 @@ class Motor:
                     elif is_sold == 1:
                         lucro = float(contract.get("profit", 0.0))
                         motivo_saida = operacao.get("motivo_saida", "CONTRATO_EXPIRADO")
+                        ativo_op = operacao.get("ativo", self.par_atual)
 
                         self.logger.info(
-                            f"🏁 Operação {contract_id} finalizada com lucro: ${lucro:+.4f} | Motivo: {motivo_saida}"
+                            f"🏁 Operação {contract_id} ({ativo_op}) finalizada com lucro: ${lucro:+.4f} | Motivo: {motivo_saida}"
                         )
 
                         # Envia forget para encerrar a stream do contrato
@@ -1213,8 +1267,18 @@ class Motor:
                             except Exception as e:
                                 self.logger.debug(f"Erro ao enviar forget para {sub_id}: {e}")
 
-                        # Registra na máquina de estados e ativa cooldown
+                        # Registra na máquina de estados do ativo e global, e ativa cooldown do ativo
+                        if not hasattr(self, "cooldowns_por_ativo"):
+                            self.cooldowns_por_ativo = {}
+                        self.cooldowns_por_ativo[ativo_op] = time.time()
                         self.ultimo_fechamento_ts = time.time()
+
+                        sm_ativo = obter_state_machine(ativo_op)
+                        sm_ativo.registrar_resultado_operacao(lucro, motivo_saida)
+                        sm_ativo.transitar(
+                            MicroScalperState.COOLDOWN,
+                            f"Pós-operação {ativo_op} (Resultado: ${lucro:+.2f})",
+                        )
                         state_machine_micro_scalper.registrar_resultado_operacao(lucro, motivo_saida)
                         state_machine_micro_scalper.transitar(
                             MicroScalperState.COOLDOWN,
@@ -1225,6 +1289,7 @@ class Motor:
                             preco_entrada = operacao.get("preco_entrada", 0.0)
                             resultado = {
                                 "id": contract_id,
+                                "ativo": ativo_op,
                                 "preco_entrada": preco_entrada,
                                 "preco_saida": contract.get("sell_price", 0.0),
                                 "lucro": lucro,
@@ -1252,16 +1317,37 @@ class Motor:
 
                         resultado_texto = "GANHO" if lucro >= 0 else "PERDA"
                         self.logger.info(
-                            f"Operação {contract_id} fechada com {resultado_texto}: ${lucro:.2f} (Saldo atual: ${self.saldo:.2f})"
+                            f"Operação {contract_id} ({ativo_op}) fechada com {resultado_texto}: ${lucro:.2f} (Saldo atual: ${self.saldo:.2f})"
                         )
 
-                        # Verifica meta
-                        lucro_total = self.obter_saldo() - self.saldo_inicial
-                        take_profit = getattr(config, "TAKE_PROFIT", self.meta_diaria)
-                        if self.meta_diaria > 0 and lucro_total >= take_profit:
-                            self.logger.info("🎯 Meta diária atingida!")
-                            self.meta_atingida = True
-                            self.rodando = False
+                        # ==============================================================
+                        # SESSION STOP: PARADA DE SESSÃO IMEDIATA (Issue #20)
+                        # - PRIMEIRA PERDA REALIZADA (lucro <= 0)
+                        # - META ATINGIDA (lucro_total >= meta)
+                        # ==============================================================
+                        if lucro <= 0:
+                            self.session_stopped = True
+                            self.session_stop_reason = (
+                                f"PRIMEIRA_PERDA_REALIZADA: Operação {contract_id} ({ativo_op}) fechou com perda (${lucro:+.4f})"
+                            )
+                            self.logger.warning(
+                                f"🛑 [SESSION STOP] {self.session_stop_reason}. Novas entradas bloqueadas! "
+                                f"Contratos abertos restantes ({len(self.operacoes_abertas)}) continuarão sendo monitorados até liquidação."
+                            )
+                        else:
+                            self.lucro_acumulado_sessao = getattr(self, "lucro_acumulado_sessao", 0.0) + lucro
+                            lucro_total = self.obter_saldo() - self.saldo_inicial
+                            take_profit = getattr(config, "TAKE_PROFIT", self.meta_diaria)
+                            if self.meta_diaria > 0 and (lucro_total >= take_profit or self.lucro_acumulado_sessao >= self.meta_diaria):
+                                self.session_stopped = True
+                                self.session_stop_reason = (
+                                    f"META_ATINGIDA: Lucro acumulado ${lucro_total:+.2f} atingiu a meta de ${self.meta_diaria:.2f}"
+                                )
+                                self.meta_atingida = True
+                                self.logger.info(
+                                    f"🎯 [SESSION STOP] {self.session_stop_reason}. Novas entradas bloqueadas! "
+                                    f"Contratos abertos restantes ({len(self.operacoes_abertas)}) continuarão sendo monitorados até liquidação."
+                                )
 
             # Captura erros retornados pela API
             if "error" in data:
@@ -1377,22 +1463,41 @@ class Motor:
         self, ativo, preco_atual, modo, meta, lucro_atual, operacoes_ativas
     ):
         """
-        ANÁLISE CANÔNICA DO MICRO-SCALPER SELETIVO (Issues #2, #3, #4).
+        ANÁLISE CANÔNICA DO MICRO-SCALPER SELETIVO (Issues #2, #3, #4, #20).
         Zero random: 100% determinístico baseado em extremos estatísticos,
         confirmação de reversão e score de confluência >= 85.
+        Suporta multi-ativos e concorrência 3 / 5 / 10 posições por perfil.
         """
-        ativo = "1HZ75V"
-        if self.par_atual != "1HZ75V":
-            self.par_atual = "1HZ75V"
+        ativo_alvo = ativo or self.par_atual
 
-        # 1. Checagem prévia de operações ativas (MAX_OPEN_POSITIONS = 1)
-        if operacoes_ativas >= 1:
-            motivo = "Máximo de 1 operação simultânea ativa"
+        # 0. Checagem de parada de sessão (SESSION STOP)
+        if getattr(self, "session_stopped", False):
+            motivo = f"Sessão parada ({getattr(self, 'session_stop_reason', 'SESSION_STOP')})"
             self.ultimo_motivo_recusa = motivo
             return {
                 "executada": False,
                 "sinal": False,
                 "tipo": None,
+                "ativo": ativo_alvo,
+                "razao": motivo,
+                "motivo_recusa": motivo,
+                "confianca": 0.0,
+                "score": 0.0,
+                "estado": MicroScalperState.NORMAL,
+                "lucro_atual": lucro_atual,
+                "operacoes_ativas": operacoes_ativas,
+            }
+
+        # 1. Checagem prévia de operações ativas (Limite dinâmico 3/5/10 por perfil)
+        limite_pos = obter_limite_posicoes(modo)
+        if operacoes_ativas >= limite_pos:
+            motivo = f"Máximo de {limite_pos} operações simultâneas atingido para o perfil '{modo}' ({operacoes_ativas}/{limite_pos})"
+            self.ultimo_motivo_recusa = motivo
+            return {
+                "executada": False,
+                "sinal": False,
+                "tipo": None,
+                "ativo": ativo_alvo,
                 "razao": motivo,
                 "motivo_recusa": motivo,
                 "confianca": 0.0,
@@ -1410,6 +1515,7 @@ class Motor:
                 "executada": False,
                 "sinal": False,
                 "tipo": None,
+                "ativo": ativo_alvo,
                 "razao": motivo,
                 "motivo_recusa": motivo,
                 "confianca": 0.0,
@@ -1419,22 +1525,26 @@ class Motor:
                 "operacoes_ativas": operacoes_ativas,
             }
 
-        # 3. Snapshot de mercado e ticks reais
+        # 3. Snapshot de mercado e ticks reais para o ativo alvo
         snapshot = {}
         ultimos_ticks = []
         if hasattr(self.catalogador, "obter_snapshot_mercado"):
-            snapshot = self.catalogador.obter_snapshot_mercado(self.par_atual)
+            snapshot = self.catalogador.obter_snapshot_mercado(ativo_alvo)
         if hasattr(self.catalogador, "obter_ultimos_ticks"):
-            ultimos_ticks = self.catalogador.obter_ultimos_ticks(60)
+            try:
+                ultimos_ticks = self.catalogador.obter_ultimos_ticks(60, ativo=ativo_alvo)
+            except TypeError:
+                ultimos_ticks = self.catalogador.obter_ultimos_ticks(60)
 
         # Se dados insuficientes, aguarda sem forçar
         if not snapshot.get("valido", False) or len(ultimos_ticks) < 15:
-            motivo = f"Aguardando ticks para análise estatística ({len(ultimos_ticks)}/15 ticks recebidos)"
+            motivo = f"Aguardando ticks para análise estatística de {ativo_alvo} ({len(ultimos_ticks)}/15 ticks recebidos)"
             self.ultimo_motivo_recusa = motivo
             return {
                 "executada": False,
                 "sinal": False,
                 "tipo": None,
+                "ativo": ativo_alvo,
                 "razao": motivo,
                 "motivo_recusa": motivo,
                 "confianca": 0.0,
@@ -1444,7 +1554,7 @@ class Motor:
                 "operacoes_ativas": operacoes_ativas,
             }
 
-        # 4. Avaliação seletiva de micro-scalping
+        # 4. Avaliação seletiva de micro-scalping determinística
         resultado_intel = analisar_micro_scalping(
             dados_ou_snapshot=snapshot,
             meta=meta,
@@ -1452,6 +1562,7 @@ class Motor:
             modo=modo,
             operacoes_ativas=operacoes_ativas,
             ultimos_ticks=ultimos_ticks,
+            ativo=ativo_alvo,
         )
 
         sinal_direcao = resultado_intel.get("sinal")
@@ -1464,9 +1575,9 @@ class Motor:
         self.ultimo_score = score
         self.ultimo_motivo_recusa = motivo_recusa
 
-        # Volume de entrada
+        # Volume de entrada escalonado por perfil
         volume = 0.35
-        if modo == "conservador":
+        if modo in ["conservador", "intermediario"]:
             volume = 0.50
         elif modo == "agressivo":
             volume = 1.00
@@ -1485,6 +1596,7 @@ class Motor:
                 "executada": False,
                 "sinal": False,
                 "tipo": None,
+                "ativo": ativo_alvo,
                 "razao": razao,
                 "motivo_recusa": motivo_recusa,
                 "confianca": confianca,
@@ -1499,7 +1611,7 @@ class Motor:
             "executada": True,
             "sinal": True,
             "tipo": sinal_direcao,
-            "ativo": self.par_atual,
+            "ativo": ativo_alvo,
             "volume": volume,
             "duracao": 15,
             "confianca": confianca,
@@ -1517,29 +1629,86 @@ class Motor:
         self.callback_tick = callback
 
     def executar_operacao_inteligente(self, _: str = "default") -> dict:
-        """Executa análise seletiva e gerencia entrada através do gateway de risco."""
+        """
+        Executa análise seletiva determinística através do pool de multi-ativos turbo integrados
+        e gerencia entrada através do gateway de risco inviolável.
+        """
         try:
             lucro_atual = self.obter_saldo() - self.saldo_inicial
             self.operacoes_ativas_count = len(self.operacoes_abertas)
 
-            # Análise determinística do micro-scalper
-            analise = self._analisar_entrada_turbo(
-                ativo=self.par_atual,
-                preco_atual=(
-                    self.ultima_cotacao
-                    if hasattr(self, "ultima_cotacao") and self.ultima_cotacao
-                    else 100.0
-                ),
-                modo=self.modo_operacao,
-                meta=self.meta_diaria,
-                lucro_atual=lucro_atual,
-                operacoes_ativas=self.operacoes_ativas_count,
-            )
+            # 0. Verificação imediata de SESSION STOP
+            if getattr(self, "session_stopped", False):
+                motivo = f"Sessão parada ({getattr(self, 'session_stop_reason', 'SESSION_STOP')})"
+                return {
+                    "executada": False,
+                    "razao": motivo,
+                    "motivo_recusa": motivo,
+                    "confianca": 0.0,
+                    "score": 0.0,
+                    "estado": MicroScalperState.NORMAL,
+                    "lucro_atual": lucro_atual,
+                    "operacoes_ativas": self.operacoes_ativas_count,
+                    "session_stopped": True,
+                }
 
-            # Se não há sinal, retorna a análise para telemetria/log
+            # 1. Scanner multi-ativo sobre ATIVOS_TURBO_INTEGRADOS
+            ativos_candidatos = list(ATIVOS_TURBO_INTEGRADOS.keys())
+            if self.par_atual in ativos_candidatos:
+                ativos_candidatos.remove(self.par_atual)
+                ativos_candidatos.insert(0, self.par_atual)
+
+            analise = None
+            melhor_analise_sem_sinal = None
+
+            for cand_ativo in ativos_candidatos:
+                # Se ativo específico estiver em cooldown, pula para próximo
+                cooldown_cand_ts = getattr(self, "cooldowns_por_ativo", {}).get(cand_ativo, 0.0)
+                cfg_micro = getattr(config, "MICRO_SCALPER_CONFIG", {})
+                cooldown_s = cfg_micro.get("cooldown", {}).get("tempo_minimo_segundos", 25)
+                if cooldown_cand_ts > 0 and (time.time() - cooldown_cand_ts) < cooldown_s:
+                    continue
+
+                analise_cand = self._analisar_entrada_turbo(
+                    ativo=cand_ativo,
+                    preco_atual=(
+                        self.ultima_cotacao
+                        if hasattr(self, "ultima_cotacao") and self.ultima_cotacao
+                        else 100.0
+                    ),
+                    modo=self.modo_operacao,
+                    meta=self.meta_diaria,
+                    lucro_atual=lucro_atual,
+                    operacoes_ativas=self.operacoes_ativas_count,
+                )
+
+                if analise_cand.get("sinal", False):
+                    analise = analise_cand
+                    break
+                else:
+                    if melhor_analise_sem_sinal is None or analise_cand.get("score", 0.0) > melhor_analise_sem_sinal.get("score", 0.0):
+                        melhor_analise_sem_sinal = analise_cand
+
+            if not analise:
+                analise = melhor_analise_sem_sinal or {
+                    "executada": False,
+                    "sinal": False,
+                    "tipo": None,
+                    "ativo": self.par_atual,
+                    "razao": "Nenhum sinal confirmado no pool turbo",
+                    "motivo_recusa": "Nenhum sinal confirmado",
+                    "confianca": 0.0,
+                    "score": 0.0,
+                    "estado": MicroScalperState.NORMAL,
+                    "lucro_atual": lucro_atual,
+                    "operacoes_ativas": self.operacoes_ativas_count,
+                }
+
+            # Se não há sinal em nenhum ativo, retorna a telemetria
             if not analise.get("sinal", False):
                 return {
                     "executada": False,
+                    "ativo": analise.get("ativo", self.par_atual),
                     "razao": analise.get("razao", "Sem sinal"),
                     "motivo_recusa": analise.get("motivo_recusa", "Sem sinal"),
                     "confianca": analise.get("confianca", 0.0),
@@ -1549,17 +1718,21 @@ class Motor:
                     "operacoes_ativas": self.operacoes_ativas_count,
                 }
 
-            # Sinal aprovado com confluência >= 85!
+            # Sinal aprovado com confluência determinística >= 85!
             tipo_operacao = analise.get("tipo", "CALL")
             valor_entrada = analise.get("volume", 0.35)
+            ativo_sinal = analise.get("ativo", self.par_atual)
 
-            # GATEWAY DE RISCO INVIOLÁVEL: validação final pré-ordem
-            valido_risco, motivo_risco = self.validar_gateway_risco(valor_entrada)
+            # GATEWAY DE RISCO INVIOLÁVEL: validação final pré-ordem para o ativo do sinal
+            valido_risco, motivo_risco = self.validar_gateway_risco(valor_entrada, ativo=ativo_sinal)
             if not valido_risco:
-                self.logger.warning(f"🚫 Ordem bloqueada pelo gateway de risco: {motivo_risco}")
+                self.logger.warning(f"🚫 Ordem bloqueada pelo gateway de risco ({ativo_sinal}): {motivo_risco}")
+                sm = obter_state_machine(ativo_sinal)
+                sm.transitar(MicroScalperState.NORMAL, motivo_risco)
                 state_machine_micro_scalper.transitar(MicroScalperState.NORMAL, motivo_risco)
                 return {
                     "executada": False,
+                    "ativo": ativo_sinal,
                     "razao": motivo_risco,
                     "motivo_recusa": motivo_risco,
                     "confianca": analise.get("confianca", 0.0),
@@ -1570,20 +1743,26 @@ class Motor:
                 }
 
             # Envia ordem para a Deriv API
+            sm = obter_state_machine(ativo_sinal)
+            sm.transitar(
+                MicroScalperState.COMPRANDO,
+                f"Enviando {tipo_operacao} de ${valor_entrada:.2f} para {ativo_sinal}",
+            )
             state_machine_micro_scalper.transitar(
                 MicroScalperState.COMPRANDO,
-                f"Enviando {tipo_operacao} de ${valor_entrada:.2f}",
+                f"Enviando {tipo_operacao} de ${valor_entrada:.2f} para {ativo_sinal}",
             )
-            sucesso = self.comprar(tipo_operacao, valor_entrada)
+            sucesso = self.comprar(tipo_operacao, valor_entrada, ativo=ativo_sinal)
 
             if sucesso:
                 self.logger.info(
-                    f"🚀 ENTRADA EXECUTADA! {tipo_operacao} - ${valor_entrada:.2f} - "
+                    f"🚀 ENTRADA EXECUTADA! {tipo_operacao} em {ativo_sinal} - ${valor_entrada:.2f} - "
                     f"Score: {analise.get('score', 0.0):.1f} - {analise.get('razao')}"
                 )
                 return {
                     "executada": True,
                     "tipo": tipo_operacao,
+                    "ativo": ativo_sinal,
                     "valor": valor_entrada,
                     "confianca": analise.get("confianca", 0.0),
                     "score": analise.get("score", 0.0),
@@ -1594,9 +1773,11 @@ class Motor:
                     "operacoes_ativas": self.operacoes_ativas_count + 1,
                 }
             else:
+                sm.transitar(MicroScalperState.NORMAL, "Falha na API ao comprar")
                 state_machine_micro_scalper.transitar(MicroScalperState.NORMAL, "Falha na API ao comprar")
                 return {
                     "executada": False,
+                    "ativo": ativo_sinal,
                     "razao": "Falha ao enviar ordem para a Deriv API",
                     "motivo_recusa": "Falha de comunicação WebSocket / API",
                     "confianca": analise.get("confianca", 0.0),
@@ -1713,20 +1894,44 @@ class Motor:
         except Exception as e:
             self.logger.error(f"Erro ao registrar resultado da operação: {e}")
 
-    def comprar(self, tipo: str, valor: float) -> bool:
-        """ESTRATÉGIA TURBO - Envia ordem de compra para contratos de 15 segundos."""
+    def comprar(self, tipo: str, valor: float, ativo: Optional[str] = None) -> bool:
+        """
+        ESTRATÉGIA TURBO - Envia ordem de compra para contratos de 15 segundos.
+        Proteção Estrita:
+        - Bloqueio total em conta REAL (SHADOW/DEMO ONLY)
+        - Bloqueio em caso de parada de sessão (SESSION STOP)
+        - Suporte a múltiplos ativos integrados
+        """
         try:
+            # Trava estrita de segurança para conta REAL
+            if getattr(self, "modo_real", False):
+                self.logger.error(
+                    "🛑 [SAFETY LOCK] Execução em conta REAL bloqueada nesta versão "
+                    "(SHADOW/DEMO ONLY: REAL_ORDER_SENT = NO, REAL_ACCOUNT_EXECUTION = BLOCKED). Nenhuma ordem enviada."
+                )
+                return False
+
+            # Trava estrita de SESSION STOP
+            if getattr(self, "session_stopped", False):
+                self.logger.warning(
+                    f"🛑 [SESSION STOP] Nova compra bloqueada: {getattr(self, 'session_stop_reason', 'Sessão encerrada')}"
+                )
+                return False
+
             with self.lock:
                 if not self.ws or not self.conectado:
                     self.logger.error("Não conectado à API. Tentando reconectar...")
                     self._tentar_reconectar()
                     return False
 
+                # Obtém símbolo alvo
+                simbolo = (ativo or self.par_atual).upper().strip()
+
                 # Obtém configurações da estratégia turbo integrada
-                ativo_config = ATIVOS_TURBO_INTEGRADOS.get(self.par_atual)
+                ativo_config = ATIVOS_TURBO_INTEGRADOS.get(simbolo)
                 if not ativo_config:
                     self.logger.error(
-                        f"Ativo {self.par_atual} não configurado para estratégia turbo"
+                        f"Ativo {simbolo} não configurado para estratégia turbo"
                     )
                     return False
 
@@ -1734,7 +1939,7 @@ class Motor:
                 min_stake = ativo_config.get("min_stake", 0.35)
                 if valor < min_stake:
                     self.logger.error(
-                        f"Valor da ordem (${valor:.2f}) abaixo do mínimo permitido para {self.par_atual} (${min_stake})"
+                        f"Valor da ordem (${valor:.2f}) abaixo do mínimo permitido para {simbolo} (${min_stake})"
                     )
                     return False
 
@@ -1759,8 +1964,8 @@ class Motor:
                         "buy": 1,
                         "parameters": {
                             "contract_type": contract_type,
-                            "symbol": self.par_atual,
-                            "underlying_symbol": self.par_atual,
+                            "symbol": simbolo,
+                            "underlying_symbol": simbolo,
                             "amount": valor,
                             "basis": "stake",
                             "duration": 15,  # 15 segundos
@@ -1781,8 +1986,8 @@ class Motor:
                             "contract_type": contract_type.replace(
                                 "CALL", "MULTUP"
                             ).replace("PUT", "MULTDOWN"),
-                            "symbol": self.par_atual,
-                            "underlying_symbol": self.par_atual,
+                            "symbol": simbolo,
+                            "underlying_symbol": simbolo,
                             "amount": valor,
                             "basis": "stake",
                             "multiplier": multiplier,
@@ -1799,7 +2004,7 @@ class Motor:
                     else f"x{multiplier if 'multiplier' in locals() else 1}"
                 )
                 self.logger.info(
-                    f"Enviando ordem TURBO {contract_type} ({duracao_str}) de ${valor:.2f} para {self.par_atual} (ID: {transaction_id})"
+                    f"Enviando ordem TURBO {contract_type} ({duracao_str}) de ${valor:.2f} para {simbolo} (ID: {transaction_id})"
                 )
                 self.ws.send(json.dumps(req))
 
@@ -1814,7 +2019,7 @@ class Motor:
                         15 if ativo_config.get("tipo_contrato") == "turbo" else 1
                     ),
                     "timestamp": timestamp_inicio,
-                    "par": self.par_atual,
+                    "par": simbolo,
                     "processada": False,
                     "fechamento_automatico": ativo_config.get("tipo_contrato")
                     != "turbo",  # Só fecha automaticamente se não for turbo
@@ -2236,12 +2441,29 @@ class Motor:
                         time.sleep(10)
                         continue
 
+                    # Se a sessão foi finalizada (meta, perda, erro crítico ou kill switch):
+                    if getattr(self, "session_stopped", False):
+                        if len(self.operacoes_abertas) == 0:
+                            self.logger.info(
+                                f"🏁 Sessão finalizada ({getattr(self, 'session_stop_reason', 'STOP')}). "
+                                "Todas as operações foram concluídas e conciliadas com sucesso."
+                            )
+                            self.rodando = False
+                            break
+                        else:
+                            self.logger.info(
+                                f"⏳ Sessão parada ({getattr(self, 'session_stop_reason', 'STOP')}). "
+                                f"Aguardando encerramento de {len(self.operacoes_abertas)} operações ativas..."
+                            )
+                            time.sleep(1.0)
+                            continue
+
                     # Executa análise e operação inteligente
                     resultado = self.executar_operacao_inteligente()
 
                     if resultado["executada"]:
                         self.logger.info(
-                            f"OPERACAO {resultado['tipo']} EXECUTADA - "
+                            f"OPERACAO {resultado['tipo']} EXECUTADA em {resultado.get('ativo', self.par_atual)} - "
                             f"Conf: {resultado['confianca']:.2f} - "
                             f"{resultado['razao']}"
                         )
@@ -2249,18 +2471,28 @@ class Motor:
                         # Log normal para acompanhar análises
                         self.logger.info(f"ANALISE: {resultado['razao']}")
 
+                    # Se a sessão parou durante a execução e não há mais posições abertas
+                    if getattr(self, "session_stopped", False) and len(self.operacoes_abertas) == 0:
+                        self.logger.info(f"🏁 Sessão finalizada: {getattr(self, 'session_stop_reason', 'STOP')}")
+                        self.rodando = False
+                        break
+
                     # Verifica se atingiu a meta
                     if resultado["lucro_atual"] >= self.meta_diaria:
                         self.logger.info(
                             f"META DE ${self.meta_diaria:.2f} ATINGIDA! "
                             f"Lucro: ${resultado['lucro_atual']:.2f}"
                         )
-                        self.rodando = False
-                        break
+                        self.session_stopped = True
+                        self.session_stop_reason = f"META_ATINGIDA: Lucro ${resultado['lucro_atual']:.2f} >= ${self.meta_diaria:.2f}"
+                        if len(self.operacoes_abertas) == 0:
+                            self.rodando = False
+                            break
 
                     # Intervalos seguros para análise
                     intervalo = {
                         "iniciante": 2.0,  # 2 segundos - Seguro
+                        "intermediario": 1.0,  # 1 segundo - Moderado
                         "conservador": 1.0,  # 1 segundo - Moderado
                         "agressivo": 0.5,  # 500ms - Rápido mas seguro
                     }.get(self.modo_operacao, 2.0)

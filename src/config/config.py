@@ -7,6 +7,7 @@ import os
 import json
 import logging
 import secrets
+from typing import Optional, Dict, Any, List
 from dotenv import load_dotenv
 
 # Carrega variáveis de ambiente do arquivo .env (na raiz ou pasta config)
@@ -120,6 +121,21 @@ class Config:
             "take_profit_global_percent": 10.0,
             "trailing_stop_ativo": False,
             "trailing_stop_distancia": 0.5,
+        },
+        "intermediario": {
+            "entrada_inicial": 5.0,
+            "multiplicador": 1.5,
+            "max_martingale": 2,
+            "meta_maxima": 50.0,
+            "operacoes_simultaneas": 5,
+            "assertividade": 0.85,
+            # Configurações de stops
+            "stop_loss_operacao_percent": 2.0,
+            "take_profit_operacao_percent": 4.0,
+            "stop_loss_global_percent": 8.0,
+            "take_profit_global_percent": 15.0,
+            "trailing_stop_ativo": True,
+            "trailing_stop_distancia": 1.0,
         },
         "conservador": {
             "entrada_inicial": 5.0,
@@ -408,27 +424,65 @@ CONFIG_ESTRATEGIA_TURBO = {
     }
 }
 
+# Limites canônicos de concorrência por perfil (Issue #20)
+LIMITES_CONCORRENCIA_POR_MODO = {
+    "iniciante": 3,
+    "intermediario": 5,
+    "conservador": 5,  # Alias compatível
+    "agressivo": 10,
+}
+
+def normalizar_modo_operacao(modo: Optional[str]) -> str:
+    """
+    Normaliza o identificador de perfil de operação.
+    'conservador' é tratado como alias compatível para 'intermediario'.
+    """
+    if not modo:
+        return "iniciante"
+    m = str(modo).strip().lower()
+    if m == "conservador":
+        return "intermediario"
+    if m in LIMITES_CONCORRENCIA_POR_MODO:
+        return m
+    return "iniciante"
+
+def obter_limite_posicoes(modo: Optional[str] = None) -> int:
+    """
+    Retorna o limite canônico de operações simultâneas para o perfil especificado:
+    - Iniciante: até 3 posições
+    - Intermediário (ou conservador): até 5 posições
+    - Agressivo: até 10 posições
+    """
+    if not modo:
+        return LIMITES_CONCORRENCIA_POR_MODO["iniciante"]
+    m = str(modo).strip().lower()
+    return LIMITES_CONCORRENCIA_POR_MODO.get(m, LIMITES_CONCORRENCIA_POR_MODO["iniciante"])
+
 MODOS_OPERACAO_SCALPING = {
     "iniciante": {
-        "max_operacoes_simultaneas": 1,
+        "max_operacoes_simultaneas": 3,
         "confianca_min_sinal": 0.7,
     },
+    "intermediario": {
+        "max_operacoes_simultaneas": 5,
+        "confianca_min_sinal": 0.8,
+    },
     "conservador": {
-        "max_operacoes_simultaneas": 1,
+        "max_operacoes_simultaneas": 5,
         "confianca_min_sinal": 0.8,
     },
     "agressivo": {
-        "max_operacoes_simultaneas": 1,
+        "max_operacoes_simultaneas": 10,
         "confianca_min_sinal": 0.6,
     },
 }
 
 # ==============================================================================
-# CONFIGURAÇÃO DO MICRO-SCALPER SELETIVO (Issues #2, #3, #4)
+# CONFIGURAÇÃO DO MICRO-SCALPER SELETIVO (Issues #2, #3, #4, #20)
 # ==============================================================================
 MICRO_SCALPER_CONFIG = {
-    # 7. UMA OPERAÇÃO POR VEZ - Sem martingale, sem averaging down
-    "max_open_positions": 1,
+    # Concorrência seletiva 3/5/10 por perfil (Issue #20)
+    "max_open_positions": 10,
     "allow_martingale": False,
     "max_martingale_steps": 0,
     "martingale_multiplier": 1.0,
@@ -499,6 +553,9 @@ MICRO_SCALPER_CONFIG = {
 
 # Vincula na classe Config para compatibilidade direta
 Config.MICRO_SCALPER = MICRO_SCALPER_CONFIG
-Config.MAX_OPEN_POSITIONS = 1
+Config.LIMITES_CONCORRENCIA_POR_MODO = LIMITES_CONCORRENCIA_POR_MODO
+Config.obter_limite_posicoes = staticmethod(obter_limite_posicoes)
+Config.normalizar_modo_operacao = staticmethod(normalizar_modo_operacao)
+Config.MAX_OPEN_POSITIONS = 10
 
 

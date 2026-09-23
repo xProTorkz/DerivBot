@@ -104,10 +104,16 @@ class TestRiskGateway(unittest.TestCase):
         self.motor.ultimo_fechamento_ts = 0.0
 
     def test_blocks_when_position_already_open(self):
+        self.motor.modo_operacao = "iniciante"
         self.motor.operacoes_abertas["fake_contract_1"] = {"id": "fake_contract_1"}
+        valido, _ = self.motor.validar_gateway_risco(0.35)
+        self.assertTrue(valido, "Deveria permitir 1 posição aberta no perfil iniciante (limite = 3)")
+
+        self.motor.operacoes_abertas["fake_contract_2"] = {"id": "fake_contract_2"}
+        self.motor.operacoes_abertas["fake_contract_3"] = {"id": "fake_contract_3"}
         valido, motivo = self.motor.validar_gateway_risco(0.35)
-        self.assertFalse(valido, "Deveria bloquear quando MAX_OPEN_POSITIONS >= 1")
-        self.assertIn("Máximo de 1 operação", motivo)
+        self.assertFalse(valido, "Deveria bloquear quando limite de 3 operações simultâneas for atingido")
+        self.assertIn("Máximo de 3 operações", motivo)
 
     def test_blocks_during_cooldown(self):
         self.motor.operacoes_abertas = {}

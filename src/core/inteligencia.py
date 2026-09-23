@@ -13,6 +13,16 @@ from src import (
     config as global_config,
 )  # Use an alias to avoid conflict with local 'config' variables
 
+try:
+    from src.config.config import obter_limite_posicoes
+except ImportError:
+    try:
+        from config.config import obter_limite_posicoes
+    except ImportError:
+        def obter_limite_posicoes(m: Optional[str] = None) -> int:
+            limits = {"iniciante": 3, "intermediario": 5, "conservador": 5, "agressivo": 10}
+            return limits.get(str(m).lower() if m else "iniciante", 3)
+
 # Diretório para armazenar os dados de memória
 MEMORIA_DIR = "memoria_inteligencia"  # Renamed to avoid conflict if catalogador also uses "memoria"
 
@@ -724,8 +734,21 @@ class MicroScalperStateMachine:
         }
 
 
-# Instância global da máquina de estados do módulo
+# Instância global da máquina de estados do módulo (fallback compatível)
 state_machine_micro_scalper = MicroScalperStateMachine()
+
+# Registro de state machines isoladas por ativo (Issue #20)
+state_machines_por_ativo: Dict[str, MicroScalperStateMachine] = {}
+
+
+def obter_state_machine(ativo: Optional[str] = None) -> MicroScalperStateMachine:
+    """Retorna a state machine isolada para o ativo especificado ou a padrão global."""
+    if not ativo:
+        return state_machine_micro_scalper
+    simbolo = str(ativo).upper().strip()
+    if simbolo not in state_machines_por_ativo:
+        state_machines_por_ativo[simbolo] = MicroScalperStateMachine()
+    return state_machines_por_ativo[simbolo]
 
 
 def analisar_micro_scalping(
@@ -735,14 +758,20 @@ def analisar_micro_scalping(
     modo: str = "iniciante",
     operacoes_ativas: int = 0,
     ultimos_ticks: Optional[List[float]] = None,
+    ativo: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    ANÁLISE CANÔNICA DO MICRO-SCALPER SELETIVO.
+    ANÁLISE CANÔNICA DO MICRO-SCALPER SELETIVO (Issues #2, #3, #4, #20).
     Substitui qualquer lógica aleatória por análise estatística determinística.
     Integra ExtremeDetector, ReversalConfirmator, ConfluenceScore e StateMachine.
+    Suporta concorrência 3 / 5 / 10 posições simultâneas e state machine isolada por ativo.
     """
     try:
-        sm = state_machine_micro_scalper
+        # Se ativo não foi passado explicitamente, tenta extrair do snapshot se for dict
+        if not ativo and isinstance(dados_ou_snapshot, dict):
+            ativo = dados_ou_snapshot.get("ativo") or dados_ou_snapshot.get("simbolo")
+
+        sm = obter_state_machine(ativo)
 
         # 1. Checagem de meta diária atingida
         if meta > 0 and lucro_atual >= meta:
@@ -757,16 +786,17 @@ def analisar_micro_scalping(
                 "motivo_recusa": sm.ultimo_motivo_recusa,
             }
 
-        # 2. Checagem de operações ativas (MAX_OPEN_POSITIONS = 1)
-        if operacoes_ativas >= 1:
-            sm.transitar(MicroScalperState.POSICAO_ABERTA, "Operação aberta em andamento")
-            sm.ultimo_motivo_recusa = f"Já existe operação ativa ({operacoes_ativas}/1)"
+        # 2. Checagem de operações ativas (Limite dinâmico por perfil: 3 / 5 / 10)
+        limite_pos = obter_limite_posicoes(modo)
+        if operacoes_ativas >= limite_pos:
+            sm.transitar(MicroScalperState.POSICAO_ABERTA, f"Limite de posições atingido ({operacoes_ativas}/{limite_pos})")
+            sm.ultimo_motivo_recusa = f"Limite de operações simultâneas atingido ({operacoes_ativas}/{limite_pos})"
             return {
                 "sinal": None,
                 "confianca": 0.0,
                 "score": sm.ultimo_score,
                 "estado": sm.estado_atual,
-                "razao": "Aguardando fechamento de operação em andamento (MAX=1)",
+                "razao": f"Aguardando liberação de vagas no perfil '{modo}' ({operacoes_ativas}/{limite_pos})",
                 "motivo_recusa": sm.ultimo_motivo_recusa,
             }
 

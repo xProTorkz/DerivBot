@@ -1779,6 +1779,7 @@ def toggle_bot():
         # Configurações por modo (sincronizado com catalogador.py)
         config_modos = {
             "iniciante": {"meta_padrao": 20.0, "meta_maxima": 20.0},
+            "intermediario": {"meta_padrao": 50.0, "meta_maxima": 50.0},
             "conservador": {"meta_padrao": 50.0, "meta_maxima": 50.0},
             "agressivo": {"meta_padrao": 100.0, "meta_maxima": None},  # Ilimitado
         }
