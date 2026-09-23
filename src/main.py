@@ -1943,6 +1943,10 @@ def toggle_bot():
                 motor.modo_operacao = modo
                 motor.meta_diaria = meta
 
+                # Reinicia a sessão formalmente e reseta session_stopped
+                if hasattr(motor, "iniciar_sessao"):
+                    motor.iniciar_sessao()
+
                 # iniciar_sistema_inteligente() já cria a própria thread interna.
                 # Chamamos diretamente para capturar falhas imediatas e não devolver
                 # um falso "iniciado" para a interface.
@@ -2190,8 +2194,33 @@ def status_robo():
             banner_info["estado"] = getattr(st_raw, "value", str(st_raw))
             banner_info["motivo"] = ult_an.get("motivo_recusa") or ult_an.get("razao") or banner_info["motivo"]
 
+        motor_rodando = bool(motor and getattr(motor, "rodando", False))
+        motor_session_stopped = bool(motor and getattr(motor, "session_stopped", False))
+        motor_stop_reason = getattr(motor, "session_stop_reason", None) if motor else None
+        ultimo_erro_deriv = getattr(motor, "ultimo_erro_deriv", getattr(motor, "ultimo_erro", None)) if motor else None
+        ultimo_estagio = getattr(motor, "ultimo_estagio_execucao", "PARADO") if motor else "PARADO"
+        contadores_funil = getattr(motor, "contadores_funil", {
+            "SCAN": 0, "SIGNAL": 0, "RISK_GATE": 0,
+            "PROPOSAL_SENT": 0, "PROPOSAL_RECEIVED": 0, "BUY_SENT": 0, "BUY_CONFIRMED": 0
+        }) if motor else {}
+
+        # Sincroniza estado de parada do motor com robo_ativo global para não mentir no painel
+        if robo_ativo and motor and (not motor_rodando or motor_session_stopped):
+            robo_ativo = False
+            status_operacao = "parado"
+            if motor_stop_reason:
+                ultima_mensagem = f"Sessão parada: {motor_stop_reason}"
+
+        status_real_ativo = bool(robo_ativo and motor_rodando and not motor_session_stopped)
+
         response_data = {
-            "ativo": bool(robo_ativo),
+            "ativo": status_real_ativo,
+            "motor_rodando": motor_rodando,
+            "session_stopped": motor_session_stopped,
+            "session_stop_reason": motor_stop_reason,
+            "ultimo_erro_deriv": ultimo_erro_deriv,
+            "ultimo_estagio_execucao": ultimo_estagio,
+            "contadores_funil": contadores_funil,
             "modo": str(modo_operacao or "iniciante"),
             "meta": float(meta_diaria or 20.0),
             "lucro": lucro_valor,

@@ -768,7 +768,11 @@ document.addEventListener("DOMContentLoaded", function () {
             botaoControle.textContent = "⛔ Parar Robô";
             botaoControle.classList.add("ativo");
           } else {
-            atualizarLog("⏸️ Robô está parado.", "config");
+            if (data.session_stopped && data.session_stop_reason) {
+              atualizarLog("🛑 " + data.session_stop_reason, "config");
+            } else {
+              atualizarLog("⏸️ Robô está parado.", "config");
+            }
             resetarProgressoBolinhas();
             botaoControle.textContent = "🚀 Iniciar Robô";
             botaoControle.classList.remove("ativo");

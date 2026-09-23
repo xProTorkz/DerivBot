@@ -723,45 +723,6 @@ class Motor:
         # Sistema de stops dedicado
         self.sistema_stops = SistemaStops()
 
-        # Log de inicialização
-        self.log_unificado("Motor inicializado com sucesso", "success", "sistema")
-        self.log_unificado("Sistema de gestão de riscos ativado", "success", "sistema")
-        self.log_unificado("Sistema de stops ativado", "success", "sistema")
-
-    def log_unificado(self, mensagem, tipo="info", categoria="trade", dados_extras=None):
-        """Log unificado enviado para self.logger e para LoggerUnificado (exibido na UI web / terminal)"""
-        msg_str = str(mensagem)
-        if tipo in ("erro", "error"):
-            self.logger.error(f"[{categoria.upper()}] {msg_str}")
-        elif tipo in ("aviso", "warning"):
-            self.logger.warning(f"[{categoria.upper()}] {msg_str}")
-        else:
-            self.logger.info(f"[{categoria.upper()}] {msg_str}")
-
-        # Despacha para LoggerUnificado da interface web
-        try:
-            import sys
-            mod_main = sys.modules.get("src.main") or sys.modules.get("main")
-            if not mod_main:
-                try:
-                    from src import main as mod_main
-                except ImportError:
-                    try:
-                        import main as mod_main
-                    except ImportError:
-                        mod_main = None
-
-            if mod_main and hasattr(mod_main, "LoggerUnificado"):
-                mod_main.LoggerUnificado.adicionar_log(
-                    mensagem=msg_str,
-                    tipo=tipo,
-                    categoria=categoria,
-                    incluir_painel=True,
-                    incluir_tempo_real=True,
-                    dados_extras=dados_extras or {},
-                )
-        except Exception:
-            pass
         # Define timeframe para micro scalping se disponível
         if hasattr(self.catalogador, "timeframe"):
             self.catalogador.timeframe = 1
@@ -781,6 +742,18 @@ class Motor:
         self.session_stop_reason = None
         self.cooldowns_por_ativo = {}
         self.lucro_acumulado_sessao = 0.0
+        self.ultimo_erro_deriv = None
+        self.ultimo_estagio_execucao = "PARADO"
+        self.ultimo_motivo_bloqueio_risco = None
+        self.contadores_funil = {
+            "SCAN": 0,
+            "SIGNAL": 0,
+            "RISK_GATE": 0,
+            "PROPOSAL_SENT": 0,
+            "PROPOSAL_RECEIVED": 0,
+            "BUY_SENT": 0,
+            "BUY_CONFIRMED": 0,
+        }
 
         # Configura stops baseado no modo inicial
         self.sistema_stops.configurar_stops_por_modo(self.modo_operacao)
@@ -836,6 +809,41 @@ class Motor:
         self.tempo_entre_tentativas = 3  # Reduzido para reconexão mais rápida
         self.ultima_tentativa = 0
         self.cache_operacoes = TTLCache(maxsize=100, ttl=60)
+
+    def log_unificado(self, mensagem, tipo="info", categoria="trade", dados_extras=None):
+        """Log unificado enviado para self.logger e para LoggerUnificado (exibido na UI web / terminal)"""
+        msg_str = str(mensagem)
+        if tipo in ("erro", "error"):
+            self.logger.error(f"[{categoria.upper()}] {msg_str}")
+        elif tipo in ("aviso", "warning"):
+            self.logger.warning(f"[{categoria.upper()}] {msg_str}")
+        else:
+            self.logger.info(f"[{categoria.upper()}] {msg_str}")
+
+        # Despacha para LoggerUnificado da interface web
+        try:
+            import sys
+            mod_main = sys.modules.get("src.main") or sys.modules.get("main")
+            if not mod_main:
+                try:
+                    from src import main as mod_main
+                except ImportError:
+                    try:
+                        import main as mod_main
+                    except ImportError:
+                        mod_main = None
+
+            if mod_main and hasattr(mod_main, "LoggerUnificado"):
+                mod_main.LoggerUnificado.adicionar_log(
+                    mensagem=msg_str,
+                    tipo=tipo,
+                    categoria=categoria,
+                    incluir_painel=True,
+                    incluir_tempo_real=True,
+                    dados_extras=dados_extras or {},
+                )
+        except Exception:
+            pass
 
     def _proximo_req_id(self) -> int:
         """Gera um request ID único para correlacionar chamadas da API Deriv."""
@@ -928,7 +936,10 @@ class Motor:
         """
         pat = token or self.token
         if not pat:
-            from config.config import Config
+            try:
+                from config.config import Config
+            except ImportError:
+                from src.config.config import Config
             pat = Config.obter_deriv_pat()
 
         if not pat or not str(pat).strip():
@@ -961,7 +972,10 @@ class Motor:
                 or getattr(config, "DERIV_APP_ID", None)
             )
             if not resolved_app_id:
-                from config.config import Config
+                try:
+                    from config.config import Config
+                except ImportError:
+                    from src.config.config import Config
                 resolved_app_id = Config.obter_deriv_app_id()
 
             if not resolved_app_id or not str(resolved_app_id).strip():
@@ -1196,12 +1210,13 @@ class Motor:
                 err_code = err.get("code", "UNKNOWN")
                 err_msg = err.get("message", str(err))
                 req_type = data.get("echo_req", {}).get("buy") or data.get("msg_type", "")
+                self.ultimo_erro_deriv = f"{err_code}: {err_msg}"
+                self.ultimo_erro = f"[{err_code}] {err_msg}"
                 self.log_unificado(
                     f"❌ [DERIV API ERROR] [{err_code}] {err_msg} (req_type={req_type})",
                     tipo="erro",
                     categoria="trade",
                 )
-                self.ultimo_erro = f"[{err_code}] {err_msg}"
 
                 # Recupera e destrava a state machine se estava em COMPRANDO
                 param_symbol = (
@@ -1224,6 +1239,10 @@ class Motor:
                 ask_price = float(prop.get("ask_price", 0.0))
                 passthrough = data.get("passthrough") or {}
 
+                if hasattr(self, "contadores_funil"):
+                    self.contadores_funil["PROPOSAL_RECEIVED"] = self.contadores_funil.get("PROPOSAL_RECEIVED", 0) + 1
+                self.ultimo_estagio_execucao = "PROPOSAL_RECEIVED"
+
                 if passthrough.get("tipo_acao") == "executar_compra" and proposal_id:
                     simbolo_prop = passthrough.get("simbolo", self.par_atual)
                     payout = float(prop.get("payout", 0.0))
@@ -1240,10 +1259,16 @@ class Motor:
                         "passthrough": passthrough,
                     }
                     self.ws.send(json.dumps(buy_req))
+                    if hasattr(self, "contadores_funil"):
+                        self.contadores_funil["BUY_SENT"] = self.contadores_funil.get("BUY_SENT", 0) + 1
+                    self.ultimo_estagio_execucao = "BUY_SENT"
 
             # Processamento de abertura de contratos
             if "buy" in data and data["buy"]:
                 contract_id = data["buy"]["contract_id"]
+                if hasattr(self, "contadores_funil"):
+                    self.contadores_funil["BUY_CONFIRMED"] = self.contadores_funil.get("BUY_CONFIRMED", 0) + 1
+                self.ultimo_estagio_execucao = "BUY_CONFIRMED"
 
                 transaction_id = None
                 passthrough = data.get("passthrough") or {}
@@ -1828,6 +1853,10 @@ class Motor:
                 }
 
             # 1. Scanner multi-ativo sobre ATIVOS_TURBO_INTEGRADOS com rotação dinâmica (Issue #20)
+            if hasattr(self, "contadores_funil"):
+                self.contadores_funil["SCAN"] = self.contadores_funil.get("SCAN", 0) + 1
+            self.ultimo_estagio_execucao = "SCAN"
+
             todos_candidatos = list(ATIVOS_TURBO_INTEGRADOS.keys())
             if not hasattr(self, "ultimo_ativo_usado"):
                 self.ultimo_ativo_usado = 0
@@ -1864,6 +1893,13 @@ class Motor:
 
                 if analise_cand.get("sinal", False):
                     analise = analise_cand
+                    if hasattr(self, "contadores_funil"):
+                        self.contadores_funil["SIGNAL"] = self.contadores_funil.get("SIGNAL", 0) + 1
+                    self.ultimo_estagio_execucao = "SIGNAL"
+                    self.logger.info(
+                        f"🚀 [SIGNAL] Sinal confirmado em {cand_ativo}! Tipo: {analise.get('tipo')} | "
+                        f"Score: {analise.get('score', 0.0):.1f} | Razão: {analise.get('razao')}"
+                    )
                     break
                 else:
                     if melhor_analise_sem_sinal is None or analise_cand.get("score", 0.0) > melhor_analise_sem_sinal.get("score", 0.0):
@@ -1910,7 +1946,13 @@ class Motor:
             # GATEWAY DE RISCO INVIOLÁVEL: validação final pré-ordem para o ativo do sinal
             valido_risco, motivo_risco = self.validar_gateway_risco(valor_entrada, ativo=ativo_sinal)
             if not valido_risco:
-                self.logger.warning(f"🚫 Ordem bloqueada pelo gateway de risco ({ativo_sinal}): {motivo_risco}")
+                self.ultimo_motivo_bloqueio_risco = motivo_risco
+                self.logger.warning(f"🚫 [RISK_GATE] Ordem bloqueada ({ativo_sinal}): {motivo_risco}")
+                self.log_unificado(
+                    f"🚫 [RISK_GATE] Bloqueado em {ativo_sinal}: {motivo_risco}",
+                    tipo="aviso",
+                    categoria="risco",
+                )
                 sm = obter_state_machine(ativo_sinal)
                 sm.transitar(MicroScalperState.NORMAL, motivo_risco)
                 state_machine_micro_scalper.transitar(MicroScalperState.NORMAL, motivo_risco)
@@ -1925,6 +1967,11 @@ class Motor:
                     "lucro_atual": lucro_atual,
                     "operacoes_ativas": self.operacoes_ativas_count,
                 }
+
+            # Passou no gateway de risco
+            if hasattr(self, "contadores_funil"):
+                self.contadores_funil["RISK_GATE"] = self.contadores_funil.get("RISK_GATE", 0) + 1
+            self.ultimo_estagio_execucao = "RISK_GATE"
 
             # Envia ordem para a Deriv API
             sm = obter_state_machine(ativo_sinal)
@@ -2204,6 +2251,9 @@ class Motor:
                     f"Enviando ordem TURBO {contract_type} ({duracao_str}) de ${valor:.2f} para {simbolo} (ID: {transaction_id})"
                 )
                 self.ws.send(json.dumps(req))
+                if hasattr(self, "contadores_funil"):
+                    self.contadores_funil["PROPOSAL_SENT"] = self.contadores_funil.get("PROPOSAL_SENT", 0) + 1
+                self.ultimo_estagio_execucao = "PROPOSAL_SENT"
 
                 # Armazena informações da transação pendente
                 if not hasattr(self, "transacoes_pendentes"):
@@ -2610,19 +2660,70 @@ class Motor:
             self.logger.error(f"Erro ao verificar status: {str(e)}")
             return {"status": "erro", "mensagem": f"Erro interno: {str(e)}"}
 
+    def iniciar_sessao(self):
+        """
+        Inicializa/reinicializa formalmente uma sessão de trading:
+        - Reseta session_stopped = False e limpa a razão de parada
+        - Reseta o lucro acumulado da sessão e atualiza saldo_inicial
+        - Zera meta_atingida e contadores de funil
+        - Define rodando = True e estágio inicial
+        - Emite telemetria de diagnóstico imediato
+        """
+        self.session_stopped = False
+        self.session_stop_reason = None
+        self.lucro_acumulado_sessao = 0.0
+        self.saldo_inicial = self.obter_saldo()
+        self.meta_atingida = False
+        self.rodando = True
+        self.ultimo_erro_deriv = None
+        self.ultimo_motivo_bloqueio_risco = None
+        self.ultimo_estagio_execucao = "INICIANDO"
+        self.contadores_funil = {
+            "SCAN": 0,
+            "SIGNAL": 0,
+            "RISK_GATE": 0,
+            "PROPOSAL_SENT": 0,
+            "PROPOSAL_RECEIVED": 0,
+            "BUY_SENT": 0,
+            "BUY_CONFIRMED": 0,
+        }
+
+        # Telemetria imediata
+        agora_ts = time.time()
+        ult_tick_ts = getattr(self, "ultimo_tick_timestamp", 0) or 0
+        idade_tick = (agora_ts - ult_tick_ts) if ult_tick_ts > 0 else -1.0
+        acc_type = getattr(self, "account_type", "demo")
+        modo_str = "REAL" if self.modo_real else "DEMO"
+
+        diag_msg = (
+            f"🚀 [NOVA SESSÃO] motor.rodando={self.rodando}, session_stopped={self.session_stopped}, "
+            f"session_stop_reason={self.session_stop_reason}, account_type={acc_type}, "
+            f"modo_real={self.modo_real} ({modo_str}), saldo=${self.saldo_inicial:.2f}, "
+            f"idade_ultimo_tick={idade_tick:.1f}s"
+        )
+        self.logger.info(diag_msg)
+        self.log_unificado(
+            f"🚀 [NOVA SESSÃO] Iniciada ({modo_str}) com saldo ${self.saldo_inicial:.2f}. Scanner e funil prontos.",
+            tipo="success",
+            categoria="sistema",
+        )
+
     def iniciar(self):
         """Inicia o motor de trading"""
         if not self.conectado:
             if not self.conectar(self.token):
                 return False
 
-        self.rodando = True
+        self.iniciar_sessao()
         self.logger.info("Motor iniciado")
         return True
 
     def parar(self):
         """Para o motor de trading"""
         self.rodando = False
+        self.session_stopped = True
+        self.session_stop_reason = "MANUAL_STOP: Parado pelo usuário"
+        self.ultimo_estagio_execucao = "PARADO"
 
         # Fecha operações ativas
         for op_id in list(self.operacoes_abertas.keys()):
@@ -2644,11 +2745,18 @@ class Motor:
             "modo": self.modo_real,
             "operacoes_ativas": len(self.operacoes_abertas),
             "historico": len(self.obter_historico()),
+            "session_stopped": getattr(self, "session_stopped", False),
+            "session_stop_reason": getattr(self, "session_stop_reason", None),
+            "ultimo_estagio_execucao": getattr(self, "ultimo_estagio_execucao", "PARADO"),
+            "contadores_funil": getattr(self, "contadores_funil", {}),
         }
 
     def iniciar_sistema_inteligente(self):
         """Inicia o sistema inteligente de operações em thread separada"""
         import threading
+
+        # Reinicializa a sessão para garantir que não haja travas de execuções anteriores
+        self.iniciar_sessao()
 
         def executar_loop_inteligente():
             """Loop principal do sistema inteligente"""
