@@ -1169,7 +1169,12 @@ class Motor:
                 self.ultimo_erro = f"[{err_code}] {err_msg}"
 
                 # Recupera e destrava a state machine se estava em COMPRANDO
-                param_symbol = data.get("echo_req", {}).get("parameters", {}).get("symbol")
+                param_symbol = (
+                    data.get("passthrough", {}).get("simbolo")
+                    or data.get("echo_req", {}).get("underlying_symbol")
+                    or data.get("echo_req", {}).get("symbol")
+                    or data.get("echo_req", {}).get("parameters", {}).get("symbol")
+                )
                 if param_symbol:
                     sm_err = obter_state_machine(param_symbol)
                     if sm_err.estado_atual == MicroScalperState.COMPRANDO:
@@ -2087,7 +2092,7 @@ class Motor:
 
                 # Configura requisição de proposta (etapa 1 do fluxo Deriv Options WS)
                 if ativo_config.get("tipo_contrato") == "turbo":
-                    # Proposta para contrato turbo de 15 segundos
+                    # Proposta para contrato turbo de 15 segundos (underlying_symbol exigido pela Deriv Options API)
                     req = {
                         "proposal": 1,
                         "amount": valor,
@@ -2096,7 +2101,7 @@ class Motor:
                         "currency": "USD",
                         "duration": 15,  # 15 segundos
                         "duration_unit": "s",  # segundos
-                        "symbol": simbolo,
+                        "underlying_symbol": simbolo,
                         "passthrough": {
                             "transaction_id": transaction_id,
                             "tipo_acao": "executar_compra",
@@ -2117,7 +2122,7 @@ class Motor:
                         "contract_type": contract_type.replace(
                             "CALL", "MULTUP"
                         ).replace("PUT", "MULTDOWN"),
-                        "symbol": simbolo,
+                        "underlying_symbol": simbolo,
                         "multiplier": multiplier,
                         "currency": "USD",
                         "passthrough": {

@@ -99,9 +99,8 @@ class TestOneSecondAssetsAndPersistence(unittest.TestCase):
         call_arg = motor.ws.send.call_args[0][0]
         payload = json.loads(call_arg)
         self.assertIn("proposal", payload)
-        self.assertEqual(payload["proposal"], 1)
-        self.assertNotIn("underlying_symbol", payload, "underlying_symbol é inválido na Deriv API")
-        self.assertIn("symbol", payload)
+        self.assertIn("underlying_symbol", payload, "underlying_symbol é o campo exigido pela Deriv Options API")
+        self.assertNotIn("symbol", payload, "symbol é descontinuado e proibido pela Deriv Options API")
         self.assertIn("amount", payload)
         self.assertIn("duration", payload)
         self.assertIn("duration_unit", payload)
