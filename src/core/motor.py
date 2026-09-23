@@ -813,6 +813,111 @@ class Motor:
             self.logger.error("Nenhum token fornecido para conexão")
             return False
 
+    def _conectar_com_pat(self, token: str) -> bool:
+        """Conecta com a nova API da Deriv usando Personal Access Token (PAT) e OTP."""
+        try:
+            import urllib.request
+            self.token = token
+            app_id = getattr(config, "DERIV_APP_ID", "34tz2Eo08gxzaLEvdMwad")
+
+            # 1. Consulta contas ativas na nova API REST
+            accounts_url = "https://api.derivws.com/trading/v1/options/accounts"
+            req_acc = urllib.request.Request(
+                accounts_url,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Deriv-App-ID": str(app_id),
+                    "Accept": "application/json",
+                },
+            )
+            with urllib.request.urlopen(req_acc, timeout=10) as resp:
+                acc_data = json.loads(resp.read().decode())
+                contas = acc_data.get("data", [])
+
+            if not contas:
+                self.logger.error("Nenhuma conta encontrada para o token PAT")
+                self.ultimo_erro = "Nenhuma conta vinculada ao token PAT"
+                return False
+
+            # Seleciona conta desejada (demo ou real)
+            modo_desejado = getattr(self, "tipo_conta", "demo")
+            modo_real = getattr(config, "MODO_REAL_PADRAO", False)
+            if not modo_real and modo_desejado != "real":
+                conta_alvo = next((c for c in contas if c.get("account_type") == "demo"), contas[0])
+            else:
+                conta_alvo = next((c for c in contas if c.get("account_type") == "real"), contas[0])
+
+            account_id = conta_alvo["account_id"]
+            self.id_conta_real = account_id
+            self.saldo = float(conta_alvo.get("balance", 0.0))
+            self.saldo_inicial = self.saldo
+            self.logger.info(
+                f"[PAT] Conta selecionada: {account_id} ({conta_alvo.get('account_type')}) - Saldo: ${self.saldo:.2f}"
+            )
+
+            # 2. Gera OTP para o WebSocket autenticado
+            otp_url = f"https://api.derivws.com/trading/v1/options/accounts/{account_id}/otp"
+            req_otp = urllib.request.Request(
+                otp_url,
+                data=b"{}",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Deriv-App-ID": str(app_id),
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(req_otp, timeout=10) as resp:
+                otp_res = json.loads(resp.read().decode())
+                ws_url = otp_res.get("data", {}).get("url")
+
+            if not ws_url:
+                self.logger.error("Falha ao obter URL com OTP da Deriv")
+                self.ultimo_erro = "Falha ao gerar OTP para conexão WebSocket"
+                return False
+
+            self.desconectar()
+            self.logger.info(f"[PAT] Conectando ao WebSocket autenticado...")
+
+            def _on_open_pat(ws):
+                self.logger.info("WebSocket PAT conectado com sucesso!")
+                self.conectado = True
+                try:
+                    self.ws.send(json.dumps({"balance": 1, "subscribe": 1}))
+                    self._inscrever_ticks()
+                except Exception as ex:
+                    self.logger.error(f"Erro ao inscrever ticks PAT: {ex}")
+
+            self.ws = websocket.WebSocketApp(
+                ws_url,
+                on_open=_on_open_pat,
+                on_message=self._on_message,
+                on_error=self._on_error,
+                on_close=self._on_close,
+            )
+
+            self.tentativas_reconexao = 0
+            self.reconectado_recentemente = False
+
+            wst = threading.Thread(target=self.ws.run_forever)
+            wst.daemon = True
+            wst.start()
+
+            for _ in range(20):
+                if self.conectado:
+                    self.logger.info(f"Conexão PAT estabelecida com sucesso. Saldo: ${self.saldo:.2f}")
+                    return True
+                time.sleep(0.5)
+
+            self.logger.error("Timeout ao conectar via PAT.")
+            return False
+
+        except Exception as e:
+            self.logger.error(f"Erro ao conectar via PAT: {e}", exc_info=True)
+            self.ultimo_erro = f"Erro na autenticação PAT: {e}"
+            return False
+
     def _conectar_com_token(self, token):
         """Conecta com a API da Deriv usando o token fornecido.
 
@@ -822,10 +927,13 @@ class Motor:
         Returns:
             bool: True se conectou com sucesso, False caso contrário
         """
+        if str(token).startswith("pat_"):
+            return self._conectar_com_pat(token)
+
         try:
             self.token = token
             ws_base = getattr(config, "DERIV_WEBSOCKET_URL", "wss://red.derivws.com/websockets/v3")
-            app_id = getattr(config, "DERIV_APP_ID", 71203)
+            app_id = getattr(config, "DERIV_APP_ID", "34tz2Eo08gxzaLEvdMwad")
             ws_url = f"{ws_base}?app_id={app_id}"
 
             # Fecha conexão existente se houver
@@ -918,6 +1026,21 @@ class Motor:
                 if self.reconectado_recentemente:
                     self.logger.info("Reconexão bem-sucedida!")
                     self.reconectado_recentemente = False
+
+            # Processamento de atualizações de saldo (streaming/subscrição)
+            if "balance" in data and data["balance"]:
+                bal_data = data["balance"]
+                if isinstance(bal_data, dict):
+                    self.saldo = float(bal_data.get("balance", self.saldo))
+                    if not self.saldo_inicial or self.saldo_inicial <= 0:
+                        self.saldo_inicial = self.saldo
+                    login_id = bal_data.get("loginid")
+                    if login_id:
+                        self.id_conta_real = login_id
+                elif isinstance(bal_data, (int, float)):
+                    self.saldo = float(bal_data)
+                    if not self.saldo_inicial or self.saldo_inicial <= 0:
+                        self.saldo_inicial = self.saldo
 
             # Processamento de ticks
             if "tick" in data and data["tick"]:
@@ -1627,6 +1750,7 @@ class Motor:
                         "parameters": {
                             "contract_type": contract_type,
                             "symbol": self.par_atual,
+                            "underlying_symbol": self.par_atual,
                             "amount": valor,
                             "basis": "stake",
                             "duration": 15,  # 15 segundos
@@ -1648,6 +1772,7 @@ class Motor:
                                 "CALL", "MULTUP"
                             ).replace("PUT", "MULTDOWN"),
                             "symbol": self.par_atual,
+                            "underlying_symbol": self.par_atual,
                             "amount": valor,
                             "basis": "stake",
                             "multiplier": multiplier,
