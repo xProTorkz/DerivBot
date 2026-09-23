@@ -84,17 +84,16 @@ echo.
 echo Iniciando DerivBot...
 echo.
 echo Painel de controle estara disponivel em:
-echo    http://localhost:5000
-echo    http://127.0.0.1:5000
+echo    http://localhost:5001
+echo    http://127.0.0.1:5001
 echo.
 echo Para parar o sistema, pressione Ctrl+C
 echo.
 echo ===============================================================================
 echo.
 
-:: Inicia o aplicativo
-cd src
-python main.py
+:: Inicia o aplicativo pelo fluxo oficial canonico
+python -m src.main
 
 :: Se chegou ate aqui, o programa foi encerrado
 echo.

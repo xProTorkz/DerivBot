@@ -151,7 +151,7 @@ class TestAdminSecurity(unittest.TestCase):
     def test_no_hardcoded_admin_licenses_in_tracked_git_tree(self):
         """Varre os arquivos rastreados pelo Git para garantir que nenhuma chave administrativa padrão existe"""
         res = subprocess.run(
-            ["git", "grep", "-i", "-E", "82YM-E0VX"],
+            ["git", "grep", "-i", "-E", "82YM-E0VX", "--", ":!tests/test_admin_security.py"],
             cwd=BASE_DIR,
             capture_output=True,
             text=True,

@@ -10,19 +10,25 @@ from enum import Enum
 
 # Importa as configurações centralizadas otimizadas
 try:
+    from src.config.config import Config
+except ImportError:
+    from config.config import Config
+
+try:
     from src import config as bot_config
 except ImportError:
     import config as bot_config
 
-# Cria diretório de logs se não existir
-os.makedirs("logs", exist_ok=True)
+# Diretório de logs canônico
+LOGS_DIR = getattr(Config, "LOGS_DIR", "logs")
+os.makedirs(LOGS_DIR, exist_ok=True)
 
 # Configuração de logging usando configurações centralizadas
 logging.basicConfig(
     level=getattr(logging, getattr(bot_config, "LOG_LEVEL", "INFO"), logging.INFO),
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.FileHandler("logs/catalogador.log", encoding="utf-8"),
+        logging.FileHandler(os.path.join(LOGS_DIR, "catalogador.log"), encoding="utf-8"),
         logging.StreamHandler(),
     ],
 )
@@ -96,18 +102,12 @@ CONFIG_VOLATILITYS = {
     },
 }
 
-# Diretório para memória usando configuração centralizada
-MEMORIA_DIR = CONFIG_CATALOGADOR["sistema"]["arquivo_memoria"]
-if not os.path.exists(MEMORIA_DIR):
-    os.makedirs(MEMORIA_DIR)
+# Diretório para memória usando configuração canônica
+MEMORIA_DIR = getattr(Config, "DATA_DIR", "data")
+os.makedirs(MEMORIA_DIR, exist_ok=True)
 
 # API Key - usando configuração centralizada
-try:
-    from config.config import Config
-
-    DEEPSEEK_API_KEY = Config.DEEPSEEK_API_KEY
-except ImportError:
-    DEEPSEEK_API_KEY = ""
+DEEPSEEK_API_KEY = getattr(Config, "DEEPSEEK_API_KEY", "")
 
 if not DEEPSEEK_API_KEY:
     logger.warning("DEEPSEEK_API_KEY não configurada. Funcionalidade de IA limitada.")
@@ -533,11 +533,18 @@ class CatalogadorOtimizado:
         ops_config = CONFIG_CATALOGADOR.get("operacoes", {})
         self.intervalo_min_ops_s = ops_config.get("intervalo_min_ops_s", 5)
 
-        # Dados
+        # Dados globais/padrão (compatibilidade)
         self.ticks: List[Tuple[float, float]] = []
         self.velas_ohlc: List[Dict[str, Union[int, float]]] = []
         self._vela_atual_construcao: Optional[Dict[str, Union[int, float]]] = None
         self._inicio_vela_atual_s: Optional[int] = None
+
+        # Buffers isolados por ativo (Issue #5: Multi-Asset Data Isolation)
+        self.ticks_por_ativo: Dict[str, List[Tuple[float, float]]] = {}
+        self.velas_por_ativo: Dict[str, List[Dict[str, Union[int, float]]]] = {}
+        self.vela_atual_por_ativo: Dict[str, Optional[Dict[str, Union[int, float]]]] = {}
+        self.inicio_vela_por_ativo: Dict[str, Optional[int]] = {}
+        self.ultimo_tick_timestamp_por_ativo: Dict[str, float] = {}
 
         # Estado
         self.ativo_selecionado = PAR_PADRAO_OPERACAO
@@ -600,11 +607,11 @@ class CatalogadorOtimizado:
                     if not config_ativo:
                         continue
 
-                    # Simula análise técnica (usando velas atuais)
-                    velas = self.obter_velas_atuais()
+                    # Análise técnica usando velas exclusivas do ativo
+                    velas = self.obter_velas_atuais(ativo=ativo)
                     if len(velas) < volatilitys_config["min_velas_necessarias"]:
-                        self.logger.warning(
-                            f"Velas insuficientes para {ativo}: {len(velas)}"
+                        self.logger.debug(
+                            f"Velas insuficientes para {ativo}: {len(velas)}/{volatilitys_config['min_velas_necessarias']}"
                         )
                         continue
 
@@ -667,15 +674,15 @@ class CatalogadorOtimizado:
                     continue
 
             if not resultados_analise:
-                fallback = CONFIG_VOLATILITYS["fallback"]
-                self.logger.error("Nenhum ativo pôde ser analisado, usando fallback")
+                self.logger.info("Nenhum ativo possui dados reais suficientes para seleção (NO_SELECTION)")
                 return {
-                    "erro": "Nenhum ativo disponível",
-                    "fallback": {
-                        "ativo": fallback["ativo_padrao"],
-                        "tipo_contrato": fallback["tipo_contrato_padrao"],
-                        "multiplicador": fallback["multiplicador_padrao"],
-                    },
+                    "status": "NO_SELECTION",
+                    "erro": "Dados reais insuficientes para seleção de ativos no momento",
+                    "motivo": "NO_TRADE",
+                    "melhor_ativo": None,
+                    "todos_resultados": [],
+                    "total_analisados": 0,
+                    "modo_operacao": modo,
                 }
 
             # Ordena por assertividade
@@ -704,14 +711,13 @@ class CatalogadorOtimizado:
 
         except Exception as e:
             self.logger.error(f"Erro na análise geral dos volatilitys: {e}")
-            fallback = CONFIG_VOLATILITYS["fallback"]
             return {
+                "status": "ERROR",
                 "erro": str(e),
-                "fallback": {
-                    "ativo": fallback["ativo_padrao"],
-                    "tipo_contrato": fallback["tipo_contrato_padrao"],
-                    "multiplicador": fallback["multiplicador_padrao"],
-                },
+                "motivo": "NO_TRADE",
+                "melhor_ativo": None,
+                "todos_resultados": [],
+                "total_analisados": 0,
             }
 
     def validar_operacao_otimizada(self, ativo: str, modo: str, saldo: float) -> tuple:
@@ -793,20 +799,37 @@ class CatalogadorOtimizado:
             self.logger.error(f"Erro ao obter configuração completa: {e}")
             return {"ativo": ativo, "erro": str(e)}
 
-    def adicionar_tick(self, preco: float) -> None:
-        """Adiciona tick e gerencia velas usando configurações centralizadas"""
+    def adicionar_tick(
+        self,
+        preco: float,
+        timestamp: Optional[float] = None,
+        ativo: Optional[str] = None,
+    ) -> None:
+        """Adiciona tick e gerencia velas com isolamento estrito por ativo."""
         try:
-            timestamp_atual = time.time()
-            self.ticks.append((timestamp_atual, preco))
+            timestamp_atual = float(timestamp) if timestamp is not None else time.time()
+            preco_float = float(preco)
+            simbolo = str(ativo).upper().strip() if ativo else None
+            ativo_efetivo = simbolo or self.ativo_selecionado
 
-            # Limita ticks em memória
-            if len(self.ticks) > self.max_ticks_mem:
-                self.ticks = self.ticks[-self.max_ticks_mem :]
+            # Roteamento isolado por ativo
+            if ativo_efetivo:
+                if ativo_efetivo not in self.ticks_por_ativo:
+                    self.ticks_por_ativo[ativo_efetivo] = []
+                self.ticks_por_ativo[ativo_efetivo].append((timestamp_atual, preco_float))
+                if len(self.ticks_por_ativo[ativo_efetivo]) > self.max_ticks_mem:
+                    self.ticks_por_ativo[ativo_efetivo] = self.ticks_por_ativo[ativo_efetivo][-self.max_ticks_mem :]
+                self.ultimo_tick_timestamp_por_ativo[ativo_efetivo] = timestamp_atual
+                self._processar_vela_ativo(timestamp_atual, preco_float, ativo_efetivo)
 
-            # Gerencia velas
-            self._processar_vela(timestamp_atual, preco)
+            # Roteamento para buffer principal/legado se for o ativo selecionado ou se não especificado
+            if not simbolo or simbolo == self.ativo_selecionado:
+                self.ticks.append((timestamp_atual, preco_float))
+                if len(self.ticks) > self.max_ticks_mem:
+                    self.ticks = self.ticks[-self.max_ticks_mem :]
+                self._processar_vela(timestamp_atual, preco_float)
 
-            # Limpeza automática
+            # Limpeza automática periódica
             if timestamp_atual - self.ultimo_cleanup_s >= self.intervalo_cleanup_s:
                 self._executar_limpeza_automatica()
                 self.ultimo_cleanup_s = timestamp_atual
@@ -814,44 +837,73 @@ class CatalogadorOtimizado:
         except Exception as e:
             self.logger.error(f"Erro ao adicionar tick: {e}")
 
-    def obter_velas_atuais(self, incluir_em_formacao: bool = False) -> List[Dict]:
-        """Obtém velas atuais usando configurações centralizadas"""
+    def obter_velas_atuais(
+        self, incluir_em_formacao: bool = False, ativo: Optional[str] = None
+    ) -> List[Dict]:
+        """Obtém velas atuais para um ativo específico ou para o buffer geral."""
         try:
-            velas = self.velas_ohlc.copy()
-
-            if incluir_em_formacao and self._vela_atual_construcao:
-                velas.append(self._vela_atual_construcao.copy())
-
-            # Limita ao máximo configurado
+            simbolo = str(ativo).upper().strip() if ativo else None
             max_velas = CONFIG_CATALOGADOR.get("analise", {}).get(
                 "max_velas_memoria", 2000
             )
-            if len(velas) > max_velas:
-                velas = velas[-max_velas:]
 
-            return velas
+            if simbolo:
+                velas = self.velas_por_ativo.get(simbolo)
+                if velas is not None and len(velas) > 0:
+                    velas_copia = velas.copy()
+                    if incluir_em_formacao and self.vela_atual_por_ativo.get(simbolo):
+                        velas_copia.append(self.vela_atual_por_ativo[simbolo].copy())
+                    if len(velas_copia) > max_velas:
+                        velas_copia = velas_copia[-max_velas:]
+                    return velas_copia
+                elif (simbolo == self.ativo_selecionado or not self.velas_por_ativo) and self.velas_ohlc:
+                    velas_copia = self.velas_ohlc.copy()
+                    if incluir_em_formacao and self._vela_atual_construcao:
+                        velas_copia.append(self._vela_atual_construcao.copy())
+                    if len(velas_copia) > max_velas:
+                        velas_copia = velas_copia[-max_velas:]
+                    return velas_copia
+                return []
+            else:
+                velas = self.velas_ohlc.copy()
+                if incluir_em_formacao and self._vela_atual_construcao:
+                    velas.append(self._vela_atual_construcao.copy())
+                if len(velas) > max_velas:
+                    velas = velas[-max_velas:]
+                return velas
 
         except Exception as e:
             self.logger.error(f"Erro ao obter velas: {e}")
             return []
 
-    def obter_ultimos_ticks(self, n_ticks: int = 150) -> List[float]:
-        """Retorna lista dos últimos n preços de ticks recebidos em tempo real."""
+    def obter_ultimos_ticks(
+        self, n_ticks: int = 150, ativo: Optional[str] = None
+    ) -> List[float]:
+        """Retorna lista dos últimos n preços de ticks recebidos para um ativo específico ou buffer geral."""
         try:
+            simbolo = str(ativo).upper().strip() if ativo else None
+            if simbolo:
+                buffer = self.ticks_por_ativo.get(simbolo)
+                if buffer:
+                    return [float(preco) for _, preco in buffer[-n_ticks:]]
+                if (simbolo == self.ativo_selecionado or not self.ticks_por_ativo) and self.ticks:
+                    return [float(preco) for _, preco in self.ticks[-n_ticks:]]
+                return []
             if not self.ticks:
                 return []
             return [float(preco) for _, preco in self.ticks[-n_ticks:]]
         except Exception:
             return []
 
-    def obter_snapshot_mercado(self, ativo: str = None) -> Dict[str, Any]:
-        """Constrói snapshot consolidado e enriquecido do mercado a partir dos ticks reais."""
+    def obter_snapshot_mercado(self, ativo: Optional[str] = None) -> Dict[str, Any]:
+        """Constrói snapshot consolidado e enriquecido do mercado a partir dos ticks reais do ativo."""
         try:
-            precos_ticks = self.obter_ultimos_ticks(150)
+            simbolo = (ativo or self.ativo_selecionado).upper().strip() if (ativo or self.ativo_selecionado) else None
+            precos_ticks = self.obter_ultimos_ticks(150, ativo=simbolo)
             if not precos_ticks:
                 return {
                     "valido": False,
-                    "razao": "Buffer de ticks vazio",
+                    "razao": f"Buffer de ticks vazio para {simbolo or 'ativo'}",
                     "preco_atual": 0.0,
                     "total_ticks": 0,
                 }
@@ -925,11 +977,13 @@ class CatalogadorOtimizado:
             dist_bb_sup = (bb_sup - preco_atual) / preco_atual if preco_atual > 0 else 0.0
             dist_bb_inf = (preco_atual - bb_inf) / preco_atual if preco_atual > 0 else 0.0
 
+            total_ticks_simbolo = len(self.ticks_por_ativo.get(simbolo, self.ticks)) if simbolo else len(self.ticks)
+
             return {
                 "valido": True,
-                "ativo": ativo or self.ativo_selecionado,
+                "ativo": simbolo or self.ativo_selecionado,
                 "preco_atual": preco_atual,
-                "total_ticks": len(self.ticks),
+                "total_ticks": total_ticks_simbolo,
                 "ticks_count": len(precos_ticks),
                 "timestamp": time.time(),
                 "percentil_curto": percentil_curto,
@@ -1005,6 +1059,39 @@ class CatalogadorOtimizado:
         except Exception as e:
             self.logger.error(f"Erro ao processar vela: {e}")
 
+    def _processar_vela_ativo(self, timestamp: float, preco: float, ativo: str) -> None:
+        """Processa formação de velas por ativo específico."""
+        try:
+            if ativo not in self.velas_por_ativo:
+                self.velas_por_ativo[ativo] = []
+            timestamp_vela = int(timestamp // self.timeframe_s) * self.timeframe_s
+            inicio_atual = self.inicio_vela_por_ativo.get(ativo)
+
+            if inicio_atual != timestamp_vela:
+                vela_atual = self.vela_atual_por_ativo.get(ativo)
+                if vela_atual:
+                    self.velas_por_ativo[ativo].append(vela_atual.copy())
+                    if len(self.velas_por_ativo[ativo]) > self.max_velas_mem:
+                        self.velas_por_ativo[ativo] = self.velas_por_ativo[ativo][-self.max_velas_mem :]
+                self.vela_atual_por_ativo[ativo] = {
+                    "timestamp": timestamp_vela,
+                    "open": preco,
+                    "high": preco,
+                    "low": preco,
+                    "close": preco,
+                    "volume": 1,
+                }
+                self.inicio_vela_por_ativo[ativo] = timestamp_vela
+            else:
+                vela = self.vela_atual_por_ativo.get(ativo)
+                if vela:
+                    vela["high"] = max(vela["high"], preco)
+                    vela["low"] = min(vela["low"], preco)
+                    vela["close"] = preco
+                    vela["volume"] += 1
+        except Exception as e:
+            self.logger.error(f"Erro ao processar vela para {ativo}: {e}")
+
     def _executar_limpeza_automatica(self) -> None:
         """Executa limpeza automática usando configurações centralizadas"""
         try:
@@ -1017,12 +1104,28 @@ class CatalogadorOtimizado:
                 if tempo_atual - ts <= self.max_idade_ticks_s
             ]
 
+            # Limpa ticks por ativo
+            for sim in list(self.ticks_por_ativo.keys()):
+                self.ticks_por_ativo[sim] = [
+                    (ts, p)
+                    for ts, p in self.ticks_por_ativo[sim]
+                    if tempo_atual - ts <= self.max_idade_ticks_s
+                ]
+
             # Limpa velas antigas
             self.velas_ohlc = [
                 vela
                 for vela in self.velas_ohlc
                 if tempo_atual - vela["timestamp"] <= self.max_idade_velas_s
             ]
+
+            # Limpa velas por ativo
+            for sim in list(self.velas_por_ativo.keys()):
+                self.velas_por_ativo[sim] = [
+                    vela
+                    for vela in self.velas_por_ativo[sim]
+                    if tempo_atual - vela["timestamp"] <= self.max_idade_velas_s
+                ]
 
             # Limpa operações antigas
             self.operacoes_ativas_ts = [
@@ -1082,9 +1185,12 @@ class CatalogadorOtimizado:
         """Inicializa lista de ativos do scanner"""
         self.ativos_priorizados = list(ATIVOS_SCALPING.keys())
 
-    def analisar_melhor_ativo(self) -> str:
-        """Retorna o melhor ativo selecionado para operações"""
-        return getattr(self, "ativo_selecionado", "1HZ75V")
+    def analisar_melhor_ativo(self) -> Optional[str]:
+        """Retorna o melhor ativo selecionado para operações com base no scanner"""
+        resultado = self.analisar_todos_volatilitys_e_escolher_melhor(modo="agressivo")
+        if resultado and resultado.get("melhor_ativo"):
+            return resultado["melhor_ativo"]["ativo"]
+        return getattr(self, "ativo_selecionado", None)
 
 
 # Alias para compatibilidade - usa a versão otimizada

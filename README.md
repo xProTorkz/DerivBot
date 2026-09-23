@@ -28,7 +28,7 @@ Um sistema avançado de trading automatizado para a plataforma Deriv, desenvolvi
    📁 Clique duas vezes em: executar_derivbot.bat
    ```
 3. **Aguarde a instalação automática** das dependências
-4. **Acesse o painel** em: http://localhost:5000
+4. **Acesse o painel** em: http://localhost:5001
 
 ### Método Manual
 
@@ -55,8 +55,7 @@ Um sistema avançado de trading automatizado para a plataforma Deriv, desenvolvi
 
 4. **Execute o sistema**:
    ```bash
-   cd src
-   python main.py
+   python -m src.main
    ```
 
 ## 📁 Nova Estrutura do Projeto
@@ -64,7 +63,6 @@ Um sistema avançado de trading automatizado para a plataforma Deriv, desenvolvi
 ```
 derivbot/
 ├── 📄 executar_derivbot.bat        # Executar sistema (PRINCIPAL)
-├── 📄 executar_desenvolvimento.bat # Executar em modo dev
 ├── 📄 requirements.txt             # Dependências Python
 ├── 📂 src/                         # Código fonte
 │   ├── 📄 main.py                  # Arquivo principal (MOVIDO)
@@ -178,15 +176,15 @@ MIT License - Veja LICENSE para detalhes.
 
 1. 📁 Baixe e extraia o projeto
 2. 🖱️ Clique duas vezes em `executar_derivbot.bat`
-3. 🌐 Acesse http://localhost:5000
+3. 🌐 Acesse http://localhost:5001
 4. 🎯 Configure e inicie o trading
 
 ### Para Desenvolvedores
 
-1. 🖱️ Clique duas vezes em `executar_desenvolvimento.bat`
-2. 🔧 Modo debug ativo com auto-reload
-3. 📝 Logs detalhados habilitados
-4. 🔄 Mudanças no código são aplicadas automaticamente
+1. 💻 Execute via terminal: `python -m src.main`
+2. 🔧 Modo debug configurável via `DEBUG=True` no `.env`
+3. 📝 Logs centralizados em `logs/derivbot.log`
+4. 🔄 Testes automatizados: `python -m unittest discover tests -v`
 
 ### Configurações de Ambiente
 

@@ -423,7 +423,20 @@
                 </tr>
               </thead>
               <tbody id="historico-completo-body">
-                <!-- Histórico completo será inserido aqui -->
+                {% for op in historico %}
+                <tr>
+                  <td>{{ op.data }}</td>
+                  <td>{{ op.hora }}</td>
+                  <td>{{ op.ativo or '1HZ75V' }}</td>
+                  <td>{{ op.tipo.upper() if op.tipo else '--' }}</td>
+                  <td title="Valor da entrada">${{ "%.2f"|format(op.valor) }}</td>
+                  <td
+                    class="resultado {{ 'positivo' if op.get('resultado_real', 0) >= 0 else 'negativo' }}"
+                  >
+                    ${{ "%.2f"|format(op.get('resultado_real', 0)) }}
+                  </td>
+                </tr>
+                {% endfor %}
               </tbody>
             </table>
           </div>
@@ -435,25 +448,16 @@
               <tr>
                 <th scope="col">Data</th>
                 <th scope="col">Hora</th>
+                <th scope="col">Ativo</th>
                 <th scope="col">Tipo</th>
                 <th scope="col">Entrada</th>
-                <th scope="col">Resultado</th>
+                <th scope="col">Status</th>
               </tr>
             </thead>
             <tbody id="historico-tabela-body">
-              {% for op in historico %}
-              <tr>
-                <td>{{ op.data }}</td>
-                <td>{{ op.hora }}</td>
-                <td>{{ op.tipo.upper() if op.tipo else '--' }}</td>
-                <td title="Valor da entrada">${{ "%.2f"|format(op.valor) }}</td>
-                <td
-                  class="resultado {{ 'positivo' if op.get('resultado_real', 0) >= 0 else 'negativo' }}"
-                >
-                  ${{ "%.2f"|format(op.get('resultado_real', 0)) }}
-                </td>
+              <tr id="linha-sem-operacao">
+                <td colspan="6" style="text-align: center; color: #888; padding: 12px;">Nenhuma operação em andamento</td>
               </tr>
-              {% endfor %}
             </tbody>
           </table>
         </div>
@@ -946,26 +950,33 @@
         window.logsAvancados = new LogsAvancados();
 
         // CSS dos logs
-        const style = document.createElement("style");
-        style.textContent = `
-            /* Bolinhas amarelas por padrão (robô parado) */
+            /* Estilo neutro para status das bolinhas (robô parado) */
             .bolinha {
-                background: #ffc107 !important;
-                border-color: #ff9800 !important;
-                box-shadow: 0 0 5px #ffc107;
+                background: #2a2a2a;
+                border: 2px solid #444;
+                box-shadow: none;
+                transition: all 0.3s ease;
             }
 
-            /* Bolinhas verdes quando robô ativo */
+            /* Bolinhas ativas com brilho suave */
             .bolinha.ativo {
-                background: #4CAF50 !important;
-                border-color: #4CAF50 !important;
-                box-shadow: 0 0 10px #4CAF50;
+                background: #00E676 !important;
+                border-color: #00E676 !important;
+                box-shadow: 0 0 10px rgba(0, 230, 118, 0.6) !important;
+                transform: scale(1.15);
+            }
+
+            /* Bolinhas em processamento/transação em andamento */
+            .bolinha.processando {
+                background: #2196F3 !important;
+                border-color: #2196F3 !important;
+                box-shadow: 0 0 10px rgba(33, 150, 243, 0.6) !important;
                 animation: pulse 1s infinite;
             }
 
             @keyframes pulse {
                 0% { transform: scale(1); }
-                50% { transform: scale(1.1); }
+                50% { transform: scale(1.15); }
                 100% { transform: scale(1); }
             }
 
@@ -1259,18 +1270,24 @@
 
           // Limpa histórico atual
           const tabelaBody = document.getElementById("historico-tabela-body");
-          if (tabelaBody) tabelaBody.innerHTML = "";
+          if (tabelaBody) {
+            tabelaBody.innerHTML = `
+              <tr id="linha-sem-operacao">
+                <td colspan="6" style="text-align: center; color: #888; padding: 12px;">Nenhuma operação em andamento</td>
+              </tr>
+            `;
+          }
 
           // Atualiza logs unificados
           adicionarLogInformativo("🚀 Robô iniciado!");
 
           // Adiciona logs informativos
           setTimeout(() => {
-            adicionarLogInformativo("🔧 Configurando estratégia turbo...");
+            adicionarLogInformativo("🔧 Configurando scanner multi-ativo...");
             setTimeout(() => {
-              adicionarLogInformativo("📊 Analisando VIX75 - Contratos 15s");
+              adicionarLogInformativo("📊 Monitorando pool de Volatilidade...");
               setTimeout(() => {
-                adicionarLogInformativo("⚡ Sistema inteligente ativo!");
+                adicionarLogInformativo("⚡ Sistema de Micro-Scalping seletivo ativo!");
               }, 1000);
             }, 500);
           }, 500);
@@ -1424,32 +1441,116 @@
           });
       }
 
-      // Função para adicionar resultado na tabela
-      function adicionarResultadoTabela(operacao) {
+      // Função para atualizar status do ciclo operacional nas bolinhas
+      function atualizarStatusBolinhasCiclo(etapa) {
+        // etapa: 'idle' | 'analisando' | 'abrindo' | 'finalizado'
+        const bAnalisando = document.getElementById("bolinha-analisando");
+        const bAbrindo = document.getElementById("bolinha-abrindo");
+        const bFinalizado = document.getElementById("bolinha-finalizado");
+
+        [bAnalisando, bAbrindo, bFinalizado].forEach((b) => {
+          if (b) {
+            b.classList.remove("ativo", "processando");
+          }
+        });
+
+        if (etapa === "analisando" && bAnalisando) {
+          bAnalisando.classList.add("ativo");
+        } else if (etapa === "abrindo") {
+          if (bAnalisando) bAnalisando.classList.add("ativo");
+          if (bAbrindo) bAbrindo.classList.add("processando");
+        } else if (etapa === "finalizado") {
+          if (bAnalisando) bAnalisando.classList.add("ativo");
+          if (bAbrindo) bAbrindo.classList.add("ativo");
+          if (bFinalizado) bFinalizado.classList.add("ativo");
+        }
+      }
+
+      function atualizarStatusBolinhas(roboAtivo) {
+        if (roboAtivo) {
+          atualizarStatusBolinhasCiclo("analisando");
+        } else {
+          atualizarStatusBolinhasCiclo("idle");
+        }
+      }
+
+      // Função para exibir operação em andamento na tabela superior
+      function exibirOperacaoEmAndamento(operacao) {
         const tabelaBody = document.getElementById("historico-tabela-body");
         if (!tabelaBody) return;
 
-        const linha = document.createElement("tr");
-        const resultado = operacao.resultado || 0;
-        const classeResultado =
-          resultado > 0 ? "positivo" : resultado < 0 ? "negativo" : "neutro";
+        const agora = new Date();
+        const dataStr = agora.toLocaleDateString("pt-BR");
+        const horaStr = agora.toLocaleTimeString("pt-BR");
+        const ativo = operacao.ativo || "1HZ75V";
+        const tipo = (operacao.tipo || "CALL").toUpperCase();
+        const valor = parseFloat(operacao.valor || 0.35).toFixed(2);
 
-        linha.innerHTML = `
-          <td>${new Date().toLocaleTimeString("pt-BR")}</td>
-          <td>${operacao.ativo || "N/A"}</td>
-          <td>${operacao.tipo || "N/A"}</td>
-          <td class="resultado-cell ${classeResultado} resultado-valor">$${resultado.toFixed(
-          2
-        )}</td>
+        tabelaBody.innerHTML = `
+          <tr id="linha-operacao-ativa">
+            <td>${dataStr}</td>
+            <td>${horaStr}</td>
+            <td><strong>${ativo}</strong></td>
+            <td><span class="tipo-${tipo.toLowerCase()}">${tipo}</span></td>
+            <td>$${valor}</td>
+            <td><span style="color: #2196F3; font-weight: bold;">Executando...</span></td>
+          </tr>
         `;
 
-        // Adiciona no topo da tabela
-        tabelaBody.insertBefore(linha, tabelaBody.firstChild);
+        atualizarStatusBolinhasCiclo("abrindo");
+      }
 
-        // Limita a 50 linhas
-        while (tabelaBody.children.length > 50) {
-          tabelaBody.removeChild(tabelaBody.lastChild);
+      // Função para finalizar operação: adiciona ao histórico geral e apaga da tabela superior
+      function finalizarOperacaoNaInterface(operacao) {
+        const tabelaCompleta = document.getElementById("historico-completo-body");
+        const tabelaAtual = document.getElementById("historico-tabela-body");
+
+        const agora = new Date();
+        const dataStr = agora.toLocaleDateString("pt-BR");
+        const horaStr = agora.toLocaleTimeString("pt-BR");
+        const ativo = operacao.ativo || "1HZ75V";
+        const tipo = (operacao.tipo || "CALL").toUpperCase();
+        const valor = parseFloat(operacao.valor || 0.35).toFixed(2);
+        const resultado = parseFloat(operacao.resultado || operacao.resultado_real || 0.0);
+        const classeResultado = resultado >= 0 ? "positivo" : "negativo";
+
+        // 1. Grava no histórico geral (completo)
+        if (tabelaCompleta) {
+          const novaLinha = document.createElement("tr");
+          novaLinha.innerHTML = `
+            <td>${dataStr}</td>
+            <td>${horaStr}</td>
+            <td>${ativo}</td>
+            <td>${tipo}</td>
+            <td title="Valor da entrada">$${valor}</td>
+            <td class="resultado ${classeResultado}">$${resultado.toFixed(2)}</td>
+          `;
+          tabelaCompleta.insertBefore(novaLinha, tabelaCompleta.firstChild);
         }
+
+        // 2. Apaga a operação da tabela superior conforme instrução
+        if (tabelaAtual) {
+          tabelaAtual.innerHTML = `
+            <tr id="linha-sem-operacao">
+              <td colspan="6" style="text-align: center; color: #888; padding: 12px;">Nenhuma operação em andamento</td>
+            </tr>
+          `;
+        }
+
+        // 3. Atualiza bolinhas: finalizado acende e depois reseta
+        atualizarStatusBolinhasCiclo("finalizado");
+        setTimeout(() => {
+          if (roboAtivo) {
+            atualizarStatusBolinhasCiclo("analisando");
+          } else {
+            atualizarStatusBolinhasCiclo("idle");
+          }
+        }, 2500);
+      }
+
+      // Função para adicionar resultado na tabela (redireciona para finalização limpa)
+      function adicionarResultadoTabela(operacao) {
+        finalizarOperacaoNaInterface(operacao);
       }
 
       // Função para mover histórico atual para histórico completo
@@ -1458,19 +1559,14 @@
         const tabelaCompleta = document.getElementById("historico-completo-body");
 
         if (tabelaAtual && tabelaCompleta && tabelaAtual.children.length > 0) {
-          // Move todas as linhas para o histórico completo
-          while (tabelaAtual.firstChild) {
-            const linha = tabelaAtual.firstChild;
-            // Adiciona timestamp se não tiver
-            if (linha.cells && linha.cells.length >= 4) {
-              const agora = new Date();
-              linha.cells[0].textContent = agora.toLocaleDateString('pt-BR');
-              linha.cells[1].textContent = agora.toLocaleTimeString('pt-BR');
-            }
-            tabelaCompleta.appendChild(linha);
+          const linhaAtiva = document.getElementById("linha-operacao-ativa");
+          if (linhaAtiva) {
+            tabelaAtual.innerHTML = `
+              <tr id="linha-sem-operacao">
+                <td colspan="6" style="text-align: center; color: #888; padding: 12px;">Nenhuma operação em andamento</td>
+              </tr>
+            `;
           }
-
-          console.log("Histórico movido para aba completa");
         }
       }
 
@@ -1484,17 +1580,6 @@
           <span class="log-emoji">📊</span>
           <span class="log-texto">${mensagem}</span>
         `;
-      }
-
-      // Função para atualizar status das bolinhas
-      function atualizarStatusBolinhas(roboAtivo) {
-        document.querySelectorAll(".bolinha").forEach((bolinha) => {
-          if (roboAtivo) {
-            bolinha.classList.add("ativo");
-          } else {
-            bolinha.classList.remove("ativo");
-          }
-        });
       }
 
       // Função para atualizar status do rodapé
@@ -1660,45 +1745,7 @@
 
         // Atualiza status do rodapé a cada 5 segundos
         setInterval(atualizarStatusRodape, 5000);
-
-        // Adiciona botões de teste (temporário)
-        adicionarBotoesTeste();
       });
-
-      // Função para adicionar botões de teste
-      function adicionarBotoesTeste() {
-        const container = document.querySelector('.painel-robo');
-        if (!container) return;
-
-        const divTeste = document.createElement('div');
-        divTeste.style.cssText = 'margin-top: 10px; padding: 8px; background: rgba(255,255,255,0.05); border-radius: 4px; text-align: center;';
-        divTeste.innerHTML = `
-          <div style="font-size: 11px; color: #888; margin-bottom: 5px;">🧪 Testes (temporário)</div>
-          <button onclick="simularOperacao(15)" style="margin: 2px; padding: 4px 8px; background: #4CAF50; color: white; border: none; border-radius: 3px; font-size: 10px;">+$15</button>
-          <button onclick="simularOperacao(-8)" style="margin: 2px; padding: 4px 8px; background: #f44336; color: white; border: none; border-radius: 3px; font-size: 10px;">-$8</button>
-          <button onclick="simularOperacao(22)" style="margin: 2px; padding: 4px 8px; background: #4CAF50; color: white; border: none; border-radius: 3px; font-size: 10px;">+$22</button>
-          <button onclick="resetarLucro()" style="margin: 2px; padding: 4px 8px; background: #666; color: white; border: none; border-radius: 3px; font-size: 10px;">Reset</button>
-        `;
-        container.appendChild(divTeste);
-      }
-
-      // Função para simular operação
-      function simularOperacao(resultado) {
-        fetch('/simular_operacao', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ resultado: resultado })
-        })
-        .then(response => response.json())
-        .then(data => {
-          console.log('Operação simulada:', data);
-          // Força atualização imediata
-          atualizarResumoFinanceiro();
-        })
-        .catch(error => {
-          console.error('Erro ao simular operação:', error);
-        });
-      }
 
       // Função para resetar lucro
       function resetarLucro() {

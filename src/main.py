@@ -38,11 +38,15 @@ from utils.gerador_licencas import (
 )
 from utils.gerador_admin import gerador_admin
 
-# Configuração de logging
+# Configuração de logging usando diretório canônico de logs
+os.makedirs(Config.LOGS_DIR, exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[logging.FileHandler("derivbot.log"), logging.StreamHandler()],
+    handlers=[
+        logging.FileHandler(os.path.join(Config.LOGS_DIR, "derivbot.log"), encoding="utf-8"),
+        logging.StreamHandler(),
+    ],
 )
 logger = logging.getLogger("DerivBot")
 
@@ -57,10 +61,8 @@ def ofuscar_segredo(valor: Any, visiveis_inicio: int = 4, visiveis_fim: int = 2)
     return f"{val_str[:visiveis_inicio]}***{val_str[-visiveis_fim:]}"
 
 
-# Diretório para armazenamento de dados - Ajustado para nova estrutura
-DATA_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data"
-)
+# Diretório canônico para armazenamento de dados
+DATA_DIR = Config.DATA_DIR
 os.makedirs(DATA_DIR, exist_ok=True)
 
 # Arquivo para armazenamento de licenças
@@ -2087,11 +2089,12 @@ def status_robo():
         except Exception:
             saldo_valor = 0.0
 
-        # Informações do ativo atual - ESTRATÉGIA TURBO FIXA
+        # Informações do ativo atual - dinâmico a partir do motor
+        par_atual = getattr(motor, "par_atual", "1HZ75V") if motor else "1HZ75V"
         ativo_info = {
-            "ativo": "1HZ75V",
-            "nome": "Volatility 75 Index (VIX75)",
-            "razao": "Estratégia Turbo - Contratos 15s",
+            "ativo": par_atual,
+            "nome": f"Volatility {par_atual.replace('1HZ', '').replace('V', '').replace('R_', '')} Index",
+            "razao": "Scanner Multi-Ativo - Micro-Scalper",
             "prioridade": 1,
         }
 

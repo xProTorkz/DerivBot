@@ -95,9 +95,10 @@ class LoggerUnificado:
 
         # Handler para arquivo
         try:
-            os.makedirs("logs", exist_ok=True)
+            logs_dir = getattr(Config, "LOGS_DIR", "logs")
+            os.makedirs(logs_dir, exist_ok=True)
             file_handler = logging.FileHandler(
-                "logs/derivbot_unificado.log", encoding="utf-8"
+                os.path.join(logs_dir, "derivbot_unificado.log"), encoding="utf-8"
             )
             file_handler.setFormatter(formatter)
             logger.addHandler(file_handler)

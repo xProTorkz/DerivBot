@@ -33,18 +33,22 @@ from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
+try:
+    from src.config.config import Config
+except ImportError:
+    from config.config import Config
+
 # Configuração de logging
+os.makedirs(Config.LOGS_DIR, exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[logging.FileHandler("derivbot.log"), logging.StreamHandler()],
+    handlers=[
+        logging.FileHandler(os.path.join(Config.LOGS_DIR, "derivbot.log"), encoding="utf-8"),
+        logging.StreamHandler(),
+    ],
 )
 logger = logging.getLogger("DerivBot")
-
-try:
-    from config.config import Config
-except ImportError:
-    from src.config.config import Config
 
 # Configurações
 DATA_DIR = Config.DATA_DIR

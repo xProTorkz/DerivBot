@@ -695,9 +695,12 @@ class Motor:
             "R_50",
         ]  # Múltiplos ativos
         self.par_atual = "1HZ75V"  # Ativo principal
-        self.ativo_fixo_turbo = True  # FIXA NO VIX75 PARA FOCAR EM ENTRADAS
-        self.rotacao_ativos = False  # DESABILITA rotação para focar em executar
+        self.ativo_fixo_turbo = False  # Modo multi-ativo habilitado (Issue #5)
+        self.rotacao_ativos = True  # Habilita rotação seletiva
         self.ultimo_ativo_usado = 0  # Índice do último ativo usado
+        self.tick_subscription_id_por_ativo: Dict[str, str] = {}
+        self.ultima_cotacao_por_ativo: Dict[str, float] = {}
+        self.ultimo_tick_timestamp_por_ativo: Dict[str, float] = {}
         self.logger.info(
             f"ESTRATEGIA TURBO MULTI-ATIVO ATIVADA - Ativos: {self.ativos_ativos}"
         )
@@ -849,11 +852,25 @@ class Motor:
                 restante = cooldown_s - tempo_desde_fechamento
                 return False, f"Gateway Risco: Em cooldown pós-operação ({restante:.1f}s restantes)"
 
-        # 3. Frescor dos ticks (stale data)
+        # 3. Frescor dos ticks (stale data) isolado por ativo
         max_stale = cfg_micro.get("gateway_risco", {}).get("tempo_max_tick_stale_s", 2.5)
-        idade_tick = time.time() - getattr(self, "ultimo_tick_timestamp", 0.0)
-        if getattr(self, "ultimo_tick_timestamp", 0.0) > 0 and idade_tick > max_stale:
-            return False, f"Gateway Risco: Dados de ticks obsoletos ({idade_tick:.1f}s > {max_stale}s)"
+        simbolo = (ativo or self.par_atual).upper().strip() if (ativo or self.par_atual) else None
+
+        ts_tick = 0.0
+        if hasattr(self, "ultimo_tick_timestamp_por_ativo") and self.ultimo_tick_timestamp_por_ativo:
+            if simbolo and simbolo in self.ultimo_tick_timestamp_por_ativo:
+                ts_tick = self.ultimo_tick_timestamp_por_ativo[simbolo]
+            elif not simbolo or simbolo == getattr(self, "par_atual", "1HZ75V"):
+                ts_tick = getattr(self, "ultimo_tick_timestamp", 0.0)
+        else:
+            ts_tick = getattr(self, "ultimo_tick_timestamp", 0.0)
+
+        if ts_tick > 0.0:
+            idade_tick = time.time() - ts_tick
+            if idade_tick > max_stale:
+                return False, f"Gateway Risco: Dados de ticks obsoletos para {simbolo or 'ativo'} ({idade_tick:.1f}s > {max_stale}s)"
+        else:
+            return False, f"Gateway Risco: Dados de ticks obsoletos ou ausentes para {simbolo or 'ativo'}"
 
         # 4. Saldo
         min_balance = cfg_micro.get("gateway_risco", {}).get("min_balance_usd", 1.0)
@@ -1096,16 +1113,36 @@ class Motor:
                     if not self.saldo_inicial or self.saldo_inicial <= 0:
                         self.saldo_inicial = self.saldo
 
-            # Processamento de ticks
+            # Processamento de ticks isolado por ativo
             if "tick" in data and data["tick"]:
                 tick_data = data["tick"]
-                self.ultimo_tick_timestamp = time.time()
-                self.ultima_cotacao = tick_data.get("quote", 0)
-                self.catalogador.adicionar_tick(self.ultima_cotacao)
+                now_ts = time.time()
+                symbol = str(
+                    tick_data.get("symbol")
+                    or data.get("echo_req", {}).get("ticks")
+                    or self.par_atual
+                ).upper().strip()
+                quote = float(tick_data.get("quote", 0.0))
 
-                # Executa o callback se registrado
-                if self.callback_tick:
-                    self.callback_tick(self.ultima_cotacao)
+                sub_id = data.get("subscription", {}).get("id") or tick_data.get("id")
+                if sub_id and symbol:
+                    self.tick_subscription_id_por_ativo[symbol] = str(sub_id)
+
+                self.ultimo_tick_timestamp_por_ativo[symbol] = now_ts
+                self.ultima_cotacao_por_ativo[symbol] = quote
+
+                # Roteia para catalogador com símbolo explícito (sem contaminação)
+                self.catalogador.adicionar_tick(quote, timestamp=now_ts, ativo=symbol)
+
+                # Mantém sincronizado com par_atual se for o caso
+                if symbol == self.par_atual:
+                    self.ultimo_tick_timestamp = now_ts
+                    self.ultima_cotacao = quote
+                    if self.callback_tick:
+                        self.callback_tick(self.ultima_cotacao)
+                elif not hasattr(self, "ultima_cotacao") or self.ultima_cotacao is None or self.ultima_cotacao == 0:
+                    self.ultimo_tick_timestamp = now_ts
+                    self.ultima_cotacao = quote
 
                 # Não executamos operações diretamente aqui, apenas através do app.py
                 # que controlará corretamente os valores de entrada
@@ -1395,6 +1432,7 @@ class Motor:
     def _on_close(self, _, close_status_code, close_msg):
         """Callback para quando a conexão é fechada."""
         self.conectado = False
+        self.tick_subscription_id_por_ativo.clear()
         self.logger.warning(
             f"Conexão fechada. Código: {close_status_code}, Msg: {close_msg}"
         )
@@ -1404,31 +1442,39 @@ class Motor:
             self._agendar_reconexao()
 
     def _inscrever_ticks(self):
-        """Inscreve para receber ticks do ativo atual."""
+        """Inscreve para receber ticks de todos os ativos monitorados com deduplicação."""
         try:
             if not self.ws or not self.conectado:
                 self.logger.warning("Não é possível inscrever ticks: não conectado")
                 return False
 
-            # Verifica se deve atualizar o ativo usando o scanner
-            self._atualizar_ativo_scanner()
+            pool_ativos = list(self.ativos_ativos)
+            if self.par_atual not in pool_ativos:
+                pool_ativos.append(self.par_atual)
 
-            req = {"ticks": self.par_atual, "subscribe": 1}
-            self.ws.send(json.dumps(req))
-            self.logger.info(f"Inscrito para receber ticks de {self.par_atual}")
+            inscricoes_feitas = 0
+            for ativo in pool_ativos:
+                if ativo in self.tick_subscription_id_por_ativo and self.tick_subscription_id_por_ativo[ativo]:
+                    continue  # Deduplicação: já inscrito
+
+                req = {"ticks": ativo, "subscribe": 1, "req_id": self._proximo_req_id()}
+                self.ws.send(json.dumps(req))
+                self.logger.info(f"Inscrito para receber ticks de {ativo}")
+                inscricoes_feitas += 1
+
+            # Atualiza o ativo do scanner se oportuno
+            self._atualizar_ativo_scanner()
             return True
         except Exception as e:
             self.logger.error(f"Erro ao inscrever ticks: {str(e)}")
             return False
 
     def _atualizar_ativo_scanner(self):
-        """Atualiza o ativo usando o scanner se necessário"""
+        """Atualiza o ativo usando dados reais do scanner se disponíveis"""
         try:
             import time
 
             agora = time.time()
-
-            # Verifica se é hora de fazer novo scan (a cada 60 segundos)
             if agora - self.ultimo_scan_ativo < 60:
                 return
 
@@ -1441,17 +1487,12 @@ class Motor:
             if not hasattr(self.catalogador, "ativos_priorizados"):
                 self.catalogador.inicializar_scanner_ativos()
 
-            # Obtém o melhor ativo
+            # Obtém o melhor ativo por análise técnica real
             melhor_ativo = self.catalogador.analisar_melhor_ativo()
 
-            # ESTRATÉGIA TURBO: MANTÉM VIX75 FIXO
-            if hasattr(self, "ativo_fixo_turbo") and self.ativo_fixo_turbo:
-                if self.par_atual != "1HZ75V":
-                    self.logger.info("FORCANDO RETORNO AO VIX75 (ESTRATEGIA TURBO)")
-                    self.definir_par("1HZ75V")
-            # Muda o ativo se necessário (apenas se não for modo turbo)
-            elif melhor_ativo and melhor_ativo != self.par_atual:
-                self.logger.info(f"Mudando para {melhor_ativo} (melhor oportunidade)")
+            # Muda o ativo se houver melhor oportunidade comprovada
+            if melhor_ativo and melhor_ativo != self.par_atual:
+                self.logger.info(f"Scanner multi-ativo: selecionado {melhor_ativo} (melhor assertividade)")
                 self.definir_par(melhor_ativo)
 
         except Exception as e:
@@ -1669,13 +1710,15 @@ class Motor:
                 if cooldown_cand_ts > 0 and (time.time() - cooldown_cand_ts) < cooldown_s:
                     continue
 
+                preco_cand = getattr(self, "ultima_cotacao_por_ativo", {}).get(cand_ativo) or (
+                    self.ultima_cotacao
+                    if hasattr(self, "ultima_cotacao") and self.ultima_cotacao
+                    else 100.0
+                )
+
                 analise_cand = self._analisar_entrada_turbo(
                     ativo=cand_ativo,
-                    preco_atual=(
-                        self.ultima_cotacao
-                        if hasattr(self, "ultima_cotacao") and self.ultima_cotacao
-                        else 100.0
-                    ),
+                    preco_atual=preco_cand,
                     modo=self.modo_operacao,
                     meta=self.meta_diaria,
                     lucro_atual=lucro_atual,
@@ -2218,12 +2261,17 @@ class Motor:
             return []
 
     def desconectar(self):
-        """Fecha a conexão com a API."""
+        """Fecha a conexão com a API e limpa subscrições de ticks."""
         try:
             if self.ws:
-                self.logger.info("Desconectando WebSocket...")
+                self.logger.info("Desconectando WebSocket e cancelando subscrições...")
+                try:
+                    self.ws.send(json.dumps({"forget_all": "ticks"}))
+                except Exception:
+                    pass
                 self.ws.close()
                 self.ws = None
+            self.tick_subscription_id_por_ativo.clear()
             self.conectado = False
         except Exception as e:
             self.logger.error(f"Erro ao desconectar: {str(e)}")
