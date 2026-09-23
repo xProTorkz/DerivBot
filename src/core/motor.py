@@ -881,10 +881,11 @@ class Motor:
             # Atualiza o timestamp da última mensagem recebida
             self.ultima_mensagem_recebida = time.time()
 
-            # Reduz verbosidade para mensagens frequentes (ticks)
+            # Reduz verbosidade para mensagens frequentes (ticks).
+            # IMPORTANTE: este bloco controla apenas log. O frescor do tick é
+            # atualizado quando uma mensagem de tick válida é realmente processada.
             if '"tick"' not in message or time.time() - self.ultimo_tick_timestamp > 5:
                 self.logger.debug(f"Mensagem recebida: {message[:100]}...")
-                self.ultimo_tick_timestamp = time.time()
 
             data = json.loads(message)
             self.ultima_resposta = data
@@ -921,6 +922,7 @@ class Motor:
             # Processamento de ticks
             if "tick" in data and data["tick"]:
                 tick_data = data["tick"]
+                self.ultimo_tick_timestamp = time.time()
                 self.ultima_cotacao = tick_data.get("quote", 0)
                 self.catalogador.adicionar_tick(self.ultima_cotacao)
 

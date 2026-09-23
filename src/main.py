@@ -1824,19 +1824,35 @@ def toggle_bot():
     if "token" not in session:
         licenca_auto = verificar_autenticacao_automatica()
         if licenca_auto:
-            # Restaura sessão automaticamente
+            # Restaura sessão automaticamente respeitando o modo DEMO por padrão.
             token_real, token_demo = obter_tokens_da_licenca(licenca_auto)
-            if token_real:
-                session["token"] = token_real
-                session["tipo_conta"] = "real"
-                session["codigo_licenca"] = licenca_auto["codigo_licenca"]
-                session["deriv_account"] = licenca_auto.get("deriv_real", "")
-                # Salva ambos os tokens na sessão para permitir troca de conta
-                session["token_real"] = token_real
-                session["token_demo"] = token_demo
-                logger.info("Sessão restaurada automaticamente para toggle_bot")
+            from config.config import Config
+            modo_real = getattr(Config, "MODO_REAL_PADRAO", False)
+
+            if token_demo and not modo_real:
+                tipo_conta = "demo"
+                token_ativo = token_demo
+            elif token_real:
+                tipo_conta = "real"
+                token_ativo = token_real
+            elif token_demo:
+                tipo_conta = "demo"
+                token_ativo = token_demo
             else:
                 return jsonify({"status": "erro", "mensagem": "Não autenticado"}), 401
+
+            session["token"] = token_ativo
+            session["tipo_conta"] = tipo_conta
+            session["codigo_licenca"] = licenca_auto["codigo_licenca"]
+            session["deriv_account"] = licenca_auto.get(
+                f"deriv_{tipo_conta}", f"account_{token_ativo[:8]}"
+            )
+            # Salva ambos os tokens apenas para troca explícita de conta no painel.
+            session["token_real"] = token_real or ""
+            session["token_demo"] = token_demo or ""
+            logger.info(
+                f"Sessão restaurada automaticamente para toggle_bot em modo {tipo_conta.upper()}"
+            )
         else:
             return jsonify({"status": "erro", "mensagem": "Não autenticado"}), 401
 
@@ -1975,22 +1991,12 @@ def toggle_bot():
                 motor.modo_operacao = modo
                 motor.meta_diaria = meta
 
-                # Inicia sistema inteligente de forma segura
+                # iniciar_sistema_inteligente() já cria a própria thread interna.
+                # Chamamos diretamente para capturar falhas imediatas e não devolver
+                # um falso "iniciado" para a interface.
                 if hasattr(motor, "iniciar_sistema_inteligente"):
-                    # Inicia em thread separada para não travar
-                    import threading
-
-                    def iniciar_motor_seguro():
-                        try:
-                            motor.iniciar_sistema_inteligente()
-                            logger.info("Sistema inteligente iniciado com sucesso")
-                        except Exception as e:
-                            logger.error(f"Erro ao iniciar sistema inteligente: {e}")
-
-                    thread = threading.Thread(target=iniciar_motor_seguro, daemon=True)
-                    thread.start()
-
-                    logger.info("SISTEMA INTELIGENTE INICIADO EM THREAD SEPARADA")
+                    motor.iniciar_sistema_inteligente()
+                    logger.info("SISTEMA INTELIGENTE INICIADO")
                     adicionar_log_tempo_real(
                         "[INICIANDO] Motor Turbo iniciado!", "success"
                     )
@@ -2009,10 +2015,18 @@ def toggle_bot():
             except Exception as e:
                 logger.error(f"ERRO ao iniciar sistema: {e}")
                 adicionar_log_tempo_real(f"[ERRO] ERRO: {str(e)}", "error")
-
-                # Continua mesmo com erro para não travar a interface
-                adicionar_log_tempo_real(
-                    "[RECONECTANDO] Sistema em modo básico", "warning"
+                robo_ativo = False
+                status_operacao = "erro"
+                if motor is not None and hasattr(motor, "rodando"):
+                    motor.rodando = False
+                return (
+                    jsonify(
+                        {
+                            "status": "erro",
+                            "mensagem": f"Falha ao iniciar o sistema inteligente: {str(e)}",
+                        }
+                    ),
+                    500,
                 )
 
             return jsonify(

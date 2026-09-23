@@ -1511,7 +1511,10 @@
             const statusDot = document.getElementById("status-dot-conexao");
 
             if (statusTexto && statusDot) {
-              if (data.saldo > 0) {
+              const conectadoDeriv = Boolean(
+                data.motor_status && data.motor_status.conectado
+              );
+              if (conectadoDeriv) {
                 statusTexto.textContent = "Conectado";
                 statusDot.className = "status-dot pequeno conectado";
               } else {
