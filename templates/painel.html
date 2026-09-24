@@ -992,20 +992,62 @@
         // CSS dos logs
         const style = document.createElement("style");
         style.textContent = `
-            /* Estilo neutro para status das bolinhas (robô parado) */
-            .bolinha {
-                background: #2a2a2a;
-                border: 2px solid #444;
-                box-shadow: none;
-                transition: all 0.3s ease;
+            /* Container de cada etapa com largura fixa para alinhamento simétrico perfeito */
+            .status-etapas > div {
+                width: 70px !important;
+                z-index: 5 !important;
+                position: relative !important;
+                text-align: center !important;
+                display: flex !important;
+                flex-direction: column !important;
+                align-items: center !important;
             }
 
-            /* Bolinhas ativas 100% amarelas (Issue #25 - ZERO bolinhas verdes neste componente) */
-            .bolinha.ativo {
+            /* Linhas conectoras fixadas no centro exato das bolinhas */
+            .status-etapas::before,
+            .status-etapas::after {
+                top: 7.5px !important;
+                height: 3px !important;
+                left: 35px !important;
+                z-index: 1 !important;
+            }
+
+            .status-etapas::before {
+                right: 35px !important;
+                background-color: rgba(255, 255, 255, 0.12) !important;
+            }
+
+            /* Linha conectora de progresso operacional 100% amarela (Issue #25) */
+            .status-etapas::after {
+                right: auto !important;
+                width: calc(var(--progresso-etapas, 0%) * (100% - 70px) / 100) !important;
+                max-width: calc(100% - 70px) !important;
+                background-color: #FFD600 !important;
+                box-shadow: 0 0 8px rgba(255, 214, 0, 0.8) !important;
+                transition: width 0.4s ease-in-out !important;
+                z-index: 2 !important;
+            }
+
+            /* Estilo neutro para status das bolinhas (100% sólidas e opacas) */
+            .bolinha {
+                width: 18px !important;
+                height: 18px !important;
+                background: #2a2a2a !important;
+                border: 2px solid #444 !important;
+                box-shadow: none !important;
+                transition: all 0.3s ease !important;
+                z-index: 5 !important;
+                position: relative !important;
+                opacity: 1 !important;
+            }
+
+            /* Bolinhas ativas 100% amarelas e 100% opacas (Issue #25) */
+            .bolinha.ativo,
+            .bolinha.ativa {
                 background: #FFD600 !important;
                 border-color: #FFD600 !important;
                 box-shadow: 0 0 10px rgba(255, 214, 0, 0.7) !important;
-                transform: scale(1.15);
+                opacity: 1 !important;
             }
 
             /* Bolinhas em processamento 100% amarelas com pulso */
@@ -1013,21 +1055,39 @@
                 background: #FFC107 !important;
                 border-color: #FFD600 !important;
                 box-shadow: 0 0 12px rgba(255, 214, 0, 0.85) !important;
-                animation: pulse 1s infinite;
+                animation: pulse 1s infinite ease-in-out !important;
+                opacity: 1 !important;
             }
 
-            /* Linha conectora de progresso operacional 100% amarela (Issue #25) */
-            .status-etapas::after {
-                width: var(--progresso-etapas, 0%) !important;
-                background-color: #FFD600 !important;
-                box-shadow: 0 0 8px rgba(255, 214, 0, 0.8) !important;
-                transition: width 0.4s ease-in-out !important;
+            .bolinha.pisca {
+                animation: piscar 1.2s infinite ease-in-out !important;
+                opacity: 1 !important;
+            }
+
+            @keyframes piscar {
+                0%, 100% {
+                    transform: scale(1);
+                    box-shadow: 0 0 6px rgba(255, 214, 0, 0.5);
+                    background-color: #FFD600;
+                }
+                50% {
+                    transform: scale(1.18);
+                    box-shadow: 0 0 16px rgba(255, 214, 0, 1), 0 0 24px rgba(255, 214, 0, 0.6);
+                    background-color: #FFE082;
+                }
             }
 
             @keyframes pulse {
-                0% { transform: scale(1); }
-                50% { transform: scale(1.15); }
-                100% { transform: scale(1); }
+                0%, 100% {
+                    transform: scale(1);
+                    box-shadow: 0 0 6px rgba(255, 214, 0, 0.5);
+                    background-color: #FFC107;
+                }
+                50% {
+                    transform: scale(1.18);
+                    box-shadow: 0 0 16px rgba(255, 214, 0, 1), 0 0 24px rgba(255, 214, 0, 0.7);
+                    background-color: #FFD54F;
+                }
             }
 
             .status-conectado { color: #4CAF50; }
@@ -1711,16 +1771,12 @@
 
             let pctProgresso = 0;
             if (botEstaAtivo) {
-              if (estagio === "SETTLED" || estagio === "FINALIZADO" || numAbertas > 0 || estagio === "BUY_CONFIRMED") {
+              if (estagio === "SETTLED" || estagio === "FINALIZADO") {
                 pctProgresso = 100;
-              } else if (estagio === "BUY_SENT" || estagio === "PROPOSAL_SENT" || estagio === "PROPOSAL_RECEIVED" || estagio === "RISK_GATE") {
-                pctProgresso = 75;
-              } else if (estagio === "SIGNAL" || estagio === "SINAL") {
+              } else if (numAbertas > 0 || estagio === "BUY_CONFIRMED" || estagio === "BUY_SENT" || estagio === "PROPOSAL_SENT" || estagio === "PROPOSAL_RECEIVED" || estagio === "RISK_GATE" || estagio === "SIGNAL" || estagio === "SINAL") {
                 pctProgresso = 50;
-              } else if (estagio === "SCAN" || estagio === "ANALISANDO") {
-                pctProgresso = 20;
               } else {
-                pctProgresso = 15;
+                pctProgresso = 0;
               }
             } else {
               pctProgresso = 0;

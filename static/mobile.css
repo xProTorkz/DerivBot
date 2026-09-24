@@ -95,8 +95,24 @@
     padding: 0.6rem 1rem;
   }
   
+  .status-etapas > div {
+    width: 60px;
+  }
+  
   .status-etapas > div span {
     font-size: 0.65rem;
+  }
+  
+  .status-etapas::before,
+  .status-etapas::after {
+    left: 30px !important;
+    right: 30px !important;
+    top: 7px;
+  }
+
+  .status-etapas::after {
+    right: auto !important;
+    max-width: calc(100% - 60px) !important;
   }
   
   .bolinha {
@@ -169,8 +185,24 @@
     padding: 0.5rem 0.8rem;
   }
   
+  .status-etapas > div {
+    width: 50px;
+  }
+  
   .status-etapas > div span {
     font-size: 0.6rem;
+  }
+  
+  .status-etapas::before,
+  .status-etapas::after {
+    left: 25px !important;
+    right: 25px !important;
+    top: 6px;
+  }
+
+  .status-etapas::after {
+    right: auto !important;
+    max-width: calc(100% - 50px) !important;
   }
   
   .bolinha {

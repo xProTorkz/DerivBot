@@ -8,17 +8,19 @@ console.log("✅ DerivBot JavaScript carregado e executando!");
 document.addEventListener("DOMContentLoaded", function () {
   // Código para garantir que a barra de progresso termine nas bolinhas
   (function fixProgressBar() {
-    // Adicionar um estilo específico que force os limites da barra
+    // Adicionar um estilo específico que force os limites da barra exatamente no centro das bolinhas
     const styleEl = document.createElement("style");
     styleEl.id = "progress-bar-fix";
     styleEl.textContent = `
       .status-etapas::before {
-        left: 20px !important;
-        right: 18px !important;
+        left: 35px !important;
+        right: 35px !important;
+        top: 7.5px !important;
       }
       .status-etapas::after {
-        left: 20px !important;
-        max-width: calc(100% - 38px) !important;
+        left: 35px !important;
+        max-width: calc(100% - 70px) !important;
+        top: 7.5px !important;
       }
     `;
     document.head.appendChild(styleEl);
@@ -383,13 +385,13 @@ document.addEventListener("DOMContentLoaded", function () {
         window.innerWidth <= 768 ||
         document.body.classList.contains("mobile-device");
 
-      // Calcula o valor para desktop - padrão
+      // Calcula o valor para desktop - padrão (conectando exatamente nos centros das bolinhas)
       let widthValue =
         progresso === 0
           ? "0"
           : progresso === 100
-          ? "calc(100% - 32px)"
-          : `calc(${progresso}% * (100% - 32px) / 100)`;
+          ? "calc(100% - 70px)"
+          : `calc(${progresso}% * (100% - 70px) / 100)`;
 
       // Utiliza a função do mobile.js se disponível
       if (

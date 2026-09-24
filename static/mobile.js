@@ -349,18 +349,38 @@ document.addEventListener("DOMContentLoaded", function () {
     const statusEtapas = document.querySelector(".status-etapas");
     if (!statusEtapas) return;
 
-    // Adiciona estilo específico para dispositivos móveis
+    // Adiciona estilo específico para dispositivos móveis conectando exatamente nos centros das bolinhas
     const styleEl = document.createElement("style");
     styleEl.id = "mobile-progress-bar-fix";
     styleEl.textContent = `
-      @media (max-width: 480px) {
-        .status-etapas::before {
-          left: 18px !important;
-          right: 16px !important;
+      @media (max-width: 768px) {
+        .status-etapas > div {
+          width: 60px !important;
+        }
+        .status-etapas::before,
+        .status-etapas::after {
+          left: 30px !important;
+          right: 30px !important;
+          top: 7px !important;
         }
         .status-etapas::after {
-          left: 18px !important;
-          max-width: calc(100% - 34px) !important;
+          right: auto !important;
+          max-width: calc(100% - 60px) !important;
+        }
+      }
+      @media (max-width: 480px) {
+        .status-etapas > div {
+          width: 50px !important;
+        }
+        .status-etapas::before,
+        .status-etapas::after {
+          left: 25px !important;
+          right: 25px !important;
+          top: 6px !important;
+        }
+        .status-etapas::after {
+          right: auto !important;
+          max-width: calc(100% - 50px) !important;
         }
       }
     `;
@@ -428,28 +448,27 @@ document.addEventListener("DOMContentLoaded", function () {
 
   // Função para calcular a largura da barra de progresso com base no tamanho da tela
   function calcularWidthProgressoBarra(progresso) {
-    // Calcula o valor correto com base no tamanho da tela
-    if (window.innerWidth <= 320) {
-      // Telas muito pequenas
+    if (window.innerWidth <= 480) {
+      // Mobile pequeno (etapa = 50px, margem = 25px em cada ponta)
       return progresso === 0
         ? "0"
         : progresso === 100
-        ? "calc(100% - 18px)"
-        : `calc(${progresso}% * (100% - 18px) / 100)`;
-    } else if (window.innerWidth <= 480) {
-      // Telas pequenas (mobile)
+        ? "calc(100% - 50px)"
+        : `calc(${progresso}% * (100% - 50px) / 100)`;
+    } else if (window.innerWidth <= 768) {
+      // Tablet / Mobile largo (etapa = 60px, margem = 30px em cada ponta)
       return progresso === 0
         ? "0"
         : progresso === 100
-        ? "calc(100% - 30px)"
-        : `calc(${progresso}% * (100% - 30px) / 100)`;
+        ? "calc(100% - 60px)"
+        : `calc(${progresso}% * (100% - 60px) / 100)`;
     } else {
-      // Telas médias e grandes - valor padrão
+      // Desktop padrão (etapa = 70px, margem = 35px em cada ponta)
       return progresso === 0
         ? "0"
         : progresso === 100
-        ? "calc(100% - 32px)"
-        : `calc(${progresso}% * (100% - 32px) / 100)`;
+        ? "calc(100% - 70px)"
+        : `calc(${progresso}% * (100% - 70px) / 100)`;
     }
   }
 

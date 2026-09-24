@@ -847,58 +847,59 @@ body {
   overflow: visible;
 }
 
-/* Ajustando precisamente os pseudo-elementos para não ultrapassar as bolinhas */
+/* Ajustando precisamente os pseudo-elementos para conectar exatamente no centro das bolinhas */
 .status-etapas::before,
 .status-etapas::after {
   content: "";
   position: absolute;
-  top: 9px;
+  top: 7.5px;
   height: 3px;
+  left: 35px !important;
+  right: 35px !important;
   z-index: 1;
 }
 
 .status-etapas::before {
-  left: 22px !important; /* Ajustado para ficar após a primeira bolinha */
-  right: 18px !important; /* Valor igual à largura total da bolinha */
-  background-color: var(--transparente-claro);
+  background-color: var(--transparente-claro, rgba(255, 255, 255, 0.12));
 }
 
 .status-etapas::after {
-  left: 22px !important; /* Ajustado para ficar após a primeira bolinha */
+  left: 35px !important;
+  right: auto !important;
   width: 0;
-  max-width: calc(
-    100% - 40px
-  ) !important; /* Ajustado para compensar o aumento do left */
-  background-color: var(--amarelo-escuro);
-  box-shadow: 0 0 5px var(--amarelo-claro);
-  transition: width 0.3s ease-in-out;
+  max-width: calc(100% - 70px) !important;
+  background-color: #FFD600;
+  box-shadow: 0 0 8px rgba(255, 214, 0, 0.8);
+  transition: width 0.4s ease-in-out;
   z-index: 2;
 }
 
-/* Container de cada etapa */
+/* Container de cada etapa - largura fixa para centralizar perfeitamente as 3 bolinhas */
 .status-etapas > div {
   display: flex;
   flex-direction: column;
   align-items: center;
   font-size: 0.75rem;
   color: rgba(204, 204, 204, 0.8);
-  z-index: 3;
+  z-index: 5;
   position: relative;
   gap: 4px;
-  width: auto;
+  width: 70px;
+  text-align: center;
 }
 
-/* === BOLINHAS DE STATUS === */
+/* === BOLINHAS DE STATUS (100% SÓLIDAS E OPACAS) === */
 .bolinha {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background-color: #333;
+  background-color: #2a2a2a;
   border: 2px solid #444;
   transition: all 0.3s ease;
-  z-index: 3;
+  z-index: 5;
   position: relative;
   margin-bottom: 2px;
+  opacity: 1 !important;
 }
 
 .bolinha.grande {
@@ -912,29 +913,54 @@ body {
   border-width: 1.5px;
 }
 
+.bolinha.ativo,
 .bolinha.ativa {
-  background-color: var(--amarelo-claro);
-  border-color: var(--amarelo-escuro);
-  box-shadow: 0 0 5px var(--amarelo-claro);
+  background-color: #FFD600 !important;
+  border-color: #FFD600 !important;
+  box-shadow: 0 0 10px rgba(255, 214, 0, 0.7) !important;
+  opacity: 1 !important;
+}
+
+.bolinha.processando {
+  background-color: #FFC107 !important;
+  border-color: #FFD600 !important;
+  box-shadow: 0 0 12px rgba(255, 214, 0, 0.85) !important;
+  opacity: 1 !important;
+  animation: pulse 1s infinite ease-in-out;
 }
 
 .bolinha.pisca {
-  animation: piscar 1.5s infinite;
-  -webkit-animation: piscar 1.5s infinite;
-  -moz-animation: piscar 1.5s infinite;
-  -ms-animation: piscar 1.5s infinite;
+  animation: piscar 1.2s infinite ease-in-out !important;
+  -webkit-animation: piscar 1.2s infinite ease-in-out !important;
+  opacity: 1 !important;
 }
 
-/* === ANIMAÇÕES COM PREFIXOS CROSS-BROWSER === */
+/* === ANIMAÇÕES COM OPACIDADE 100% SÓLIDA (ZERO VAZAMENTO DA BARRA) === */
 @keyframes piscar {
   0%,
   100% {
-    opacity: 1;
     transform: scale(1);
+    box-shadow: 0 0 6px rgba(255, 214, 0, 0.5);
+    background-color: #FFD600;
   }
   50% {
-    opacity: 0.6;
-    transform: scale(1.1);
+    transform: scale(1.18);
+    box-shadow: 0 0 16px rgba(255, 214, 0, 1), 0 0 24px rgba(255, 214, 0, 0.6);
+    background-color: #FFE082;
+  }
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 6px rgba(255, 214, 0, 0.5);
+    background-color: #FFC107;
+  }
+  50% {
+    transform: scale(1.18);
+    box-shadow: 0 0 16px rgba(255, 214, 0, 1), 0 0 24px rgba(255, 214, 0, 0.7);
+    background-color: #FFD54F;
   }
 }
 
@@ -1478,8 +1504,24 @@ body {
     padding: 0.6rem 1rem;
   }
 
+  .status-etapas > div {
+    width: 60px;
+  }
+
   .status-etapas > div span {
     font-size: 0.65rem;
+  }
+
+  .status-etapas::before,
+  .status-etapas::after {
+    left: 30px !important;
+    right: 30px !important;
+    top: 7px;
+  }
+
+  .status-etapas::after {
+    right: auto !important;
+    max-width: calc(100% - 60px) !important;
   }
 
   .bolinha {
@@ -1638,8 +1680,24 @@ body {
     padding: 0.5rem 0.8rem;
   }
 
+  .status-etapas > div {
+    width: 50px;
+  }
+
   .status-etapas > div span {
     font-size: 0.6rem;
+  }
+
+  .status-etapas::before,
+  .status-etapas::after {
+    left: 25px !important;
+    right: 25px !important;
+    top: 6px;
+  }
+
+  .status-etapas::after {
+    right: auto !important;
+    max-width: calc(100% - 50px) !important;
   }
 
   .bolinha {
