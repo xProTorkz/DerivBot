@@ -9,7 +9,7 @@ BRANCH=main
 MASTER_ISSUE=#11
 ACTIVE_ISSUE=#25 (DONE) -> NEXT: #21
 TASK_TYPE=INTELLIGENCE
-BASELINE_SHA=f9cc3c713acaebf4c022e30441d141c198f1c274
+BASELINE_SHA=44f8deda775191b49aa2bf32d8252277bb042f56
 NEXT_AFTER_ACTIVE=#21
 DEMO_ONLY=YES
 REAL_ORDER_SENT=NO
@@ -17,8 +17,8 @@ REAL_ORDER_SENT=NO
 
 ## Execução concluída
 
-#25 — Inteligência assertiva + recuperação 2x limitada pela meta da sessão.
-Status: DONE (Validado com 105/105 testes, commit f9cc3c7 sincronizado com origin/main).
+#25 — Inteligência assertiva + recuperação 2x limitada pela meta da sessão + UI Stepper canaleta contínua vazada e proporção original (bolinhas 16px, canaleta 2.5px).
+Status: DONE (Validado com 105/105 testes, commit 44f8ded sincronizado com origin/main).
 
 Próxima tarefa autorizada na fila: #21 (E2E/soak DEMO).
 
