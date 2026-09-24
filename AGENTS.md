@@ -36,6 +36,23 @@ Roteamento canônico:
 
 Para tarefas de código, usar ambas sob demanda. Não criar Skill nova sem necessidade comprovada.
 
+
+## Roteamento de Skill por tipo de tarefa
+
+O criador da Issue deve preencher `TASK_TYPE`. O Antigravity usa o roteamento abaixo sem procurar outra Skill se não houver necessidade explícita.
+
+| TASK_TYPE | Skill principal | Skill de suporte | Contexto inicial |
+|---|---|---|---|
+| `INTELLIGENCE` | `testes-validacao` | `pesquisa-projeto` | Issue + inteligência + testes focados |
+| `RISK` | `testes-validacao` | `pesquisa-projeto` | Issue + motor/config + testes de risco |
+| `UI` | `testes-validacao` | `pesquisa-projeto` | Issue + painel/scripts/style |
+| `RUNTIME` | `testes-validacao` | `pesquisa-projeto` | Issue + main/motor/deriv_api |
+| `AUTH` | `testes-validacao` | `pesquisa-projeto` | Issue + auth/runtime + testes auth |
+| `AUDIT` | `pesquisa-projeto` | `testes-validacao` | estado canônico + Issue + evidências |
+| `STATUS` | `pesquisa-projeto` | nenhuma | estado canônico + GitHub live |
+
+Se a tarefa combinar tipos, usar o tipo dominante e carregar apenas o segundo conjunto de arquivos quando o critério de aceite exigir.
+
 ## Mapa mínimo do código
 
 ### Inteligência / sinais / timing / regime
