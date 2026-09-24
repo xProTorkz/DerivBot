@@ -496,8 +496,9 @@ class ReversalConfirmator:
         else:
             ticks_aprovados = 0
 
-        # Critério de aprovação: virada demonstrada E (rejeição do extremo OU desaceleração)
-        confirmado = virada and (rejeicao_extremo or desacelerando)
+        # Critério de aprovação rigoroso: virada demonstrada E rejeição real do extremo
+        # NUNCA compra CALL se estiver renovando mínimas e NUNCA compra PUT se estiver renovando máximas
+        confirmado = virada and rejeicao_extremo
 
         pontuacao = 0.0
         if confirmado:
