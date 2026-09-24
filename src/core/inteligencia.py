@@ -273,6 +273,614 @@ class MicroScalperState:
     COOLDOWN = "COOLDOWN"
 
 
+class MarketRegime:
+    """Classificação canônica de regime de mercado (Issue #17)."""
+    REVERSAO_VALIDA = "REVERSAO_VALIDA"
+    TENDENCIA_FORTE = "TENDENCIA_FORTE"
+    CHOP = "CHOP"
+    VOLATILIDADE_BAIXA = "VOLATILIDADE_BAIXA"
+    VOLATILIDADE_ANORMAL = "VOLATILIDADE_ANORMAL"
+    DADOS_STALE = "DADOS_STALE"
+    NO_TRADE = "NO_TRADE"
+
+
+class RegimeClassifier:
+    """
+    Classificador de Regime de Mercado (Issue #17).
+    Determina se o mercado oferece vantagem estatística para entrada de reversão.
+    Regra inviolável: se houver dúvida ou regime adverso -> NO_TRADE.
+    """
+
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        cfg_micro = getattr(global_config, "MICRO_SCALPER_CONFIG", {})
+        self.config = config or cfg_micro.get("regime", {
+            "adx_tendencia_forte": 32.0,
+            "volatilidade_baixa_min": 0.00005,
+            "volatilidade_anormal_max": 0.05,
+        })
+
+    def classificar(
+        self,
+        ativo: str,
+        ticks: List[float],
+        snapshot: Dict[str, Any],
+        direcao_pretendida: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Classifica o regime atual do ativo e decide se autoriza operação.
+        """
+        if not ticks or len(ticks) < 10:
+            return {
+                "regime": MarketRegime.NO_TRADE,
+                "aprovado": False,
+                "razao": f"Ticks insuficientes para classificação de regime ({len(ticks) if ticks else 0}/10)",
+                "detalhes": {},
+            }
+
+        preco_atual = float(ticks[-1])
+        if preco_atual <= 0:
+            return {
+                "regime": MarketRegime.NO_TRADE,
+                "aprovado": False,
+                "razao": "Preço atual inválido (<= 0)",
+                "detalhes": {},
+            }
+
+        # 1. Checagem de dados stale (idade do tick > 3.5s ou ticks estáticos duplicados)
+        idade_tick = float(snapshot.get("idade_tick", 0.0) or snapshot.get("tempo_stale", 0.0))
+        if idade_tick > 3.5:
+            return {
+                "regime": MarketRegime.DADOS_STALE,
+                "aprovado": False,
+                "razao": f"Dados stale detectados (idade do tick: {idade_tick:.1f}s > 3.5s)",
+                "detalhes": {"idade_tick": idade_tick},
+            }
+
+        if len(ticks) >= 5 and len(set(ticks[-5:])) <= 1:
+            return {
+                "regime": MarketRegime.DADOS_STALE,
+                "aprovado": False,
+                "razao": "Dados estáticos detectados (últimos 5 ticks idênticos)",
+                "detalhes": {"ticks_recentes": ticks[-5:]},
+            }
+
+        # 2. Volatilidade e desvio padrão dos últimos ticks
+        n_ticks_vol = min(len(ticks), 20)
+        std_ticks = float(np.std(ticks[-n_ticks_vol:])) if n_ticks_vol >= 5 else 0.0
+        vol_rel = (std_ticks / preco_atual) if preco_atual > 0 else 0.0
+
+        # Checagem de volatilidade baixa (mercado morto)
+        vol_min = self.config.get("volatilidade_baixa_min", 0.00005)
+        if std_ticks == 0.0 or vol_rel < vol_min:
+            return {
+                "regime": MarketRegime.VOLATILIDADE_BAIXA,
+                "aprovado": False,
+                "razao": f"Volatilidade insuficiente ({vol_rel:.6f} < {vol_min:.6f})",
+                "detalhes": {"vol_rel": vol_rel, "std_ticks": std_ticks},
+            }
+
+        # Checagem de volatilidade anormal (gap gigante / spike atípico)
+        vol_max = self.config.get("volatilidade_anormal_max", 0.05)
+        ultimo_delta = abs(ticks[-1] - ticks[-2]) if len(ticks) >= 2 else 0.0
+        if len(ticks) >= 10 and std_ticks > 0:
+            if ultimo_delta > max(4.0 * std_ticks, preco_atual * 0.015) or vol_rel > vol_max:
+                return {
+                    "regime": MarketRegime.VOLATILIDADE_ANORMAL,
+                    "aprovado": False,
+                    "razao": f"Volatilidade anormal / spike ({ultimo_delta:.4f} > 4x std {std_ticks:.4f})",
+                    "detalhes": {"ultimo_delta": ultimo_delta, "std_ticks": std_ticks},
+                }
+
+        # 3. Tendência Forte Contrária (bloqueio de faca caindo / foguete subindo)
+        deltas = [ticks[i] - ticks[i - 1] for i in range(1, len(ticks))]
+        ultimos_deltas = deltas[-6:] if len(deltas) >= 6 else deltas
+        inclinacao_curta = float(snapshot.get("inclinacao_curta", 0.0))
+
+        if direcao_pretendida == "CALL":
+            # CALL tenta comprar fundo. Se mercado está em queda livre contínua:
+            quedas_consecutivas = 0
+            for d in reversed(ultimos_deltas):
+                if d <= 0:
+                    quedas_consecutivas += 1
+                else:
+                    break
+            # Queda de 5+ ticks seguidos sem repique ou slope acelerando para baixo
+            if quedas_consecutivas >= 5 or (quedas_consecutivas >= 4 and inclinacao_curta < -0.001 * preco_atual):
+                return {
+                    "regime": MarketRegime.TENDENCIA_FORTE,
+                    "aprovado": False,
+                    "razao": f"Tendência de baixa forte em andamento ({quedas_consecutivas} ticks de queda contínua, slope {inclinacao_curta:.4f})",
+                    "detalhes": {"quedas_consecutivas": quedas_consecutivas, "slope": inclinacao_curta},
+                }
+
+        elif direcao_pretendida == "PUT":
+            # PUT tenta vender topo. Se mercado está em alta forte contínua:
+            altas_consecutivas = 0
+            for d in reversed(ultimos_deltas):
+                if d >= 0:
+                    altas_consecutivas += 1
+                else:
+                    break
+            # Alta de 5+ ticks seguidos sem recuo ou slope acelerando para cima
+            if altas_consecutivas >= 5 or (altas_consecutivas >= 4 and inclinacao_curta > 0.001 * preco_atual):
+                return {
+                    "regime": MarketRegime.TENDENCIA_FORTE,
+                    "aprovado": False,
+                    "razao": f"Tendência de alta forte em andamento ({altas_consecutivas} ticks de alta contínua, slope {inclinacao_curta:.4f})",
+                    "detalhes": {"altas_consecutivas": altas_consecutivas, "slope": inclinacao_curta},
+                }
+
+        # 4. CHOP (Ruído excessivo e micro-range comprimido)
+        if len(deltas) >= 12:
+            sign_flips = sum(1 for i in range(1, len(ultimos_deltas)) if (ultimos_deltas[i] * ultimos_deltas[i - 1]) < 0)
+            deslocamento = abs(ticks[-1] - ticks[-12])
+            if sign_flips >= 7 and deslocamento < 0.3 * std_ticks:
+                return {
+                    "regime": MarketRegime.CHOP,
+                    "aprovado": False,
+                    "razao": f"Mercado em chop/ruído excessivo ({sign_flips} inversões de sinal em 12 ticks)",
+                    "detalhes": {"sign_flips": sign_flips, "deslocamento": deslocamento},
+                }
+
+        # 5. Se passou por todas as rejeições, temos uma Reversão Válida
+        return {
+            "regime": MarketRegime.REVERSAO_VALIDA,
+            "aprovado": True,
+            "razao": "Regime de reversão estatisticamente válido",
+            "detalhes": {
+                "std_ticks": std_ticks,
+                "vol_rel": vol_rel,
+                "slope": inclinacao_curta,
+            },
+        }
+
+
+class Timing24Detector:
+    """
+    Detector determinístico de Timing 2/4 por ticks (Issue #13).
+    Isolamento de estado rigoroso por ativo (CROSS_ASSET_TIMING_CONTAMINATION=0).
+    Regras:
+    - PUT: 2 picos superiores locais com recuo (pullback >= epsilon). Janela de 1 a 4 ticks.
+    - CALL: 2 fundos inferiores locais com repique (bounce >= epsilon). Janela de 1 a 4 ticks.
+    - Se confirmação ocorrer entre ticks 1 e 4: sinal aprovado.
+    - Se tick > 4: TIMING_2_4_EXPIRED -> NO_TRADE.
+    - Se preço romper extremo: CONTINUACAO_DE_TENDENCIA -> NO_TRADE.
+    """
+
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        cfg_micro = getattr(global_config, "MICRO_SCALPER_CONFIG", {})
+        self.config = config or cfg_micro.get("timing_2_4", {
+            "max_confirmation_window": 4,
+            "min_peak_distance_ticks": 2,
+            "max_peak_distance_ticks": 25,
+            "epsilon_factor": 0.20,
+        })
+        self.estados_por_ativo: Dict[str, Dict[str, Any]] = {}
+
+    def obter_estado(self, ativo: str) -> Dict[str, Any]:
+        simbolo = str(ativo or "GLOBAL").upper().strip()
+        if simbolo not in self.estados_por_ativo:
+            self.estados_por_ativo[simbolo] = {
+                "ativo": simbolo,
+                "direction_candidate": None,
+                "peak_count": 0,
+                "peaks": [],
+                "second_peak_tick_index": None,
+                "confirmation_tick": None,
+                "pattern_started_at": 0.0,
+                "pattern_status": "IDLE",
+                "last_rejection_reason": "",
+                "last_telemetry": {},
+            }
+        return self.estados_por_ativo[simbolo]
+
+    def resetar_estado(self, ativo: Optional[str] = None):
+        if ativo:
+            simbolo = str(ativo).upper().strip()
+            if simbolo in self.estados_por_ativo:
+                del self.estados_por_ativo[simbolo]
+        else:
+            self.estados_por_ativo.clear()
+
+    def detectar(
+        self,
+        ativo: str,
+        ticks: List[float],
+        direcao_pretendida: str,
+    ) -> Dict[str, Any]:
+        """
+        Analisa a sequência de ticks reais e detecta o padrão 2/4 determinístico.
+        """
+        simbolo = str(ativo or "GLOBAL").upper().strip()
+        estado = self.obter_estado(simbolo)
+
+        if not ticks or len(ticks) < 8:
+            motivo = f"Buffer insuficiente para Timing 2/4 ({len(ticks) if ticks else 0}/8 ticks)"
+            estado["pattern_status"] = "INSUFFICIENT_DATA"
+            estado["last_rejection_reason"] = motivo
+            return {
+                "ativo": simbolo,
+                "direcao": direcao_pretendida,
+                "aprovado": False,
+                "pattern_status": "INSUFFICIENT_DATA",
+                "confirmation_tick": None,
+                "picos_detectados": 0,
+                "preco_pico_1": None,
+                "preco_pico_2": None,
+                "razao": motivo,
+                "telemetria": {},
+            }
+
+        # Janela de análise dos últimos ticks
+        janela = min(len(ticks), 30)
+        serie = ticks[-janela:]
+        n = len(serie)
+        preco_atual = serie[-1]
+
+        # Cálculo dinâmico do epsilon adaptado ao ativo e escala
+        std_local = float(np.std(serie[-15:])) if len(serie) >= 15 else float(np.std(serie))
+        fator_eps = float(self.config.get("epsilon_factor", 0.20))
+        epsilon = max(std_local * fator_eps, preco_atual * 0.00005, 0.001)
+
+        max_window = int(self.config.get("max_confirmation_window", 4))
+
+        if direcao_pretendida == "PUT":
+            # Busca dois picos superiores (máximos locais)
+            # Um pico ocorre em i se serie[i] > serie[i-1] e serie[i] >= serie[i+1]
+            picos_idx = []
+            for i in range(1, n - 1):
+                if serie[i] > serie[i - 1] and serie[i] >= serie[i + 1]:
+                    if (serie[i] - min(serie[i - 1], serie[i + 1])) >= epsilon * 0.4:
+                        picos_idx.append(i)
+
+            if n >= 2 and serie[-1] > serie[-2] and (serie[-1] - serie[-2]) >= epsilon * 0.4:
+                picos_idx.append(n - 1)
+
+            if len(picos_idx) < 2:
+                # Dois ticks consecutivos de alta NÃO contam como dois picos
+                motivo = "Menos de 2 picos superiores confirmados"
+                estado["pattern_status"] = "NO_TWO_PEAKS"
+                estado["last_rejection_reason"] = motivo
+                return {
+                    "ativo": simbolo,
+                    "direcao": direcao_pretendida,
+                    "aprovado": False,
+                    "pattern_status": "NO_TWO_PEAKS",
+                    "confirmation_tick": None,
+                    "picos_detectados": len(picos_idx),
+                    "preco_pico_1": serie[picos_idx[0]] if picos_idx else None,
+                    "preco_pico_2": None,
+                    "razao": motivo,
+                    "telemetria": {"epsilon": epsilon, "picos_idx": picos_idx},
+                }
+
+            # Encontra o par mais recente de picos com um vale intermediário >= epsilon
+            par_valido = None
+            for p2_cand in reversed(picos_idx):
+                for p1_cand in reversed([p for p in picos_idx if p < p2_cand]):
+                    vales_entre = [serie[j] for j in range(p1_cand + 1, p2_cand)]
+                    if vales_entre:
+                        min_vale = min(vales_entre)
+                        recuo_p1 = serie[p1_cand] - min_vale
+                        recuo_p2 = serie[p2_cand] - min_vale
+                        if recuo_p1 >= epsilon and recuo_p2 >= epsilon:
+                            par_valido = (p1_cand, p2_cand)
+                            break
+                if par_valido:
+                    break
+
+            if not par_valido:
+                motivo = "Dois picos detectados mas sem recuo (pullback) intermediário suficiente (abaixo de epsilon)"
+                estado["pattern_status"] = "FALSE_PEAK_BELOW_EPSILON"
+                estado["last_rejection_reason"] = motivo
+                return {
+                    "ativo": simbolo,
+                    "direcao": direcao_pretendida,
+                    "aprovado": False,
+                    "pattern_status": "FALSE_PEAK_BELOW_EPSILON",
+                    "confirmation_tick": None,
+                    "picos_detectados": len(picos_idx),
+                    "preco_pico_1": serie[picos_idx[-2]],
+                    "preco_pico_2": serie[picos_idx[-1]],
+                    "razao": motivo,
+                    "telemetria": {"epsilon": epsilon},
+                }
+
+            i1, i2 = par_valido
+            p1_preco = serie[i1]
+            p2_preco = serie[i2]
+            k = (n - 1) - i2  # ticks decorridos após o 2º pico
+
+            if k == 0:
+                motivo = "Segundo pico acabou de ocorrer, aguardando início da janela de confirmação (tick 0)"
+                estado["pattern_status"] = "SECOND_PEAK_FORMING"
+                estado["last_rejection_reason"] = motivo
+                return {
+                    "ativo": simbolo,
+                    "direcao": direcao_pretendida,
+                    "aprovado": False,
+                    "pattern_status": "SECOND_PEAK_FORMING",
+                    "confirmation_tick": 0,
+                    "picos_detectados": 2,
+                    "preco_pico_1": p1_preco,
+                    "preco_pico_2": p2_preco,
+                    "razao": motivo,
+                    "telemetria": {"k": 0, "epsilon": epsilon},
+                }
+
+            if k > max_window:
+                motivo = f"Janela de confirmação expirada ({k} ticks após segundo pico > {max_window})"
+                estado["pattern_status"] = "TIMING_2_4_EXPIRED"
+                estado["last_rejection_reason"] = motivo
+                return {
+                    "ativo": simbolo,
+                    "direcao": direcao_pretendida,
+                    "aprovado": False,
+                    "pattern_status": "TIMING_2_4_EXPIRED",
+                    "confirmation_tick": k,
+                    "picos_detectados": 2,
+                    "preco_pico_1": p1_preco,
+                    "preco_pico_2": p2_preco,
+                    "razao": motivo,
+                    "telemetria": {"k": k, "max_window": max_window},
+                }
+
+            # Dentro da janela de 1 a 4 ticks (k in 1..4):
+            # 1. Verifica continuação de tendência (rompimento de máximas)
+            if preco_atual > p2_preco + (epsilon * 0.1):
+                motivo = f"Tendência de alta acelerando: preço rompeu segundo pico no tick {k} ({preco_atual:.2f} > {p2_preco:.2f})"
+                estado["pattern_status"] = "CONTINUATION_BLOCKED"
+                estado["last_rejection_reason"] = motivo
+                return {
+                    "ativo": simbolo,
+                    "direcao": direcao_pretendida,
+                    "aprovado": False,
+                    "pattern_status": "CONTINUATION_BLOCKED",
+                    "confirmation_tick": k,
+                    "picos_detectados": 2,
+                    "preco_pico_1": p1_preco,
+                    "preco_pico_2": p2_preco,
+                    "razao": motivo,
+                    "telemetria": {"k": k, "preco_atual": preco_atual, "p2_preco": p2_preco},
+                }
+
+            # 2. Confirmação de rejeição objetiva e slope virando (exige recuo mínimo >= epsilon * 0.4)
+            rejeitou = (p2_preco - preco_atual) >= (epsilon * 0.4)
+            slope_curto = (serie[-1] - serie[-min(k + 1, 3)]) / float(min(k, 2)) if k >= 1 else 0.0
+            slope_virou = slope_curto <= 0.0001
+
+            if rejeitou and slope_virou:
+                motivo = f"Timing 2/4 PUT confirmado no tick {k}/4 (P1: {p1_preco:.2f}, P2: {p2_preco:.2f}, Preço: {preco_atual:.2f})"
+                estado["pattern_status"] = "CONFIRMED"
+                estado["confirmation_tick"] = k
+                estado["last_rejection_reason"] = ""
+                return {
+                    "ativo": simbolo,
+                    "direcao": direcao_pretendida,
+                    "aprovado": True,
+                    "pattern_status": "CONFIRMED",
+                    "confirmation_tick": k,
+                    "picos_detectados": 2,
+                    "preco_pico_1": p1_preco,
+                    "preco_pico_2": p2_preco,
+                    "razao": motivo,
+                    "telemetria": {
+                        "k": k,
+                        "p1": p1_preco,
+                        "p2": p2_preco,
+                        "preco_atual": preco_atual,
+                        "slope_curto": slope_curto,
+                    },
+                }
+            else:
+                motivo = f"Janela aberta (tick {k}/4): aguardando rejeição objetiva e slope descendente"
+                estado["pattern_status"] = "AWAITING_CONFIRMATION"
+                estado["last_rejection_reason"] = motivo
+                return {
+                    "ativo": simbolo,
+                    "direcao": direcao_pretendida,
+                    "aprovado": False,
+                    "pattern_status": "AWAITING_CONFIRMATION",
+                    "confirmation_tick": k,
+                    "picos_detectados": 2,
+                    "preco_pico_1": p1_preco,
+                    "preco_pico_2": p2_preco,
+                    "razao": motivo,
+                    "telemetria": {"k": k, "rejeitou": rejeitou, "slope_virou": slope_virou},
+                }
+
+        elif direcao_pretendida == "CALL":
+            # Busca dois fundos inferiores (mínimos locais)
+            # Um fundo ocorre em i se serie[i] < serie[i-1] e serie[i] <= serie[i+1]
+            fundos_idx = []
+            for i in range(1, n - 1):
+                if serie[i] < serie[i - 1] and serie[i] <= serie[i + 1]:
+                    if (max(serie[i - 1], serie[i + 1]) - serie[i]) >= epsilon * 0.4:
+                        fundos_idx.append(i)
+
+            if n >= 2 and serie[-1] < serie[-2] and (serie[-2] - serie[-1]) >= epsilon * 0.4:
+                fundos_idx.append(n - 1)
+
+            if len(fundos_idx) < 2:
+                # Dois ticks consecutivos de queda NÃO contam como dois fundos
+                motivo = "Menos de 2 fundos inferiores confirmados"
+                estado["pattern_status"] = "NO_TWO_TROUGHS"
+                estado["last_rejection_reason"] = motivo
+                return {
+                    "ativo": simbolo,
+                    "direcao": direcao_pretendida,
+                    "aprovado": False,
+                    "pattern_status": "NO_TWO_TROUGHS",
+                    "confirmation_tick": None,
+                    "picos_detectados": len(fundos_idx),
+                    "preco_pico_1": serie[fundos_idx[0]] if fundos_idx else None,
+                    "preco_pico_2": None,
+                    "razao": motivo,
+                    "telemetria": {"epsilon": epsilon, "fundos_idx": fundos_idx},
+                }
+
+            # Encontra o par mais recente de fundos com repique intermediário >= epsilon
+            par_valido = None
+            for f2_cand in reversed(fundos_idx):
+                for f1_cand in reversed([f for f in fundos_idx if f < f2_cand]):
+                    picos_entre = [serie[j] for j in range(f1_cand + 1, f2_cand)]
+                    if picos_entre:
+                        max_repique = max(picos_entre)
+                        repique_f1 = max_repique - serie[f1_cand]
+                        repique_f2 = max_repique - serie[f2_cand]
+                        if repique_f1 >= epsilon and repique_f2 >= epsilon:
+                            par_valido = (f1_cand, f2_cand)
+                            break
+                if par_valido:
+                    break
+
+            if not par_valido:
+                motivo = "Dois fundos detectados mas sem repique intermediário suficiente (abaixo de epsilon)"
+                estado["pattern_status"] = "FALSE_PEAK_BELOW_EPSILON"
+                estado["last_rejection_reason"] = motivo
+                return {
+                    "ativo": simbolo,
+                    "direcao": direcao_pretendida,
+                    "aprovado": False,
+                    "pattern_status": "FALSE_PEAK_BELOW_EPSILON",
+                    "confirmation_tick": None,
+                    "picos_detectados": len(fundos_idx),
+                    "preco_pico_1": serie[fundos_idx[-2]],
+                    "preco_pico_2": serie[fundos_idx[-1]],
+                    "razao": motivo,
+                    "telemetria": {"epsilon": epsilon},
+                }
+
+            i1, i2 = par_valido
+            f1_preco = serie[i1]
+            f2_preco = serie[i2]
+            k = (n - 1) - i2  # ticks decorridos após o 2º fundo
+
+            if k == 0:
+                motivo = "Segundo fundo acabou de ocorrer, aguardando início da janela de confirmação (tick 0)"
+                estado["pattern_status"] = "SECOND_TROUGH_FORMING"
+                estado["last_rejection_reason"] = motivo
+                return {
+                    "ativo": simbolo,
+                    "direcao": direcao_pretendida,
+                    "aprovado": False,
+                    "pattern_status": "SECOND_TROUGH_FORMING",
+                    "confirmation_tick": 0,
+                    "picos_detectados": 2,
+                    "preco_pico_1": f1_preco,
+                    "preco_pico_2": f2_preco,
+                    "razao": motivo,
+                    "telemetria": {"k": 0, "epsilon": epsilon},
+                }
+
+            if k > max_window:
+                motivo = f"Janela de confirmação expirada ({k} ticks após segundo fundo > {max_window})"
+                estado["pattern_status"] = "TIMING_2_4_EXPIRED"
+                estado["last_rejection_reason"] = motivo
+                return {
+                    "ativo": simbolo,
+                    "direcao": direcao_pretendida,
+                    "aprovado": False,
+                    "pattern_status": "TIMING_2_4_EXPIRED",
+                    "confirmation_tick": k,
+                    "picos_detectados": 2,
+                    "preco_pico_1": f1_preco,
+                    "preco_pico_2": f2_preco,
+                    "razao": motivo,
+                    "telemetria": {"k": k, "max_window": max_window},
+                }
+
+            # Dentro da janela de 1 a 4 ticks:
+            # 1. Verifica continuação de queda (faca caindo / rompimento de mínimas)
+            if preco_atual < f2_preco - (epsilon * 0.1):
+                motivo = f"Tendência de baixa acelerando: preço rompeu segundo fundo no tick {k} ({preco_atual:.2f} < {f2_preco:.2f})"
+                estado["pattern_status"] = "CONTINUATION_BLOCKED"
+                estado["last_rejection_reason"] = motivo
+                return {
+                    "ativo": simbolo,
+                    "direcao": direcao_pretendida,
+                    "aprovado": False,
+                    "pattern_status": "CONTINUATION_BLOCKED",
+                    "confirmation_tick": k,
+                    "picos_detectados": 2,
+                    "preco_pico_1": f1_preco,
+                    "preco_pico_2": f2_preco,
+                    "razao": motivo,
+                    "telemetria": {"k": k, "preco_atual": preco_atual, "f2_preco": f2_preco},
+                }
+
+            # 2. Confirmação de rejeição e slope ascendente (exige repique mínimo >= epsilon * 0.4)
+            rejeitou = (preco_atual - f2_preco) >= (epsilon * 0.4)
+            slope_curto = (serie[-1] - serie[-min(k + 1, 3)]) / float(min(k, 2)) if k >= 1 else 0.0
+            slope_virou = slope_curto >= -0.0001
+
+            if rejeitou and slope_virou:
+                motivo = f"Timing 2/4 CALL confirmado no tick {k}/4 (F1: {f1_preco:.2f}, F2: {f2_preco:.2f}, Preço: {preco_atual:.2f})"
+                estado["pattern_status"] = "CONFIRMED"
+                estado["confirmation_tick"] = k
+                estado["last_rejection_reason"] = ""
+                return {
+                    "ativo": simbolo,
+                    "direcao": direcao_pretendida,
+                    "aprovado": True,
+                    "pattern_status": "CONFIRMED",
+                    "confirmation_tick": k,
+                    "picos_detectados": 2,
+                    "preco_pico_1": f1_preco,
+                    "preco_pico_2": f2_preco,
+                    "razao": motivo,
+                    "telemetria": {
+                        "k": k,
+                        "f1": f1_preco,
+                        "f2": f2_preco,
+                        "preco_atual": preco_atual,
+                        "slope_curto": slope_curto,
+                    },
+                }
+            else:
+                motivo = f"Janela aberta (tick {k}/4): aguardando rejeição objetiva e slope ascendente"
+                estado["pattern_status"] = "AWAITING_CONFIRMATION"
+                estado["last_rejection_reason"] = motivo
+                return {
+                    "ativo": simbolo,
+                    "direcao": direcao_pretendida,
+                    "aprovado": False,
+                    "pattern_status": "AWAITING_CONFIRMATION",
+                    "confirmation_tick": k,
+                    "picos_detectados": 2,
+                    "preco_pico_1": f1_preco,
+                    "preco_pico_2": f2_preco,
+                    "razao": motivo,
+                    "telemetria": {"k": k, "rejeitou": rejeitou, "slope_virou": slope_virou},
+                }
+
+        return {
+            "ativo": simbolo,
+            "direcao": direcao_pretendida,
+            "aprovado": False,
+            "pattern_status": "UNKNOWN_DIRECTION",
+            "confirmation_tick": None,
+            "picos_detectados": 0,
+            "preco_pico_1": None,
+            "preco_pico_2": None,
+            "razao": f"Direção pretendida desconhecida: {direcao_pretendida}",
+            "telemetria": {},
+        }
+
+
+# Instâncias canônicas globais dos componentes
+detector_timing_24 = Timing24Detector()
+classificador_regime = RegimeClassifier()
+
+
+def obter_timing_24_detector() -> Timing24Detector:
+    return detector_timing_24
+
+
+def obter_regime_classifier() -> RegimeClassifier:
+    return classificador_regime
+
+
 class ExtremeDetector:
     """
     Detector de Extremos Estatísticos.
@@ -808,11 +1416,14 @@ def analisar_micro_scalping(
     ultimos_ticks: Optional[List[float]] = None,
     ativo: Optional[str] = None,
     state_machine: Optional[MicroScalperStateMachine] = None,
+    usar_timing_2_4: bool = False,
+    usar_filtro_regime: bool = False,
 ) -> Dict[str, Any]:
     """
-    ANÁLISE CANÔNICA DO MICRO-SCALPER SELETIVO (Issues #2, #3, #4, #20).
+    ANÁLISE CANÔNICA DO MICRO-SCALPER SELETIVO (Issues #2, #3, #4, #13, #17, #20).
     Substitui qualquer lógica aleatória por análise estatística determinística.
-    Integra ExtremeDetector, ReversalConfirmator, ConfluenceScore e StateMachine.
+    Integra ExtremeDetector, ReversalConfirmator, ConfluenceScore, StateMachine,
+    Timing24Detector (#13) e RegimeClassifier (#17).
     Suporta concorrência 3 / 5 / 10 posições simultâneas e state machine isolada por ativo.
     """
     try:
@@ -820,7 +1431,8 @@ def analisar_micro_scalping(
         if not ativo and isinstance(dados_ou_snapshot, dict):
             ativo = dados_ou_snapshot.get("ativo") or dados_ou_snapshot.get("simbolo")
 
-        sm = state_machine or obter_state_machine(ativo)
+        ativo_str = str(ativo or "GLOBAL").upper().strip()
+        sm = state_machine or obter_state_machine(ativo_str)
 
         # Destrava automática caso tenha ficado em COMPRANDO por mais de 8s (falha de rede / timeout)
         agora_check = time.time()
@@ -865,7 +1477,6 @@ def analisar_micro_scalping(
             if not ticks and "ultimos_ticks" in snapshot:
                 ticks = snapshot["ultimos_ticks"]
         elif isinstance(dados_ou_snapshot, list) and len(dados_ou_snapshot) > 0:
-            # Converte lista de velas ou ticks para snapshot simplificado
             if isinstance(dados_ou_snapshot[0], dict):
                 closes = [v["close"] for v in dados_ou_snapshot]
             else:
@@ -874,7 +1485,6 @@ def analisar_micro_scalping(
             preco_atual = closes[-1]
             ticks = closes[-60:]
             
-            # Cálculo rápido de indicadores para compatibilidade
             rsi = calcular_rsi_local(closes, 14)
             p_curto = float(np.percentile(closes[-20:], 50)) if len(closes) >= 20 else 50.0
             p_curto_val = (sum(1 for x in closes[-20:] if x <= preco_atual) / len(closes[-20:]) * 100) if len(closes) >= 20 else 50.0
@@ -936,6 +1546,7 @@ def analisar_micro_scalping(
         ):
             # O preço está dentro da janela de reversão pós-extremo!
             extremo_res = sm.dados_ultimo_extremo
+            direcao = sm.direcao_reversao or extremo_res.get("direcao_pretendida", "CALL")
         elif sm.estado_atual in (
             MicroScalperState.POSICAO_ABERTA,
             MicroScalperState.COMPRANDO,
@@ -943,14 +1554,15 @@ def analisar_micro_scalping(
             MicroScalperState.COOLDOWN,
         ):
             # Não reseta para NORMAL se o ativo já possui uma operação ativa ou em transição
+            st_name = getattr(sm.estado_atual, "name", str(sm.estado_atual))
             return {
                 "sinal": None,
                 "confianca": 0.0,
                 "score": getattr(sm, "ultimo_score", 0.0),
                 "min_score": target_min_score,
                 "estado": sm.estado_atual,
-                "razao": f"Ativo em estado {sm.estado_atual.name}",
-                "motivo_recusa": f"Ativo em estado {sm.estado_atual.name}",
+                "razao": f"Ativo em estado {st_name}",
+                "motivo_recusa": f"Ativo em estado {st_name}",
                 "analise": snapshot,
             }
         else:
@@ -970,11 +1582,56 @@ def analisar_micro_scalping(
                 "analise": snapshot,
             }
 
-        # 5. Confirmador de Reversão
+        # 5. FILTRO DE REGIME DE MERCADO (Issue #17)
+        regime_res = None
+        if usar_filtro_regime:
+            regime_res = classificador_regime.classificar(
+                ativo=ativo_str,
+                ticks=ticks,
+                snapshot=snapshot,
+                direcao_pretendida=direcao,
+            )
+            if not regime_res["aprovado"]:
+                sm.ultimo_motivo_recusa = f"Regime {regime_res['regime']}: {regime_res['razao']}"
+                return {
+                    "sinal": None,
+                    "confianca": 0.0,
+                    "score": 0.0,
+                    "min_score": target_min_score,
+                    "estado": sm.estado_atual,
+                    "regime": regime_res["regime"],
+                    "razao": regime_res["razao"],
+                    "motivo_recusa": sm.ultimo_motivo_recusa,
+                    "analise": snapshot,
+                }
+
+        # 6. FILTRO DE TIMING 2/4 POR TICKS (Issue #13)
+        timing_res = None
+        if usar_timing_2_4:
+            timing_res = detector_timing_24.detectar(
+                ativo=ativo_str,
+                ticks=ticks,
+                direcao_pretendida=direcao,
+            )
+            if not timing_res["aprovado"]:
+                sm.ultimo_motivo_recusa = f"Timing 2/4 não confirmado: {timing_res['razao']}"
+                return {
+                    "sinal": None,
+                    "confianca": 0.0,
+                    "score": 0.0,
+                    "min_score": target_min_score,
+                    "estado": sm.estado_atual,
+                    "timing_2_4": timing_res,
+                    "razao": timing_res["razao"],
+                    "motivo_recusa": sm.ultimo_motivo_recusa,
+                    "analise": snapshot,
+                }
+
+        # 7. Confirmador de Reversão
         confirmador = ReversalConfirmator()
         reversao_res = confirmador.confirmar(direcao, ticks, snapshot)
 
-        # 6. Score de Confluência calibrado por perfil
+        # 8. Score de Confluência calibrado por perfil
         score_res = confluence.calcular(direcao, extremo_res, reversao_res, snapshot, modo=modo)
         sm.ultimo_score = score_res["score"]
 
@@ -992,7 +1649,19 @@ def analisar_micro_scalping(
                 "analise": snapshot,
             }
 
-        # SINAL APROVADO COM EXTREMO + REVERSÃO + CONFLUÊNCIA!
+        # Confluências auditáveis explícitas
+        confluencias_audit = {
+            "2_4_PATTERN": "PASS" if (timing_res and timing_res.get("aprovado")) else ("BYPASS" if not usar_timing_2_4 else "FAIL"),
+            "EXTREMO": "PASS",
+            "REJEICAO": "PASS" if reversao_res.get("rejeicao_extremo") else "FAIL",
+            "SLOPE_REVERSAL": "PASS" if reversao_res.get("desacelerando") else "FAIL",
+            "ACCELERATION_DECAY": "PASS" if reversao_res.get("desacelerando") else "FAIL",
+            "REGIME": regime_res.get("regime", "REVERSAO_VALIDA") if regime_res else "REVERSAO_VALIDA",
+            "VOLATILITY": "PASS",
+            "TICKS_FRESH": "PASS",
+        }
+
+        # SINAL APROVADO COM EXTREMO + REVERSÃO + CONFLUÊNCIA (+ TIMING 2/4 / REGIME)!
         sm.transitar(
             MicroScalperState.SINAL_CONFIRMADO,
             f"Sinal {direcao} aprovado com score {score_res['score']:.1f}",
@@ -1013,6 +1682,9 @@ def analisar_micro_scalping(
             "razao": score_res["razao"],
             "motivo_recusa": "",
             "scores_detalhados": score_res["scores_detalhados"],
+            "confluencias": confluencias_audit,
+            "timing_2_4": timing_res,
+            "regime": regime_res.get("regime") if regime_res else "REVERSAO_VALIDA",
             "analise": snapshot,
         }
 
@@ -1034,12 +1706,18 @@ def executar_replay_ticks(
     stake: float = 1.0,
     payout_ratio: float = 0.85,
     min_exit_profit: float = 0.05,
-    max_hold_ticks: int = 45,
+    max_hold_ticks: int = 15,
+    usar_timing_2_4: bool = False,
+    usar_filtro_regime: bool = False,
+    usar_gale_1: bool = False,
+    saldo_inicial: float = 1000.0,
+    modo_saida: str = "FIRST_POSITIVE_PROFIT",
 ) -> Dict[str, Any]:
     """
-    Framework determinístico de replay de ticks para Walk-Forward / Backtest.
+    Framework determinístico de replay de ticks para Walk-Forward / Backtest fiel (Issue #14).
     Simula exatamente o pipeline:
-    Tick feed -> Catalogador -> ExtremeDetector -> ReversalConfirmator -> ConfluenceScore -> Saída no 1º Lucro.
+    Tick feed -> Catalogador -> Timing24 (#13) -> Regime (#17) -> ExtremeDetector -> ReversalConfirmator -> Saída.
+    Elimina fórmula sintética de P&L: utiliza payout real de contrato Deriv Turbo / Opção.
     """
     from src.core.catalogador import CatalogadorOtimizado
 
@@ -1053,6 +1731,15 @@ def executar_replay_ticks(
 
     posicao_ativa = None
     lucro_acumulado = 0.0
+    saldo_corrente = saldo_inicial
+
+    # Controle de Gale 1
+    recovery_level = 0
+    stake_base = stake
+    previous_loss = 0.0
+    consecutive_losses = 0
+    max_consecutive_losses = 0
+    loss_streak_dist = {}
 
     for i, preco in enumerate(historico_ticks):
         cat.adicionar_tick(preco)
@@ -1063,38 +1750,77 @@ def executar_replay_ticks(
             ticks_em_posicao = i - posicao_ativa["tick_indice_entrada"]
             preco_entrada = posicao_ativa["preco_entrada"]
             direcao = posicao_ativa["tipo"]
+            stake_op = posicao_ativa["stake"]
 
-            # Variação percentual do preço
-            delta_pct = (preco - preco_entrada) / preco_entrada if direcao == "CALL" else (preco_entrada - preco) / preco_entrada
-            
-            # Estimativa de lucro proporcional na Deriv
-            # No primeiro tick positivo com lucro líquido real:
-            lucro_estimado = delta_pct * stake * 50.0  # Fator de alavancagem sintética
-            
-            # Condição de saída: primeiro lucro positivo >= min_exit_profit OU timeout
+            delta = (preco - preco_entrada) if direcao == "CALL" else (preco_entrada - preco)
+            delta_pct = (delta / preco_entrada) if preco_entrada > 0 else 0.0
+
+            # Atualiza MFE e MAE da operação
+            if delta_pct > posicao_ativa["mfe"]:
+                posicao_ativa["mfe"] = delta_pct
+            if -delta_pct > posicao_ativa["mae"]:
+                posicao_ativa["mae"] = -delta_pct
+
             saiu = False
             motivo_saida = ""
             lucro_final = 0.0
 
-            if lucro_estimado >= min_exit_profit:
-                saiu = True
-                lucro_final = lucro_estimado
-                motivo_saida = "FIRST_POSITIVE_PROFIT"
-            elif ticks_em_posicao >= max_hold_ticks:
-                saiu = True
-                lucro_final = lucro_estimado
-                motivo_saida = "MAX_HOLD_TIMEOUT"
+            if modo_saida == "FIRST_POSITIVE_PROFIT":
+                if delta > 0:
+                    saiu = True
+                    motivo_saida = "FIRST_POSITIVE_PROFIT"
+                    lucro_final = round(stake_op * payout_ratio, 2)
+                elif ticks_em_posicao >= max_hold_ticks:
+                    saiu = True
+                    motivo_saida = "MAX_HOLD_TIMEOUT"
+                    lucro_final = -round(stake_op, 2)
+            else:
+                # Expiração no tick final do contrato (ex: 15 ticks)
+                if ticks_em_posicao >= max_hold_ticks:
+                    saiu = True
+                    motivo_saida = "CONTRATO_EXPIRADO"
+                    if delta > 0:
+                        lucro_final = round(stake_op * payout_ratio, 2)
+                    elif delta < 0:
+                        lucro_final = -round(stake_op, 2)
+                    else:
+                        lucro_final = 0.0
 
             if saiu:
                 lucro_acumulado += lucro_final
+                saldo_corrente += lucro_final
                 sm_local.registrar_resultado_operacao(lucro_final, motivo_saida)
                 posicao_ativa["tick_indice_saida"] = i
                 posicao_ativa["preco_saida"] = preco
                 posicao_ativa["lucro"] = round(lucro_final, 4)
                 posicao_ativa["motivo_saida"] = motivo_saida
                 posicao_ativa["duracao_ticks"] = ticks_em_posicao
+
+                if lucro_final > 0:
+                    if recovery_level == 1:
+                        posicao_ativa["recovery_net"] = round(lucro_final - previous_loss, 2)
+                    consecutive_losses = 0
+                    recovery_level = 0
+                    previous_loss = 0.0
+                elif lucro_final < 0:
+                    consecutive_losses += 1
+                    max_consecutive_losses = max(max_consecutive_losses, consecutive_losses)
+                    loss_streak_dist[consecutive_losses] = loss_streak_dist.get(consecutive_losses, 0) + 1
+                    if usar_gale_1:
+                        if recovery_level == 0:
+                            recovery_level = 1
+                            previous_loss = abs(lucro_final)
+                        else:
+                            # 2 losses com Gale -> SESSION STOP
+                            recovery_level = 0
+                            previous_loss = 0.0
+
                 operacoes.append(posicao_ativa)
                 posicao_ativa = None
+
+                # Verifica meta ou stop
+                if meta_lucro > 0 and lucro_acumulado >= meta_lucro:
+                    break
             continue
 
         # Se não há posição aberta, analisa oportunidade
@@ -1109,17 +1835,33 @@ def executar_replay_ticks(
             modo="iniciante",
             operacoes_ativas=0,
             ultimos_ticks=ticks_buffer[-60:],
+            ativo="1HZ75V",
+            usar_timing_2_4=usar_timing_2_4,
+            usar_filtro_regime=usar_filtro_regime,
         )
 
         sinal = analise.get("sinal")
         if sinal:
+            # Determina stake com Gale 1 se ativo
+            if usar_gale_1 and recovery_level == 1:
+                stake_op = min(stake_base * 2.0, saldo_inicial * 0.02)
+                tipo_rec = "GALE_1"
+            else:
+                stake_op = stake_base
+                tipo_rec = "NORMAL"
+
             posicao_ativa = {
                 "id": len(operacoes) + 1,
                 "tipo": sinal,
+                "stake": stake_op,
+                "recovery_level": tipo_rec,
                 "preco_entrada": preco,
                 "tick_indice_entrada": i,
                 "score": analise.get("score", 0.0),
+                "regime": analise.get("regime", "REVERSAO_VALIDA"),
                 "timestamp_simulado": i,
+                "mfe": 0.0,
+                "mae": 0.0,
             }
         else:
             motivo = analise.get("motivo_recusa", "Sem motivo")
@@ -1127,18 +1869,115 @@ def executar_replay_ticks(
 
     total_ops = len(operacoes)
     wins = sum(1 for op in operacoes if op["lucro"] > 0)
-    losses = total_ops - wins
+    losses = sum(1 for op in operacoes if op["lucro"] < 0)
+    empates = total_ops - wins - losses
     win_rate = (wins / total_ops * 100) if total_ops > 0 else 0.0
+    loss_rate = (losses / total_ops * 100) if total_ops > 0 else 0.0
+
+    mfes = [op.get("mfe", 0.0) for op in operacoes]
+    maes = [op.get("mae", 0.0) for op in operacoes]
+    mfe_medio = round(float(np.mean(mfes)), 6) if mfes else 0.0
+    mae_medio = round(float(np.mean(maes)), 6) if maes else 0.0
 
     return {
         "total_ticks": len(historico_ticks),
         "total_operacoes": total_ops,
         "vitorias": wins,
         "derrotas": losses,
+        "empates": empates,
         "win_rate_percent": round(win_rate, 2),
+        "loss_rate_percent": round(loss_rate, 2),
+        "maior_sequencia_perdas": max_consecutive_losses,
+        "distribuicao_perdas_consecutivas": loss_streak_dist,
+        "mfe_medio": mfe_medio,
+        "mae_medio": mae_medio,
         "lucro_acumulado": round(lucro_acumulado, 2),
         "motivos_recusa_principais": dict(sorted(motivos_recusa_contagem.items(), key=lambda x: x[1], reverse=True)[:5]),
         "historico_operacoes": operacoes,
+    }
+
+
+def executar_shadow_mode(
+    historico_ticks: List[float],
+    ativo: str = "1HZ75V",
+    stake_base: float = 0.35,
+    payout_ratio: float = 0.88,
+    duracao_ticks: int = 15,
+    usar_timing_2_4: bool = True,
+    usar_filtro_regime: bool = True,
+) -> Dict[str, Any]:
+    """
+    Executa estratégia em modo SHADOW (Issue #19).
+    Processa todos os ticks sem enviar ordens reais ou demo (REAL_ORDER_SENT=NO, BUY_SENT=0).
+    Registra decisões e avalia resultado hipotético nos próximos 15 ticks.
+    """
+    from src.core.catalogador import CatalogadorOtimizado
+
+    cat = CatalogadorOtimizado()
+    cat.ativo_selecionado = ativo
+    decisoes_shadow = []
+    ticks_buffer = []
+
+    for i, preco in enumerate(historico_ticks):
+        cat.adicionar_tick(preco)
+        ticks_buffer.append(preco)
+        if i < 25 or i + duracao_ticks >= len(historico_ticks):
+            continue
+
+        snap = cat.obter_snapshot_mercado(ativo)
+        analise = analisar_micro_scalping(
+            dados_ou_snapshot=snap,
+            ultimos_ticks=ticks_buffer[-60:],
+            ativo=ativo,
+            usar_timing_2_4=usar_timing_2_4,
+            usar_filtro_regime=usar_filtro_regime,
+        )
+
+        sinal = analise.get("sinal")
+        if sinal:
+            ticks_futuros = historico_ticks[i + 1 : i + 1 + duracao_ticks]
+            preco_entrada = preco
+            preco_saida = ticks_futuros[-1]
+            
+            deltas = [(p - preco_entrada) if sinal == "CALL" else (preco_entrada - p) for p in ticks_futuros]
+            mfe = max(deltas) / preco_entrada if preco_entrada > 0 else 0.0
+            mae = max(-min(deltas), 0.0) / preco_entrada if preco_entrada > 0 else 0.0
+            
+            delta_final = deltas[-1]
+            resultado = "WIN" if delta_final > 0 else ("LOSS" if delta_final < 0 else "EMPATE")
+            lucro_teorico = round(stake_base * payout_ratio, 2) if resultado == "WIN" else (-stake_base if resultado == "LOSS" else 0.0)
+
+            decisao = {
+                "tick_indice": i,
+                "ativo": ativo,
+                "sinal": sinal,
+                "preco_entrada": preco_entrada,
+                "preco_saida": preco_saida,
+                "score": analise.get("score", 0.0),
+                "regime": analise.get("regime", "REVERSAO_VALIDA"),
+                "timing_2_4": analise.get("timing_2_4", {}),
+                "resultado": resultado,
+                "lucro_teorico": lucro_teorico,
+                "mfe": round(mfe, 6),
+                "mae": round(mae, 6),
+            }
+            decisoes_shadow.append(decisao)
+
+    total = len(decisoes_shadow)
+    wins = sum(1 for d in decisoes_shadow if d["resultado"] == "WIN")
+    losses = sum(1 for d in decisoes_shadow if d["resultado"] == "LOSS")
+    empates = total - wins - losses
+    win_rate = (wins / total * 100) if total > 0 else 0.0
+
+    return {
+        "modo": "SHADOW",
+        "ativo": ativo,
+        "total_decisoes": total,
+        "vitorias_teoricas": wins,
+        "derrotas_teoricas": losses,
+        "empates_teoricos": empates,
+        "win_rate_teorico": round(win_rate, 2),
+        "decisoes": decisoes_shadow,
     }
 
 

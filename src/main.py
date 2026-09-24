@@ -2344,6 +2344,8 @@ def status_robo():
             "operacoes": int(contador_operacoes),
             "operacoes_ativas": operacoes_ativas_list,
             "consecutive_losses": consec_losses,
+            "recovery_level": _safe_int(getattr(motor, "recovery_level", 0), 0) if motor else 0,
+            "recovery_net_result": _safe_float(getattr(motor, "recovery_net_result", 0.0), 0.0) if motor else 0.0,
             "saldo_teorico_reconciliado": saldo_teorico,
             "lucro_realizado_sessao": lucro_sess,
             "status_operacao": str(status_operacao or "parado"),

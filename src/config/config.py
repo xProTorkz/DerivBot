@@ -606,6 +606,32 @@ MICRO_SCALPER_CONFIG = {
         "log_todas_oportunidades": True,
         "max_historico_telemetria": 500,
     },
+
+    # 19. TIMING 2/4 POR TICKS (Issue #13)
+    "timing_2_4": {
+        "ativo": True,
+        "max_confirmation_window": int(os.getenv("TIMING_2_4_MAX_WINDOW", "4")),
+        "min_peak_distance_ticks": int(os.getenv("TIMING_2_4_MIN_PEAK_DIST", "2")),
+        "max_peak_distance_ticks": int(os.getenv("TIMING_2_4_MAX_PEAK_DIST", "25")),
+        "epsilon_factor": float(os.getenv("TIMING_2_4_EPSILON_FACTOR", "0.20")),
+    },
+
+    # 20. REGIME DE MERCADO E FILTRO NO_TRADE (Issue #17)
+    "regime": {
+        "ativo": True,
+        "adx_tendencia_forte": float(os.getenv("REGIME_ADX_FORTE", "32.0")),
+        "volatilidade_baixa_min": float(os.getenv("REGIME_VOL_MIN", "0.00005")),
+        "volatilidade_anormal_max": float(os.getenv("REGIME_VOL_MAX", "0.05")),
+    },
+
+    # 21. RECUPERAÇÃO CONTROLADA GALE 1 (Fase 11)
+    "recuperacao_gale": {
+        "ativo": True,
+        "max_recovery_level": 1,
+        "multiplier": 2.0,
+        "max_exposure_percent_balance": 2.0,  # Cap de 2% da banca inicial
+        "stop_on_second_loss": True,
+    },
 }
 
 # Vincula na classe Config para compatibilidade direta
@@ -617,5 +643,7 @@ Config.MAX_OPEN_POSITIONS = 3
 Config.PERCENTUAL_META_POR_MODO = PERCENTUAL_META_POR_MODO
 Config.calcular_meta_sessao = staticmethod(calcular_meta_sessao)
 Config.calcular_valor_operacao = staticmethod(calcular_valor_operacao)
+
+RECUPERACAO_GALE_CONFIG = MICRO_SCALPER_CONFIG.get("recuperacao_gale", {})
 
 

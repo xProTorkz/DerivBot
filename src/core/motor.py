@@ -748,6 +748,11 @@ class Motor:
         self.contratos_liquidados_sessao = set()
         self.consecutive_losses = 0
         self.max_perdas_consecutivas = 1
+        self.recovery_level = 0
+        self.previous_loss_amount = 0.0
+        self.previous_contract_id = None
+        self.recovery_origin_contract_id = None
+        self.recovery_net_result = 0.0
         self.ultimo_erro_deriv = None
         self.ultimo_estagio_execucao = "PARADO"
         self.ultimo_motivo_bloqueio_risco = None
@@ -1318,6 +1323,8 @@ class Motor:
                         "is_valid_to_sell": 0,
                         "fechamento_automatico": False,
                         "ultimo_update": time.time(),
+                        "is_recovery": bool(passthrough.get("is_recovery", False)),
+                        "recovery_origin_contract_id": passthrough.get("recovery_origin_contract_id"),
                     }
 
                     if transaction_id and hasattr(self, "transacoes_pendentes"):
@@ -1507,6 +1514,11 @@ class Motor:
                         timestamp_fechamento_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         tipo_op_str = operacao.get("tipo", "TURBO") if operacao else "TURBO"
                         val_op = float(operacao.get("valor") or operacao.get("preco_entrada") or 0.35) if operacao else 0.35
+                        era_recuperacao = bool(
+                            operacao.get("is_recovery", False)
+                            if operacao
+                            else (getattr(self, "recovery_level", 0) == 1)
+                        )
 
                         resultado = {
                             "id": raw_contract_id,
@@ -1523,6 +1535,13 @@ class Motor:
                             "timestamp_fechamento": timestamp_fechamento_str,
                             "tipo": tipo_op_str,
                             "valor": val_op,
+                            "recovery_level": "GALE_1" if era_recuperacao else "BASE",
+                            "is_recovery": era_recuperacao,
+                            "recovery_origin_contract_id": (
+                                operacao.get("recovery_origin_contract_id")
+                                if operacao
+                                else getattr(self, "recovery_origin_contract_id", None)
+                            ),
                         }
                         self.historico_operacoes.append(resultado)
 
@@ -1583,36 +1602,70 @@ class Motor:
                     )
 
                     # ==============================================================
-                    # REGRA CANÔNICA DE PERDAS CONSECUTIVAS E META (Issue #23.F)
-                    # - 1ª perda: continua
-                    # - Ganho: reseta contador para 0
-                    # - 2ª perda consecutiva: SESSION STOP
-                    # - Meta atingida: SESSION STOP
+                    # REGRA CANÔNICA DE PERDAS CONSECUTIVAS, GALE 1 E META (Issue #23.F / Fase 11)
+                    # - 1ª perda: continua e arma Gale 1 (2x stake base, 2% risk cap)
+                    # - Ganho no Gale 1: lucro líquido registrado, reseta para stake base
+                    # - 2ª perda consecutiva: SESSION STOP imediato
+                    # - Meta atingida: SESSION STOP imediato
                     # ==============================================================
                     if lucro <= 0:
                         self.consecutive_losses = getattr(self, "consecutive_losses", 0) + 1
                         limite_perdas = getattr(self, "max_perdas_consecutivas", 1)
-                        if self.consecutive_losses >= limite_perdas:
+
+                        if limite_perdas == 1:
                             self.session_stopped = True
-                            if limite_perdas == 1:
-                                self.session_stop_reason = (
-                                    f"PRIMEIRA_PERDA_REALIZADA: Operação {raw_contract_id} ({ativo_op}) fechou com perda (${lucro:+.4f})"
-                                )
-                            else:
-                                self.session_stop_reason = (
-                                    f"DUAS_PERDAS_CONSECUTIVAS: Limite de {limite_perdas} perdas consecutivas atingido (${lucro:+.2f})"
-                                )
+                            self.session_stop_reason = (
+                                f"PRIMEIRA_PERDA_REALIZADA: Operação {raw_contract_id} ({ativo_op}) fechou com perda (${lucro:+.4f})"
+                            )
                             self.logger.warning(
                                 f"🛑 [SESSION STOP] {self.session_stop_reason}. Novas entradas bloqueadas! "
                                 f"Contratos abertos restantes ({len(self.operacoes_abertas)}) continuarão sendo monitorados até liquidação."
                             )
-                        else:
+                        elif getattr(self, "recovery_level", 0) == 0:
+                            # 1ª perda com limite_perdas > 1: arma Gale 1 para a próxima entrada
+                            self.recovery_level = 1
+                            self.previous_loss_amount = abs(lucro)
+                            self.previous_contract_id = str(raw_contract_id)
+                            self.recovery_origin_contract_id = str(raw_contract_id)
                             self.logger.warning(
-                                f"⚠️ [PERDA REGISTRADA] Operação {raw_contract_id} fechou com perda (${lucro:+.2f}). "
-                                f"Perdas consecutivas: {self.consecutive_losses}/{limite_perdas}"
+                                f"⚠️ [GALE 1 ARMADO] Operação {raw_contract_id} ({ativo_op}) fechou com perda (${lucro:+.2f}). "
+                                f"Perdas consecutivas: {self.consecutive_losses}/{limite_perdas}. "
+                                f"Próxima entrada qualificada usará Gale 1 (2x stake)."
+                            )
+                        else:
+                            # Derrota no Gale 1: segundo loss consecutivo -> SESSION STOP
+                            self.recovery_net_result = -(getattr(self, "previous_loss_amount", 0.0) + abs(lucro))
+                            self.recovery_level = 0
+                            self.session_stopped = True
+                            self.session_stop_reason = (
+                                f"DUAS_PERDAS_CONSECUTIVAS: Limite de {limite_perdas} perdas consecutivas atingido no Gale 1 (${lucro:+.2f})"
+                            )
+                            self.logger.warning(
+                                f"🛑 [SESSION STOP] {self.session_stop_reason}. Novas entradas bloqueadas! "
+                                f"Contratos abertos restantes ({len(self.operacoes_abertas)}) continuarão sendo monitorados até liquidação."
+                            )
+
+                        if self.consecutive_losses >= limite_perdas and not self.session_stopped:
+                            self.session_stopped = True
+                            self.session_stop_reason = (
+                                f"DUAS_PERDAS_CONSECUTIVAS: Limite de {limite_perdas} perdas consecutivas atingido (${lucro:+.2f})"
+                            )
+                            self.logger.warning(
+                                f"🛑 [SESSION STOP] {self.session_stop_reason}. Novas entradas bloqueadas!"
                             )
                     elif lucro > 0:
+                        if era_recuperacao or getattr(self, "recovery_level", 0) == 1:
+                            perda_ant = getattr(self, "previous_loss_amount", 0.0)
+                            self.recovery_net_result = lucro - perda_ant
+                            self.logger.info(
+                                f"🎉 [RECUPERAÇÃO GALE 1 SUCESSO] Operação {raw_contract_id} recuperou com lucro líquido de ${self.recovery_net_result:+.2f} "
+                                f"(Lucro: ${lucro:.2f}, Perda recuperada: ${perda_ant:.2f})"
+                            )
+                        self.recovery_level = 0
+                        self.previous_loss_amount = 0.0
+                        self.recovery_origin_contract_id = None
                         self.consecutive_losses = 0
+
                         # Checa se atingiu meta da sessão
                         meta_alvo = getattr(self, "meta_diaria", 20.0)
                         lucro_sess = self.lucro_realizado_sessao
@@ -1836,7 +1889,7 @@ class Motor:
                 "operacoes_ativas": operacoes_ativas,
             }
 
-        # 4. Avaliação seletiva de micro-scalping determinística
+        # 4. Avaliação seletiva de micro-scalping determinística com Timing 2/4 e Regime (Issues #13, #17)
         resultado_intel = analisar_micro_scalping(
             dados_ou_snapshot=snapshot,
             meta=meta,
@@ -1845,6 +1898,8 @@ class Motor:
             operacoes_ativas=operacoes_ativas,
             ultimos_ticks=ultimos_ticks,
             ativo=ativo_alvo,
+            usar_timing_2_4=True,
+            usar_filtro_regime=True,
         )
 
         sinal_direcao = resultado_intel.get("sinal")
@@ -1862,7 +1917,29 @@ class Motor:
         meta_base = float(meta) if (meta is not None and float(meta) > 0) else float(getattr(self, "meta_diaria", 20.0))
         min_contrato = float(self._obter_config_ativo(ativo_alvo).get("min_stake", 0.35))
         valor_teorico = round(meta_base * 0.01, 2)
-        volume = max(valor_teorico, min_contrato)
+        stake_base = max(valor_teorico, min_contrato)
+
+        # Recuperação Controlada Gale 1 (Issue #23.F / Fase 11):
+        # Apenas 1 passo de recuperação (2x stake base), teto de risco de 2% do saldo inicial da sessão
+        volume = stake_base
+        rec_level = getattr(self, "recovery_level", 0)
+        if rec_level == 1:
+            saldo_ref = float(getattr(self, "saldo_inicial_sessao", 0.0) or getattr(self, "obter_saldo", lambda: 1000.0)() or 1000.0)
+            teto_risco_2pct = max(round(saldo_ref * 0.02, 2), 0.0)
+            gale_volume = round(stake_base * 2.0, 2)
+
+            if gale_volume > teto_risco_2pct or min_contrato > teto_risco_2pct:
+                self.logger.warning(
+                    f"RECOVERY_SKIPPED_RISK_CAP: Gale 1 (${gale_volume:.2f}) excede o teto de 2% de risco da banca "
+                    f"(${teto_risco_2pct:.2f} com saldo ref ${saldo_ref:.2f}). Mantendo stake base ${stake_base:.2f}."
+                )
+                volume = stake_base
+            else:
+                volume = gale_volume
+                self.logger.info(
+                    f"RECOVERY_GALE_1_ARMED: Operação armada com Gale 1 (${volume:.2f}, 2x stake base) "
+                    f"para recuperar perda anterior de ${getattr(self, 'previous_loss_amount', 0.0):.2f}"
+                )
 
         indicadores_resumo = {
             "rsi": snapshot.get("rsi", 50.0),
@@ -1890,6 +1967,7 @@ class Motor:
                 "indicadores": indicadores_resumo,
                 "lucro_atual": lucro_atual,
                 "operacoes_ativas": operacoes_ativas,
+                "recovery_level": rec_level,
             }
 
         return {
@@ -1908,6 +1986,7 @@ class Motor:
             "indicadores": indicadores_resumo,
             "lucro_atual": lucro_atual,
             "operacoes_ativas": operacoes_ativas,
+            "recovery_level": rec_level,
         }
 
     def registrar_callback_tick(self, callback: Callable[[float], None]):
@@ -2301,6 +2380,8 @@ class Motor:
                             "simbolo": simbolo,
                             "contract_type": contract_type,
                             "valor_max": valor,
+                            "is_recovery": (getattr(self, "recovery_level", 0) == 1),
+                            "recovery_origin_contract_id": getattr(self, "recovery_origin_contract_id", None),
                         },
                     }
                 else:
@@ -2324,6 +2405,8 @@ class Motor:
                             "simbolo": simbolo,
                             "contract_type": contract_type,
                             "valor_max": valor,
+                            "is_recovery": (getattr(self, "recovery_level", 0) == 1),
+                            "recovery_origin_contract_id": getattr(self, "recovery_origin_contract_id", None),
                         },
                     }
 
@@ -2765,6 +2848,11 @@ class Motor:
         self.contratos_liquidados_sessao = set()
         self.consecutive_losses = 0
         self.max_perdas_consecutivas = 2
+        self.recovery_level = 0
+        self.previous_loss_amount = 0.0
+        self.previous_contract_id = None
+        self.recovery_origin_contract_id = None
+        self.recovery_net_result = 0.0
         self.meta_atingida = False
         self.rodando = True
         self.ultimo_erro_deriv = None
@@ -2815,6 +2903,9 @@ class Motor:
         self.session_stopped = True
         self.session_stop_reason = "MANUAL_STOP: Parado pelo usuário"
         self.ultimo_estagio_execucao = "PARADO"
+        self.recovery_level = 0
+        self.previous_loss_amount = 0.0
+        self.recovery_origin_contract_id = None
 
         num_abertas = len(self.operacoes_abertas)
         if num_abertas > 0:
@@ -2850,6 +2941,8 @@ class Motor:
             "session_stop_reason": getattr(self, "session_stop_reason", None),
             "ultimo_estagio_execucao": getattr(self, "ultimo_estagio_execucao", "PARADO"),
             "contadores_funil": getattr(self, "contadores_funil", {}),
+            "recovery_level": getattr(self, "recovery_level", 0),
+            "recovery_net_result": getattr(self, "recovery_net_result", 0.0),
         }
 
     def iniciar_sistema_inteligente(self):
