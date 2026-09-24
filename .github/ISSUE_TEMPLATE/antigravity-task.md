@@ -13,6 +13,7 @@ PROJECT=DerivBot
 REPOSITORY=xProTorkz/DerivBot
 BRANCH=main
 MASTER_ISSUE=#11
+TASK_TYPE=
 BASELINE_SHA=
 SKILL_PRIMARY=
 SKILL_SUPPORT=
@@ -20,9 +21,33 @@ DEMO_ONLY=YES
 REAL_ORDER_SENT=NO
 ```
 
+## Roteamento obrigatório
+
+Use `AGENTS.md` para mapear `TASK_TYPE` → Skill e arquivos iniciais.
+
+Tipos canônicos:
+```
+INTELLIGENCE
+RISK
+UI
+RUNTIME
+AUTH
+AUDIT
+STATUS
+```
+
+A Issue deve sair pronta com Skill principal/suporte preenchidas. Não delegar ao Antigravity a descoberta ampla do escopo.
+
 ## Objetivo único
 
 <!-- Uma frase: resultado que deve existir quando a tarefa terminar. -->
+
+## Contexto mínimo
+
+```
+READ_FIRST=AGENTS.md,.agents/context/CURRENT_STATE.md,this issue
+DO_NOT_SCAN_FULL_REPO=YES
+```
 
 ## Estado inicial comprovado
 
