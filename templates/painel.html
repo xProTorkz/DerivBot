@@ -325,6 +325,7 @@
               class="icone-historico ativo"
               id="btn-historico-atual"
               onclick="trocarAba('tabela')"
+              title="Operações em Tempo Real"
               data-tooltip="Operações em Tempo Real"
               aria-label="Ver operações abertas em tempo real"
             >
@@ -334,6 +335,7 @@
               class="icone-historico"
               id="btn-historico-completo"
               onclick="trocarAba('historico-completo')"
+              title="Histórico Geral do Dia"
               data-tooltip="Histórico Geral do Dia"
               aria-label="Ver histórico completo do dia"
             >
@@ -348,6 +350,7 @@
               class="icone-historico"
               id="btn-graficos"
               onclick="trocarAba('grafico')"
+              title="Gráficos de Performance"
               data-tooltip="Gráficos de Performance"
               aria-label="Ver gráficos de performance"
             >
@@ -357,6 +360,7 @@
               class="icone-historico"
               id="btn-logs"
               onclick="trocarAba('logs')"
+              title="Logs em Tempo Real"
               data-tooltip="Logs em Tempo Real"
               aria-label="Ver logs em tempo real"
             >
@@ -366,6 +370,7 @@
               class="icone-historico"
               id="btn-limpar"
               onclick="trocarAba('limpar')"
+              title="Limpar Histórico"
               data-tooltip="Limpar Histórico"
               aria-label="Limpar histórico de operações"
             >
@@ -1283,10 +1288,19 @@
       console.log("🔥 Script inline carregado!");
 
       let roboAtivo = false;
+      window.roboAtivo = false;
 
       function moverHistoricoParaCompleto() {
-        if (typeof carregarHistoricoCompleto === "function") {
+        if (typeof window.carregarHistoricoCompleto === "function") {
+          window.carregarHistoricoCompleto();
+        } else if (typeof carregarHistoricoCompleto === "function") {
           carregarHistoricoCompleto();
+        }
+      }
+
+      function trocarAba(aba) {
+        if (typeof window.trocarAba === "function") {
+          window.trocarAba(aba);
         }
       }
 

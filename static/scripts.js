@@ -248,9 +248,6 @@ document.addEventListener("DOMContentLoaded", function () {
       if (roboAtivo) {
         trocarAba("tabela");
       }
-
-      // Demonstrar o progresso quando for ativado
-      demonstrarProgresso();
     } catch (erro) {
       console.error("Erro ao alternar robô:", erro);
     }
@@ -954,55 +951,14 @@ document.addEventListener("DOMContentLoaded", function () {
     fetch("/historico")
       .then((response) => response.json())
       .then((data) => {
-        if (data.status === "ok" && data.historico) {
-          // Limpa a tabela atual
-          historicoTabela.innerHTML = "";
-
-          // Adiciona as operações à tabela
-          data.historico.forEach((op) => {
-            const tr = document.createElement("tr");
-
-            // Formata a data e hora
-            let data = op.data || "--";
-            let hora = op.hora || "--";
-
-            // Se temos timestamp, extraímos data e hora
-            if (op.timestamp) {
-              try {
-                const dt = new Date(op.timestamp);
-                data = dt.toLocaleDateString("pt-BR");
-                hora = dt.toLocaleTimeString("pt-BR");
-              } catch (e) {
-                console.warn("Erro ao formatar timestamp:", e);
-              }
-            }
-
-            // Determina o resultado (pode estar em diferentes propriedades)
-            let resultado = op.resultado_real || op.resultado || op.lucro || 0;
-            let valorEntrada = op.valor || op.preco_entrada || 0;
-
-            // Cria as células
-            tr.innerHTML = `
-              <td>${data}</td>
-              <td>${hora}</td>
-              <td>${(op.tipo || "--").toUpperCase()}</td>
-              <td title="Valor da entrada">$${parseFloat(valorEntrada).toFixed(
-                2
-              )}</td>
-              <td class="resultado ${
-                resultado >= 0 ? "positivo" : "negativo"
-              }">$${parseFloat(resultado).toFixed(2)}</td>
-            `;
-
-            historicoTabela.appendChild(tr);
-          });
-
-          // Atualiza o resumo
-          atualizarResumo(data.historico);
+        const hist = Array.isArray(data) ? data : (data && Array.isArray(data.historico) ? data.historico : []);
+        // Atualiza apenas o resumo estatístico, sem interferir na tabela de operações ativas (historico-tabela-body)
+        if (typeof atualizarResumo === "function") {
+          atualizarResumo(hist);
         }
       })
       .catch((error) => {
-        console.error("Erro ao atualizar histórico:", error);
+        console.warn("Erro ao atualizar histórico de resumo:", error);
       });
   }
 
@@ -1016,8 +972,7 @@ document.addEventListener("DOMContentLoaded", function () {
     let lucroTotal = 0;
 
     historico.forEach((op) => {
-      // Determina o resultado (pode estar em diferentes propriedades)
-      let resultado = op.resultado_real || op.resultado || op.lucro || 0;
+      let resultado = op.resultado_real !== undefined ? op.resultado_real : (op.resultado !== undefined ? op.resultado : (op.lucro || 0));
       resultado = parseFloat(resultado);
 
       if (resultado > 0) {
@@ -1032,14 +987,17 @@ document.addEventListener("DOMContentLoaded", function () {
     // Calcula assertividade
     const assertividade = total > 0 ? (lucros / total) * 100 : 0;
 
-    // Atualiza os elementos
-    document.getElementById("resumo-total").innerText = total;
-    document.getElementById("resumo-lucros").innerText = lucros;
-    document.getElementById("resumo-prejuizos").innerText = prejuizos;
-    document.getElementById("resumo-assertividade").innerText =
-      assertividade.toFixed(1);
-    document.getElementById("resumo-lucro-total").innerText =
-      "$" + lucroTotal.toFixed(2);
+    // Atualiza os elementos de resumo defensivamente
+    const elTotal = document.getElementById("resumo-total");
+    if (elTotal) elTotal.innerText = total;
+    const elLucros = document.getElementById("resumo-lucros");
+    if (elLucros) elLucros.innerText = lucros;
+    const elPrejuizos = document.getElementById("resumo-prejuizos");
+    if (elPrejuizos) elPrejuizos.innerText = prejuizos;
+    const elAssert = document.getElementById("resumo-assertividade");
+    if (elAssert) elAssert.innerText = assertividade.toFixed(1);
+    const elLucroTotal = document.getElementById("resumo-lucro-total");
+    if (elLucroTotal) elLucroTotal.innerText = "$" + lucroTotal.toFixed(2);
   }
 
   // Função para trocar entre abas do histórico (Totalmente defensiva contra nós ausentes)
@@ -1124,7 +1082,8 @@ document.addEventListener("DOMContentLoaded", function () {
 
     fetch("/historico")
       .then((res) => res.json())
-      .then((operacoes) => {
+      .then((data) => {
+        const operacoes = Array.isArray(data) ? data : (data && Array.isArray(data.historico) ? data.historico : []);
         if (!operacoes || operacoes.length === 0) {
           container.innerHTML = `
             <div style="padding: 30px; text-align: center; color: #888;">
@@ -1276,9 +1235,11 @@ document.addEventListener("DOMContentLoaded", function () {
   function carregarHistoricoCompleto() {
     fetch("/historico")
       .then((res) => res.json())
-      .then((operacoes) => {
+      .then((data) => {
         const tbody = document.getElementById("historico-completo-body");
         if (!tbody) return;
+
+        const operacoes = Array.isArray(data) ? data : (data && Array.isArray(data.historico) ? data.historico : []);
 
         if (!operacoes || operacoes.length === 0) {
           tbody.innerHTML = `
@@ -1320,18 +1281,14 @@ document.addEventListener("DOMContentLoaded", function () {
       });
   }
 
-  // Função para demonstrar o progresso das bolinhas (para testes)
-  function demonstrarProgresso() {
-    if (!roboAtivo) return;
+  // Exporta funções globalmente para acesso nos eventos inline e abas
+  window.carregarHistoricoCompleto = carregarHistoricoCompleto;
+  window.carregarGrafico = carregarGrafico;
+  window.carregarLogsTempoReal = carregarLogsTempoReal;
 
-    // Simula o progresso das bolinhas
-    setTimeout(() => {
-      atualizarProgressoBolinhas(
-        "analisando",
-        "Analisando mercado em busca do melhor momento...",
-        "analise"
-      );
-    }, 1000);
+  // Função descontinuada - bolinhas seguem estritamente o funil de execução da Deriv
+  function demonstrarProgresso() {
+    // No-op: progresso do ciclo e bolinhas seguem estritamente o motor da Deriv
   }
 
   // Função para atualizar a meta
@@ -1414,18 +1371,12 @@ document.addEventListener("DOMContentLoaded", function () {
       });
     }
 
-    // Inicia os timers de atualização
+    // Inicia o timer de verificação de conexão com a Deriv
     verificarConexaoDeriv();
     verificacaoDerivTimer = setInterval(verificarConexaoDeriv, 10000);
 
-    atualizarStatusRobo();
-    verificacaoStatusTimer = setInterval(atualizarStatusRobo, 3000);
-
-    atualizarHistorico();
-    atualizacaoTimer = setInterval(atualizarHistorico, 5000);
-
-    atualizarSaldo();
-    setInterval(atualizarSaldo, 10000); // Atualiza saldo a cada 10 segundos
+    // O status do robô, saldo, lucro, steppers e operações ativas são gerenciados
+    // de forma unificada e estável por atualizarStatusGeral() no painel.html.
   }
 
   // Função para atualizar logs da estratégia turbo
