@@ -266,99 +266,205 @@ class TestGale1ControlledRecovery(unittest.TestCase):
         self.assertFalse(analise["executada"])
         self.assertIn("Aguardando confluência", analise["razao"])
 
-    def test_win_on_gale_resets_to_base_stake(self):
-        """16. Ganho no Gale reseta para stake base e registra lucro líquido."""
-        self.motor.recovery_level = 1
-        self.motor.previous_loss_amount = 0.35
-        self.motor.consecutive_losses = 1
+    def test_win_on_recovery_resets_to_base_stake(self):
+        """16. Ganho na recuperação reseta para stake base e zera perdas consecutivas."""
+        self.motor.recovery_level = 2
+        self.motor.previous_loss_amount = 2.0
+        self.motor.consecutive_losses = 2
+        self.motor.stake_base = 1.0
+        self.motor.stake_atual = 4.0
+        self.motor.meta_lucro_sessao = 20.0
+        self.motor.limite_prejuizo_sessao = 20.0
+        self.motor.lucro_realizado_sessao = -3.0
 
         raw_contract_id = "2222222222"
         self.motor.operacoes_abertas[raw_contract_id] = {
             "id": raw_contract_id,
             "contract_id": raw_contract_id,
             "ativo": "1HZ100V",
-            "valor": 0.70,
+            "valor": 4.0,
             "tipo": "TURBO",
+            "recovery_level_num": 2,
             "is_recovery": True,
         }
 
-        # Gale de $0.70 venceu com lucro de ~$0.66
+        # Operação de $4.00 vence com lucro de $3.80
         msg = {
             "proposal_open_contract": {
                 "contract_id": raw_contract_id,
                 "is_sold": 1,
-                "profit": 0.66,
-                "sell_price": 1.36,
-                "balance_after": 1000.31,
+                "profit": 3.80,
+                "sell_price": 7.80,
+                "balance_after": 1000.80,
             }
         }
         self.motor._on_message(None, json.dumps(msg))
 
         self.assertEqual(self.motor.recovery_level, 0)
         self.assertEqual(self.motor.consecutive_losses, 0)
-        self.assertAlmostEqual(self.motor.recovery_net_result, 0.66 - 0.35, places=2)
+        self.assertEqual(self.motor.stake_atual, 1.0)
+        self.assertAlmostEqual(self.motor.lucro_realizado_sessao, 0.80, places=2)
         self.assertFalse(self.motor.session_stopped)
 
-    def test_loss_on_gale_triggers_second_consecutive_loss_and_session_stop(self):
-        """17. Perda no Gale gera a segunda perda consecutiva e dispara SESSION_STOP."""
-        self.motor.recovery_level = 1
-        self.motor.previous_loss_amount = 0.35
-        self.motor.consecutive_losses = 1
+    def test_canonical_sequence_1_2_4_8_5_capped_at_session_budget(self):
+        """17. Sequência canônica da Issue #25: Meta $20, stake base $1 -> 1, 2, 4, 8, 5 com perda total cravada em -$20 (nunca -$31)."""
+        self.motor.iniciar_sessao()
+        self.motor.meta_diaria = 20.0
+        self.motor.meta_lucro_sessao = 20.0
+        self.motor.limite_prejuizo_sessao = 20.0
+        self.motor.stake_base = 1.0
+        self.motor.stake_atual = 1.0
+        self.motor.orcamento_prejuizo_restante = 20.0
 
-        raw_contract_id = "3333333333"
-        self.motor.operacoes_abertas[raw_contract_id] = {
-            "id": raw_contract_id,
-            "contract_id": raw_contract_id,
-            "ativo": "1HZ100V",
-            "valor": 0.70,
-            "tipo": "TURBO",
-            "is_recovery": True,
-        }
+        sequencia_stakes_esperados = [1.0, 2.0, 4.0, 8.0, 5.0]
+        perdas_acumuladas_esperadas = [-1.0, -3.0, -7.0, -15.0, -20.0]
+        orcamentos_restantes_esperados = [19.0, 17.0, 13.0, 5.0, 0.0]
 
-        # Gale de $0.70 perdeu
-        msg = {
-            "proposal_open_contract": {
-                "contract_id": raw_contract_id,
-                "is_sold": 1,
-                "profit": -0.70,
-                "sell_price": 0.0,
-                "balance_after": 998.95,
+        for step, (stake_exec, perda_acum, orc_esperado) in enumerate(
+            zip(sequencia_stakes_esperados, perdas_acumuladas_esperadas, orcamentos_restantes_esperados), start=1
+        ):
+            cid = f"contract_step_{step}"
+            self.motor.operacoes_abertas[cid] = {
+                "id": cid,
+                "contract_id": cid,
+                "ativo": "1HZ100V",
+                "valor": stake_exec,
+                "tipo": "TURBO",
+                "recovery_level_num": step - 1,
+                "is_recovery": (step > 1),
             }
-        }
-        self.motor._on_message(None, json.dumps(msg))
 
-        self.assertEqual(self.motor.consecutive_losses, 2)
-        self.assertTrue(self.motor.session_stopped)
-        self.assertIn("DUAS_PERDAS_CONSECUTIVAS", self.motor.session_stop_reason)
+            msg = {
+                "proposal_open_contract": {
+                    "contract_id": cid,
+                    "is_sold": 1,
+                    "profit": -stake_exec,
+                    "sell_price": 0.0,
+                    "balance_after": 1000.0 + perda_acum,
+                }
+            }
+            self.motor._on_message(None, json.dumps(msg))
 
-    def test_no_third_trade_after_two_consecutive_losses(self):
-        """18. Nenhuma terceira operação é permitida após 2 perdas consecutivas."""
-        self.motor.session_stopped = True
-        self.motor.session_stop_reason = "DUAS_PERDAS_CONSECUTIVAS: Limite atingido"
+            self.assertAlmostEqual(self.motor.lucro_realizado_sessao, perda_acum, places=2)
+            self.assertAlmostEqual(self.motor.orcamento_prejuizo_restante, orc_esperado, places=2)
 
+            if step < 5:
+                proximo_esperado = sequencia_stakes_esperados[step]
+                self.assertAlmostEqual(self.motor.stake_atual, proximo_esperado, places=2)
+                self.assertFalse(self.motor.session_stopped, f"Sessão não deveria parar no passo {step}")
+            else:
+                self.assertTrue(self.motor.session_stopped, "Sessão deve parar no passo 5 por atingir o limite de prejuízo")
+                self.assertIn("META_PREJUIZO_ATINGIDA", self.motor.session_stop_reason)
+                self.assertAlmostEqual(self.motor.lucro_realizado_sessao, -20.0, places=2)
+
+    def test_consecutive_losses_does_not_stop_session_alone(self):
+        """18. consecutive_losses não para a sessão sozinho enquanto houver orçamento restante."""
+        self.motor.iniciar_sessao()
+        self.motor.meta_diaria = 50.0
+        self.motor.meta_lucro_sessao = 50.0
+        self.motor.limite_prejuizo_sessao = 50.0
+        self.motor.stake_base = 0.50
+        self.motor.lucro_realizado_sessao = -3.50
+        self.motor.orcamento_prejuizo_restante = 46.50
+        self.motor.consecutive_losses = 3
+        self.motor.recovery_level = 3
+
+        self.assertFalse(self.motor.session_stopped)
+        self.assertEqual(self.motor.consecutive_losses, 3)
+
+    def test_session_stop_on_insufficient_budget(self):
+        """19. Orçamento restante menor que o contrato mínimo dispara ORCAMENTO_INSUFICIENTE."""
+        self.motor.iniciar_sessao()
+        self.motor.meta_diaria = 20.0
+        self.motor.meta_lucro_sessao = 20.0
+        self.motor.limite_prejuizo_sessao = 20.0
+        self.motor.stake_base = 1.0
+        self.motor.lucro_realizado_sessao = -19.80  # Resta apenas $0.20
+        self.motor.orcamento_prejuizo_restante = 0.20
+
+        # Tentativa de análise com orçamento restante < min_stake (0.35)
         analise = self.motor._analisar_entrada_turbo(
             ativo="1HZ100V",
             preco_atual=100.0,
             modo="iniciante",
             meta=20.0,
-            lucro_atual=-1.05,
+            lucro_atual=-19.80,
             operacoes_ativas=0,
         )
         self.assertFalse(analise["sinal"])
-        self.assertFalse(analise["executada"])
-        self.assertIn("Sessão parada", analise["razao"])
+        self.assertTrue(self.motor.session_stopped)
+        self.assertIn("ORCAMENTO_INSUFICIENTE", self.motor.session_stop_reason)
 
-        # Também comprar() deve bloquear
-        comprou = self.motor.comprar("CALL", 0.35, "1HZ100V")
-        self.assertFalse(comprou)
+    def test_stop_win_when_profit_hits_session_target(self):
+        """20. Sessão para imediatamente com META_LUCRO_ATINGIDA ao bater a meta."""
+        self.motor.iniciar_sessao()
+        self.motor.meta_diaria = 20.0
+        self.motor.meta_lucro_sessao = 20.0
+        self.motor.lucro_realizado_sessao = 19.50
 
-    def test_risk_cap_2pct_limits_excessive_stake(self):
-        """19. Teto de risco de 2% da banca impede stake abusivo."""
-        # Saldo ref $30.0 -> 2% = $0.60. Gale 1 = 2x $0.35 = $0.70 > $0.60 -> mantém base $0.35
-        self.motor.saldo_inicial_sessao = 30.0
-        self.motor.saldo = 30.0
+        raw_contract_id = "target_hit_contract"
+        self.motor.operacoes_abertas[raw_contract_id] = {
+            "id": raw_contract_id,
+            "contract_id": raw_contract_id,
+            "ativo": "1HZ100V",
+            "valor": 1.0,
+            "tipo": "TURBO",
+            "recovery_level_num": 0,
+            "is_recovery": False,
+        }
+
+        msg = {
+            "proposal_open_contract": {
+                "contract_id": raw_contract_id,
+                "is_sold": 1,
+                "profit": 0.85,
+                "sell_price": 1.85,
+                "balance_after": 1020.35,
+            }
+        }
+        self.motor._on_message(None, json.dumps(msg))
+
+        self.assertTrue(self.motor.session_stopped)
+        self.assertIn("META_LUCRO_ATINGIDA", self.motor.session_stop_reason)
+        self.assertGreaterEqual(self.motor.lucro_realizado_sessao, 20.0)
+
+    def test_rule_b8_single_in_flight_recovery(self):
+        """21. Regra de Concorrência B8: enquanto recovery_level > 0, apenas 1 operação em voo."""
+        self.motor.iniciar_sessao()
         self.motor.recovery_level = 1
-        self.motor.previous_loss_amount = 0.35
+        self.motor.operacoes_abertas["flight_rec_1"] = {
+            "id": "flight_rec_1",
+            "contract_id": "flight_rec_1",
+            "ativo": "1HZ100V",
+            "valor": 2.0,
+            "tipo": "TURBO",
+            "recovery_level_num": 1,
+            "is_recovery": True,
+        }
+
+        analise = self.motor._analisar_entrada_turbo(
+            ativo="1HZ75V",
+            preco_atual=100.0,
+            modo="iniciante",
+            meta=20.0,
+            lucro_atual=-1.0,
+            operacoes_ativas=1,
+        )
+
+        self.assertFalse(analise["sinal"])
+        self.assertIn("B8", analise["razao"])
+
+    def test_multi_asset_recovery_allowed(self):
+        """22. Recuperação pode ser executada em qualquer outro ativo qualificado pelo scanner."""
+        self.motor.iniciar_sessao()
+        self.motor.recovery_level = 1
+        self.motor.stake_base = 1.0
+        self.motor.stake_atual = 1.0
+        self.motor.meta_diaria = 20.0
+        self.motor.meta_lucro_sessao = 20.0
+        self.motor.limite_prejuizo_sessao = 20.0
+        self.motor.orcamento_prejuizo_restante = 19.0
+        self.motor.lucro_realizado_sessao = -1.0
 
         snapshot_valido = {"valido": True, "rsi": 20.0, "z_score": -2.5}
         ultimos_ticks = [100.0 - i * 0.5 for i in range(15)] + [92.0, 92.5, 93.0]
@@ -366,99 +472,93 @@ class TestGale1ControlledRecovery(unittest.TestCase):
         with patch("src.core.motor.analisar_micro_scalping") as mock_analise:
             mock_analise.return_value = {
                 "sinal": "CALL",
-                "score": 90.0,
-                "confianca": 0.90,
-                "razao": "Double bottom confirmed",
+                "score": 91.0,
+                "confianca": 0.91,
+                "razao": "Double bottom in 1HZ75V",
                 "estado": MicroScalperState.NORMAL,
                 "min_score": 85.0,
             }
             with patch.object(self.motor.catalogador, "obter_snapshot_mercado", return_value=snapshot_valido), \
                  patch.object(self.motor.catalogador, "obter_ultimos_ticks", return_value=ultimos_ticks):
                 analise = self.motor._analisar_entrada_turbo(
-                    ativo="1HZ100V",
+                    ativo="1HZ75V",
                     preco_atual=93.0,
                     modo="iniciante",
                     meta=20.0,
-                    lucro_atual=-0.35,
+                    lucro_atual=-1.0,
                     operacoes_ativas=0,
                 )
 
-        self.assertEqual(analise["volume"], 0.35)
-
-    def test_contract_min_exceeding_risk_cap_logs_skipped(self):
-        """20. Contrato mínimo acima do teto de risco registra RECOVERY_SKIPPED_RISK_CAP."""
-        self.motor.saldo_inicial_sessao = 10.0  # 2% de 10.0 = $0.20 < min contract ($0.35)
-        self.motor.saldo = 10.0
-        self.motor.recovery_level = 1
-
-        with self.assertLogs(self.motor.logger, level="WARNING") as log_cm:
-            with patch("src.core.motor.analisar_micro_scalping") as mock_analise:
-                mock_analise.return_value = {
-                    "sinal": "CALL",
-                    "score": 90.0,
-                    "confianca": 0.90,
-                    "razao": "Reversal valid",
-                    "estado": MicroScalperState.NORMAL,
-                    "min_score": 85.0,
-                }
-                with patch.object(self.motor.catalogador, "obter_snapshot_mercado", return_value={"valido": True}), \
-                     patch.object(self.motor.catalogador, "obter_ultimos_ticks", return_value=[100.0] * 20):
-                    analise = self.motor._analisar_entrada_turbo(
-                        ativo="1HZ100V",
-                        preco_atual=100.0,
-                        modo="iniciante",
-                        meta=20.0,
-                        lucro_atual=-0.35,
-                        operacoes_ativas=0,
-                    )
-            self.assertTrue(any("RECOVERY_SKIPPED_RISK_CAP" in msg for msg in log_cm.output))
-            self.assertEqual(analise["volume"], 0.35)
+        self.assertTrue(analise["sinal"])
+        self.assertEqual(analise["ativo"], "1HZ75V")
+        self.assertEqual(analise["volume"], 2.0)
+        self.assertEqual(analise["recovery_level"], 1)
 
     def test_session_reset_clears_recovery_state(self):
-        """21. Reinício de sessão limpa estado de recuperação."""
-        self.motor.recovery_level = 1
-        self.motor.previous_loss_amount = 0.35
-        self.motor.consecutive_losses = 1
+        """23. Reinício de sessão limpa estado de recuperação e restaura orçamento da meta."""
+        self.motor.recovery_level = 2
+        self.motor.previous_loss_amount = 2.0
+        self.motor.consecutive_losses = 2
         self.motor.session_stopped = True
+        self.motor.meta_diaria = 20.0
 
         self.motor.iniciar_sessao()
 
         self.assertEqual(self.motor.recovery_level, 0)
         self.assertEqual(self.motor.previous_loss_amount, 0.0)
         self.assertEqual(self.motor.consecutive_losses, 0)
+        self.assertEqual(self.motor.orcamento_prejuizo_restante, 20.0)
+        self.assertEqual(self.motor.stake_atual, self.motor.stake_base)
         self.assertFalse(self.motor.session_stopped)
 
     def test_manual_stop_neutralizes_recovery_state(self):
-        """22. Parada manual neutraliza estado de recuperação."""
-        self.motor.recovery_level = 1
-        self.motor.previous_loss_amount = 0.35
+        """24. Parada manual neutraliza estado de recuperação."""
+        self.motor.recovery_level = 3
+        self.motor.previous_loss_amount = 4.0
 
         self.motor.parar()
 
         self.assertEqual(self.motor.recovery_level, 0)
         self.assertEqual(self.motor.previous_loss_amount, 0.0)
+        self.assertEqual(self.motor.stake_atual, self.motor.stake_base)
         self.assertTrue(self.motor.session_stopped)
 
 
 class TestSystemSecurityAndIntegration(unittest.TestCase):
-    """Testes de Segurança e Proteção Inviolável de Conta Real e Telemetria (Issues #19, #21, #23)."""
+    """Testes de Segurança e Proteção Inviolável de Conta Real e Telemetria (Issues #19, #21, #23, #25)."""
 
     def setUp(self):
         self.motor = Motor()
 
     def test_real_account_remains_strictly_blocked(self):
-        """23. Conta real continua estritamente bloqueada (modo_real = False, REAL_ORDER_SENT=NO)."""
+        """25. Conta real continua estritamente bloqueada (modo_real = True -> bloqueio inviolável)."""
         self.motor.modo_real = True
         sucesso = self.motor.comprar("CALL", 0.35, "1HZ100V")
         self.assertFalse(sucesso)
 
-    def test_full_suite_runs_without_regression(self):
-        """24. Status do robô expõe recovery_level e recovery_net_result adequadamente."""
-        self.motor.recovery_level = 1
-        self.motor.recovery_net_result = 0.42
+    def test_telemetry_schema_exposes_recovery_and_budget_metrics(self):
+        """26. Status do robô expõe todo o schema canônico de orçamento e recuperação geométrica 2x."""
+        self.motor.meta_lucro_sessao = 20.0
+        self.motor.limite_prejuizo_sessao = 20.0
+        self.motor.lucro_realizado_sessao = -3.0
+        self.motor.recovery_level = 2
+        self.motor.consecutive_losses = 2
+        self.motor.stake_base = 1.0
+        self.motor.stake_atual = 4.0
+        self.motor.stake_proximo_teorico = 4.0
+        self.motor.stake_proximo_limitado = 4.0
+
         status = self.motor.get_status()
-        self.assertEqual(status["recovery_level"], 1)
-        self.assertEqual(status["recovery_net_result"], 0.42)
+        self.assertEqual(status["meta_lucro_sessao"], 20.0)
+        self.assertEqual(status["limite_prejuizo_sessao"], 20.0)
+        self.assertEqual(status["lucro_realizado_sessao"], -3.0)
+        self.assertEqual(status["orcamento_prejuizo_restante"], 17.0)
+        self.assertEqual(status["stake_base"], 1.0)
+        self.assertEqual(status["stake_atual"], 4.0)
+        self.assertEqual(status["stake_proximo_teorico"], 4.0)
+        self.assertEqual(status["stake_proximo_limitado"], 4.0)
+        self.assertEqual(status["recovery_level"], 2)
+        self.assertEqual(status["consecutive_losses"], 2)
 
 
 if __name__ == "__main__":

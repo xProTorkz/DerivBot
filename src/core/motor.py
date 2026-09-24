@@ -747,8 +747,18 @@ class Motor:
         self.saldo_teorico_reconciliado = 0.0
         self.contratos_liquidados_sessao = set()
         self.consecutive_losses = 0
-        self.max_perdas_consecutivas = 1
+        self.max_perdas_consecutivas = 999  # Desacoplado: parada é pelo orçamento da sessão (-meta)
+        self.stop_por_consecutive_losses = False
         self.recovery_level = 0
+        self.meta_lucro_sessao = 20.0
+        self.limite_prejuizo_sessao = 20.0
+        self.prejuizo_acumulado_sessao = 0.0
+        self.orcamento_prejuizo_restante = 20.0
+        self.stake_base = 0.35
+        self.stake_atual = 0.35
+        self.stake_proximo_teorico = 0.35
+        self.stake_proximo_limitado = 0.35
+        self.ultimo_resultado = "NENHUM"
         self.previous_loss_amount = 0.0
         self.previous_contract_id = None
         self.recovery_origin_contract_id = None
@@ -1305,6 +1315,7 @@ class Motor:
                 with self.lock:
                     buy_price = float(data["buy"].get("buy_price", 0.35))
                     duracao_op = float(passthrough.get("duration", 15))
+                    rec_num = int(passthrough.get("recovery_level_num", getattr(self, "recovery_level", 0)))
                     self.operacoes_abertas[contract_id] = {
                         "id": contract_id,
                         "contract_id": str(contract_id),
@@ -1323,7 +1334,9 @@ class Motor:
                         "is_valid_to_sell": 0,
                         "fechamento_automatico": False,
                         "ultimo_update": time.time(),
-                        "is_recovery": bool(passthrough.get("is_recovery", False)),
+                        "recovery_level_num": rec_num,
+                        "recovery_level": f"G{rec_num}" if rec_num > 0 else "BASE",
+                        "is_recovery": bool(rec_num > 0 or passthrough.get("is_recovery", False)),
                         "recovery_origin_contract_id": passthrough.get("recovery_origin_contract_id"),
                     }
 
@@ -1517,8 +1530,26 @@ class Motor:
                         era_recuperacao = bool(
                             operacao.get("is_recovery", False)
                             if operacao
-                            else (getattr(self, "recovery_level", 0) == 1)
+                            else (getattr(self, "recovery_level", 0) > 0)
                         )
+                        rec_num_op = int(
+                            operacao.get("recovery_level_num", 1 if era_recuperacao else 0)
+                            if operacao
+                            else (1 if era_recuperacao else 0)
+                        )
+                        rec_str = f"G{rec_num_op}" if rec_num_op > 0 else "BASE"
+
+                        # Reconciliação financeira canônica (Issue #23.A / #25)
+                        self.lucro_realizado_sessao = getattr(self, "lucro_realizado_sessao", 0.0) + lucro
+                        self.lucro_acumulado_sessao = self.lucro_realizado_sessao
+                        saldo_inicial_sess = getattr(self, "saldo_inicial_sessao", self.saldo_inicial) or self.saldo_inicial
+                        saldo_teorico = saldo_inicial_sess + self.lucro_realizado_sessao
+                        self.saldo_teorico_reconciliado = saldo_teorico
+
+                        meta_lucro = float(getattr(self, "meta_lucro_sessao", getattr(self, "meta_diaria", 20.0)))
+                        limite_prejuizo = float(getattr(self, "limite_prejuizo_sessao", meta_lucro))
+                        perda_realizada = max(0.0, -self.lucro_realizado_sessao)
+                        self.orcamento_prejuizo_restante = max(0.0, limite_prejuizo - perda_realizada)
 
                         resultado = {
                             "id": raw_contract_id,
@@ -1535,8 +1566,13 @@ class Motor:
                             "timestamp_fechamento": timestamp_fechamento_str,
                             "tipo": tipo_op_str,
                             "valor": val_op,
-                            "recovery_level": "GALE_1" if era_recuperacao else "BASE",
+                            "stake": val_op,
+                            "recovery_level": rec_str,
+                            "recovery_level_num": rec_num_op,
                             "is_recovery": era_recuperacao,
+                            "pnl_operacao": lucro,
+                            "pnl_sessao_apos": self.lucro_realizado_sessao,
+                            "orcamento_restante_apos": self.orcamento_prejuizo_restante,
                             "recovery_origin_contract_id": (
                                 operacao.get("recovery_origin_contract_id")
                                 if operacao
@@ -1547,13 +1583,6 @@ class Motor:
 
                         if "balance_after" in contract:
                             self.saldo = float(contract["balance_after"])
-
-                        # Reconciliação financeira canônica (Issue #23.A)
-                        self.lucro_realizado_sessao = getattr(self, "lucro_realizado_sessao", 0.0) + lucro
-                        self.lucro_acumulado_sessao = self.lucro_realizado_sessao
-                        saldo_inicial_sess = getattr(self, "saldo_inicial_sessao", self.saldo_inicial) or self.saldo_inicial
-                        saldo_teorico = saldo_inicial_sess + self.lucro_realizado_sessao
-                        self.saldo_teorico_reconciliado = saldo_teorico
 
                         dif_reconc = abs(self.saldo - saldo_teorico)
                         if dif_reconc > 0.01:
@@ -1568,7 +1597,7 @@ class Motor:
                         self.sistema_stops.remover_stop_operacao(raw_contract_id)
                         self.sistema_stops.remover_stop_operacao(cid_str)
 
-                        # Notifica main.py com schema completo (Issue #23.B)
+                        # Notifica main.py com schema completo (Issue #23.B / #25)
                         try:
                             import sys
                             mod_main = sys.modules.get("src.main") or sys.modules.get("main")
@@ -1589,6 +1618,10 @@ class Motor:
                                     hora_abertura=timestamp_abertura_str,
                                     hora_fechamento=timestamp_fechamento_str,
                                     status_final=status_final_str,
+                                    recovery_level=rec_str,
+                                    stake=val_op,
+                                    pnl_sessao_apos=self.lucro_realizado_sessao,
+                                    orcamento_restante_apos=self.orcamento_prejuizo_restante,
                                 )
                         except Exception as e:
                             self.logger.warning(f"Erro ao notificar operação no main: {e}")
@@ -1602,16 +1635,30 @@ class Motor:
                     )
 
                     # ==============================================================
-                    # REGRA CANÔNICA DE PERDAS CONSECUTIVAS, GALE 1 E META (Issue #23.F / Fase 11)
-                    # - 1ª perda: continua e arma Gale 1 (2x stake base, 2% risk cap)
-                    # - Ganho no Gale 1: lucro líquido registrado, reseta para stake base
-                    # - 2ª perda consecutiva: SESSION STOP imediato
-                    # - Meta atingida: SESSION STOP imediato
+                    # REGRA CANÔNICA DE RECUPERAÇÃO 2X LIMITADA PELO ORÇAMENTO DA META (Issue #25)
                     # ==============================================================
+                    cfg_min = float(self._obter_config_ativo(ativo_op).get("min_stake", 0.35))
+
                     if lucro <= 0:
                         self.consecutive_losses = getattr(self, "consecutive_losses", 0) + 1
-                        limite_perdas = getattr(self, "max_perdas_consecutivas", 1)
+                        self.recovery_level = rec_num_op + 1
+                        self.previous_loss_amount = abs(lucro)
+                        self.previous_contract_id = str(raw_contract_id)
+                        if not getattr(self, "recovery_origin_contract_id", None):
+                            self.recovery_origin_contract_id = str(raw_contract_id)
+                        self.ultimo_resultado = "LOSS"
 
+                        # Calcula o próximo stake: 2x do stake executado, limitado pelo orçamento restante e pela meta
+                        stake_anterior = val_op
+                        stake_teorico = round(stake_anterior * 2.0, 2)
+                        stake_limitado = min(stake_teorico, self.orcamento_prejuizo_restante, meta_lucro)
+                        stake_limitado = round(stake_limitado, 2)
+                        self.stake_proximo_teorico = stake_teorico
+                        self.stake_proximo_limitado = stake_limitado
+                        self.stake_atual = stake_limitado
+
+                        # Verificação de encerramento por limite explícito de perdas consecutivas (compatibilidade)
+                        limite_perdas = getattr(self, "max_perdas_consecutivas", 999)
                         if limite_perdas == 1:
                             self.session_stopped = True
                             self.session_stop_reason = (
@@ -1621,58 +1668,67 @@ class Motor:
                                 f"🛑 [SESSION STOP] {self.session_stop_reason}. Novas entradas bloqueadas! "
                                 f"Contratos abertos restantes ({len(self.operacoes_abertas)}) continuarão sendo monitorados até liquidação."
                             )
-                        elif getattr(self, "recovery_level", 0) == 0:
-                            # 1ª perda com limite_perdas > 1: arma Gale 1 para a próxima entrada
-                            self.recovery_level = 1
-                            self.previous_loss_amount = abs(lucro)
-                            self.previous_contract_id = str(raw_contract_id)
-                            self.recovery_origin_contract_id = str(raw_contract_id)
-                            self.logger.warning(
-                                f"⚠️ [GALE 1 ARMADO] Operação {raw_contract_id} ({ativo_op}) fechou com perda (${lucro:+.2f}). "
-                                f"Perdas consecutivas: {self.consecutive_losses}/{limite_perdas}. "
-                                f"Próxima entrada qualificada usará Gale 1 (2x stake)."
-                            )
-                        else:
-                            # Derrota no Gale 1: segundo loss consecutivo -> SESSION STOP
-                            self.recovery_net_result = -(getattr(self, "previous_loss_amount", 0.0) + abs(lucro))
-                            self.recovery_level = 0
+                        elif limite_perdas == 2 and self.consecutive_losses >= 2:
                             self.session_stopped = True
                             self.session_stop_reason = (
-                                f"DUAS_PERDAS_CONSECUTIVAS: Limite de {limite_perdas} perdas consecutivas atingido no Gale 1 (${lucro:+.2f})"
+                                f"DUAS_PERDAS_CONSECUTIVAS: Limite de 2 perdas consecutivas atingido (${lucro:+.2f})"
                             )
                             self.logger.warning(
                                 f"🛑 [SESSION STOP] {self.session_stop_reason}. Novas entradas bloqueadas! "
                                 f"Contratos abertos restantes ({len(self.operacoes_abertas)}) continuarão sendo monitorados até liquidação."
                             )
 
-                        if self.consecutive_losses >= limite_perdas and not self.session_stopped:
+                        # Verificação de encerramento por limite de perda da sessão (-meta)
+                        elif self.lucro_realizado_sessao <= -limite_prejuizo or self.orcamento_prejuizo_restante <= 0.0:
                             self.session_stopped = True
                             self.session_stop_reason = (
-                                f"DUAS_PERDAS_CONSECUTIVAS: Limite de {limite_perdas} perdas consecutivas atingido (${lucro:+.2f})"
+                                f"META_PREJUIZO_ATINGIDA: Limite de perda da sessão atingido (-${limite_prejuizo:.2f})"
+                            )
+                            self.logger.warning(
+                                f"🛑 [SESSION STOP] {self.session_stop_reason}. Novas entradas bloqueadas! "
+                                f"Contratos abertos restantes ({len(self.operacoes_abertas)}) continuarão sendo monitorados até liquidação."
+                            )
+                        elif self.orcamento_prejuizo_restante < cfg_min or stake_limitado < cfg_min:
+                            self.session_stopped = True
+                            self.session_stop_reason = (
+                                f"ORCAMENTO_INSUFICIENTE: Orçamento restante (${self.orcamento_prejuizo_restante:.2f}) "
+                                f"insuficiente para contrato mínimo (${cfg_min:.2f})"
                             )
                             self.logger.warning(
                                 f"🛑 [SESSION STOP] {self.session_stop_reason}. Novas entradas bloqueadas!"
                             )
+                        else:
+                            self.logger.warning(
+                                f"⚠️ [RECUPERAÇÃO G{self.recovery_level} ARMADA] Operação {raw_contract_id} fechou com perda (${lucro:+.2f}). "
+                                f"Próximo stake teórico: ${stake_teorico:.2f}, limitado: ${stake_limitado:.2f} "
+                                f"(Orçamento restante: ${self.orcamento_prejuizo_restante:.2f} / ${limite_prejuizo:.2f})."
+                            )
+
                     elif lucro > 0:
-                        if era_recuperacao or getattr(self, "recovery_level", 0) == 1:
+                        if era_recuperacao or rec_num_op > 0:
                             perda_ant = getattr(self, "previous_loss_amount", 0.0)
                             self.recovery_net_result = lucro - perda_ant
                             self.logger.info(
-                                f"🎉 [RECUPERAÇÃO GALE 1 SUCESSO] Operação {raw_contract_id} recuperou com lucro líquido de ${self.recovery_net_result:+.2f} "
-                                f"(Lucro: ${lucro:.2f}, Perda recuperada: ${perda_ant:.2f})"
+                                f"🎉 [RECUPERAÇÃO G{rec_num_op} SUCESSO] Operação {raw_contract_id} recuperou com lucro de ${lucro:.2f} "
+                                f"(Líquido frente à perda anterior: ${self.recovery_net_result:+.2f})"
                             )
                         self.recovery_level = 0
                         self.previous_loss_amount = 0.0
                         self.recovery_origin_contract_id = None
                         self.consecutive_losses = 0
+                        self.ultimo_resultado = "WIN"
 
-                        # Checa se atingiu meta da sessão
-                        meta_alvo = getattr(self, "meta_diaria", 20.0)
-                        lucro_sess = self.lucro_realizado_sessao
-                        if meta_alvo > 0 and lucro_sess >= meta_alvo:
+                        # Reseta stake para a base
+                        base_stk = getattr(self, "stake_base", 0.35)
+                        self.stake_atual = base_stk
+                        self.stake_proximo_teorico = base_stk
+                        self.stake_proximo_limitado = base_stk
+
+                        # Checa se atingiu meta da sessão (Stop Win)
+                        if meta_lucro > 0 and self.lucro_realizado_sessao >= meta_lucro:
                             self.session_stopped = True
                             self.session_stop_reason = (
-                                f"META_ATINGIDA: Lucro realizado ${lucro_sess:+.2f} atingiu a meta de ${meta_alvo:.2f}"
+                                f"META_ATINGIDA: Lucro realizado ${self.lucro_realizado_sessao:+.2f} atingiu a meta de ${meta_lucro:.2f} (META_LUCRO_ATINGIDA)"
                             )
                             self.meta_atingida = True
                             self.logger.info(
@@ -1842,9 +1898,42 @@ class Motor:
                 "operacoes_ativas": operacoes_ativas,
             }
 
-        # 2. Checagem de meta diária
-        if meta > 0 and lucro_atual >= meta:
-            motivo = f"Meta diária de ${meta:.2f} já atingida (Lucro atual: ${lucro_atual:.2f})"
+        # Regra de concorrência B8 (Issue #25): em recuperação, somente 1 operação em voo
+        rec_level = getattr(self, "recovery_level", 0)
+        if rec_level > 0 and operacoes_ativas > 0:
+            motivo = f"Aguardando liquidação da operação em recuperação ativa (Regra B8: single in-flight)"
+            self.ultimo_motivo_recusa = motivo
+            return {
+                "executada": False,
+                "sinal": False,
+                "tipo": None,
+                "ativo": ativo_alvo,
+                "razao": motivo,
+                "motivo_recusa": motivo,
+                "confianca": 0.0,
+                "score": 0.0,
+                "estado": MicroScalperState.POSICAO_ABERTA,
+                "lucro_atual": lucro_atual,
+                "operacoes_ativas": operacoes_ativas,
+                "recovery_level": rec_level,
+            }
+
+        # 2. Checagem de Orçamento da Sessão e Paradas (Issue #25)
+        meta_base = float(meta) if (meta is not None and float(meta) > 0) else float(getattr(self, "meta_lucro_sessao", getattr(self, "meta_diaria", 20.0)))
+        limite_prej = float(getattr(self, "limite_prejuizo_sessao", meta_base))
+        lucro_sess = float(getattr(self, "lucro_realizado_sessao", lucro_atual))
+        perda_acum = max(0.0, -lucro_sess)
+        orc_restante = max(0.0, limite_prej - perda_acum)
+        self.orcamento_prejuizo_restante = orc_restante
+
+        min_contrato = float(self._obter_config_ativo(ativo_alvo).get("min_stake", 0.35))
+
+        # Stop Win: meta atingida
+        if meta_base > 0 and lucro_sess >= meta_base:
+            self.session_stopped = True
+            self.session_stop_reason = f"META_ATINGIDA: Lucro realizado ${lucro_sess:+.2f} atingiu a meta de ${meta_base:.2f} (META_LUCRO_ATINGIDA)"
+            self.meta_atingida = True
+            motivo = self.session_stop_reason
             self.ultimo_motivo_recusa = motivo
             return {
                 "executada": False,
@@ -1858,6 +1947,49 @@ class Motor:
                 "estado": MicroScalperState.NORMAL,
                 "lucro_atual": lucro_atual,
                 "operacoes_ativas": operacoes_ativas,
+                "session_stopped": True,
+            }
+
+        # Stop Loss: perda atingiu o limite do orçamento (-meta)
+        if lucro_sess <= -limite_prej or orc_restante <= 0.0:
+            self.session_stopped = True
+            self.session_stop_reason = f"META_PREJUIZO_ATINGIDA: Limite de perda da sessão atingido (-${limite_prej:.2f})"
+            motivo = self.session_stop_reason
+            self.ultimo_motivo_recusa = motivo
+            return {
+                "executada": False,
+                "sinal": False,
+                "tipo": None,
+                "ativo": ativo_alvo,
+                "razao": motivo,
+                "motivo_recusa": motivo,
+                "confianca": 0.0,
+                "score": 0.0,
+                "estado": MicroScalperState.NORMAL,
+                "lucro_atual": lucro_atual,
+                "operacoes_ativas": operacoes_ativas,
+                "session_stopped": True,
+            }
+
+        # Stop por Orçamento Insuficiente
+        if orc_restante < min_contrato:
+            self.session_stopped = True
+            self.session_stop_reason = f"ORCAMENTO_INSUFICIENTE: Orçamento restante (${orc_restante:.2f}) insuficiente para contrato mínimo (${min_contrato:.2f})"
+            motivo = self.session_stop_reason
+            self.ultimo_motivo_recusa = motivo
+            return {
+                "executada": False,
+                "sinal": False,
+                "tipo": None,
+                "ativo": ativo_alvo,
+                "razao": motivo,
+                "motivo_recusa": motivo,
+                "confianca": 0.0,
+                "score": 0.0,
+                "estado": MicroScalperState.NORMAL,
+                "lucro_atual": lucro_atual,
+                "operacoes_ativas": operacoes_ativas,
+                "session_stopped": True,
             }
 
         # 3. Snapshot de mercado e ticks reais para o ativo alvo
@@ -1912,34 +2044,53 @@ class Motor:
         self.ultimo_score = score
         self.ultimo_motivo_recusa = motivo_recusa
 
-        # Volume de entrada derivado da meta da sessão (Issue #23.E):
-        # Fórmula: 1% da meta da sessão, respeitando o mínimo exigido pelo contrato Deriv
-        meta_base = float(meta) if (meta is not None and float(meta) > 0) else float(getattr(self, "meta_diaria", 20.0))
-        min_contrato = float(self._obter_config_ativo(ativo_alvo).get("min_stake", 0.35))
-        valor_teorico = round(meta_base * 0.01, 2)
-        stake_base = max(valor_teorico, min_contrato)
+        # Dimensionamento de stake com progressão geométrica 2x limitada pelo orçamento da meta (Issue #25)
+        if hasattr(self, "stake_base") and float(self.stake_base) > 0:
+            stake_base = max(float(self.stake_base), min_contrato)
+        else:
+            stake_base = max(round(meta_base * 0.01, 2), min_contrato)
+            self.stake_base = stake_base
 
-        # Recuperação Controlada Gale 1 (Issue #23.F / Fase 11):
-        # Apenas 1 passo de recuperação (2x stake base), teto de risco de 2% do saldo inicial da sessão
-        volume = stake_base
-        rec_level = getattr(self, "recovery_level", 0)
-        if rec_level == 1:
-            saldo_ref = float(getattr(self, "saldo_inicial_sessao", 0.0) or getattr(self, "obter_saldo", lambda: 1000.0)() or 1000.0)
-            teto_risco_2pct = max(round(saldo_ref * 0.02, 2), 0.0)
-            gale_volume = round(stake_base * 2.0, 2)
+        if rec_level == 0:
+            stake_teorico = stake_base
+            volume = min(stake_teorico, orc_restante, meta_base)
+        else:
+            stake_anterior = getattr(self, "stake_atual", stake_base)
+            stake_teorico = round(float(stake_anterior) * 2.0, 2)
+            volume = min(stake_teorico, orc_restante, meta_base)
 
-            if gale_volume > teto_risco_2pct or min_contrato > teto_risco_2pct:
-                self.logger.warning(
-                    f"RECOVERY_SKIPPED_RISK_CAP: Gale 1 (${gale_volume:.2f}) excede o teto de 2% de risco da banca "
-                    f"(${teto_risco_2pct:.2f} com saldo ref ${saldo_ref:.2f}). Mantendo stake base ${stake_base:.2f}."
-                )
-                volume = stake_base
-            else:
-                volume = gale_volume
-                self.logger.info(
-                    f"RECOVERY_GALE_1_ARMED: Operação armada com Gale 1 (${volume:.2f}, 2x stake base) "
-                    f"para recuperar perda anterior de ${getattr(self, 'previous_loss_amount', 0.0):.2f}"
-                )
+        volume = round(volume, 2)
+        self.stake_proximo_teorico = stake_teorico
+        self.stake_proximo_limitado = volume
+        self.stake_atual = volume
+
+        if volume < min_contrato:
+            self.session_stopped = True
+            self.session_stop_reason = (
+                f"ORCAMENTO_INSUFICIENTE: Stake calculado (${volume:.2f}) abaixo do mínimo contratual (${min_contrato:.2f})"
+            )
+            motivo = self.session_stop_reason
+            self.ultimo_motivo_recusa = motivo
+            return {
+                "executada": False,
+                "sinal": False,
+                "tipo": None,
+                "ativo": ativo_alvo,
+                "razao": motivo,
+                "motivo_recusa": motivo,
+                "confianca": 0.0,
+                "score": 0.0,
+                "estado": MicroScalperState.NORMAL,
+                "lucro_atual": lucro_atual,
+                "operacoes_ativas": operacoes_ativas,
+                "session_stopped": True,
+            }
+
+        if rec_level > 0:
+            self.logger.info(
+                f"RECOVERY_GEOMETRICA_2X: Nível G{rec_level} | Stake Teórico: ${stake_teorico:.2f} | "
+                f"Stake Limitado: ${volume:.2f} | Orçamento Restante: ${orc_restante:.2f} / ${limite_prej:.2f}"
+            )
 
         indicadores_resumo = {
             "rsi": snapshot.get("rsi", 50.0),
@@ -2380,7 +2531,8 @@ class Motor:
                             "simbolo": simbolo,
                             "contract_type": contract_type,
                             "valor_max": valor,
-                            "is_recovery": (getattr(self, "recovery_level", 0) == 1),
+                            "recovery_level_num": getattr(self, "recovery_level", 0),
+                            "is_recovery": (getattr(self, "recovery_level", 0) > 0),
                             "recovery_origin_contract_id": getattr(self, "recovery_origin_contract_id", None),
                         },
                     }
@@ -2405,7 +2557,8 @@ class Motor:
                             "simbolo": simbolo,
                             "contract_type": contract_type,
                             "valor_max": valor,
-                            "is_recovery": (getattr(self, "recovery_level", 0) == 1),
+                            "recovery_level_num": getattr(self, "recovery_level", 0),
+                            "is_recovery": (getattr(self, "recovery_level", 0) > 0),
                             "recovery_origin_contract_id": getattr(self, "recovery_origin_contract_id", None),
                         },
                     }
@@ -2847,8 +3000,19 @@ class Motor:
         self.saldo_teorico_reconciliado = self.saldo_inicial_sessao
         self.contratos_liquidados_sessao = set()
         self.consecutive_losses = 0
-        self.max_perdas_consecutivas = 2
+        self.max_perdas_consecutivas = 999  # Desacoplado da parada (parada é por -meta)
+        self.stop_por_consecutive_losses = False
+        meta_s = float(getattr(self, "meta_diaria", 20.0) or 20.0)
+        self.meta_lucro_sessao = meta_s
+        self.limite_prejuizo_sessao = meta_s
+        self.prejuizo_acumulado_sessao = 0.0
+        self.orcamento_prejuizo_restante = meta_s
         self.recovery_level = 0
+        self.stake_base = getattr(self, "stake_base", 0.35)
+        self.stake_atual = self.stake_base
+        self.stake_proximo_teorico = self.stake_base
+        self.stake_proximo_limitado = self.stake_base
+        self.ultimo_resultado = "NENHUM"
         self.previous_loss_amount = 0.0
         self.previous_contract_id = None
         self.recovery_origin_contract_id = None
@@ -2904,6 +3068,7 @@ class Motor:
         self.session_stop_reason = "MANUAL_STOP: Parado pelo usuário"
         self.ultimo_estagio_execucao = "PARADO"
         self.recovery_level = 0
+        self.stake_atual = getattr(self, "stake_base", 0.35)
         self.previous_loss_amount = 0.0
         self.recovery_origin_contract_id = None
 
@@ -2929,7 +3094,12 @@ class Motor:
         self.logger.info(f"Modo alterado para: {'REAL' if self.modo_real else 'DEMO'}")
 
     def get_status(self) -> Dict[str, Any]:
-        """Retorna status atual"""
+        """Retorna status atual com schema canônico da Issue #25"""
+        meta_s = getattr(self, "meta_lucro_sessao", getattr(self, "meta_diaria", 20.0))
+        lucro_sess = getattr(self, "lucro_realizado_sessao", 0.0)
+        perda_real = max(0.0, -lucro_sess)
+        orc_rest = max(0.0, meta_s - perda_real)
+
         return {
             "conectado": self.conectado,
             "rodando": self.rodando,
@@ -2943,6 +3113,15 @@ class Motor:
             "contadores_funil": getattr(self, "contadores_funil", {}),
             "recovery_level": getattr(self, "recovery_level", 0),
             "recovery_net_result": getattr(self, "recovery_net_result", 0.0),
+            "meta_lucro_sessao": meta_s,
+            "limite_prejuizo_sessao": getattr(self, "limite_prejuizo_sessao", meta_s),
+            "lucro_realizado_sessao": lucro_sess,
+            "orcamento_prejuizo_restante": orc_rest,
+            "stake_base": getattr(self, "stake_base", 0.35),
+            "stake_atual": getattr(self, "stake_atual", 0.35),
+            "stake_proximo_teorico": getattr(self, "stake_proximo_teorico", 0.35),
+            "stake_proximo_limitado": getattr(self, "stake_proximo_limitado", 0.35),
+            "consecutive_losses": getattr(self, "consecutive_losses", 0),
         }
 
     def iniciar_sistema_inteligente(self):

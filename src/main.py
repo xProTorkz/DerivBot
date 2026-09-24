@@ -808,8 +808,12 @@ def adicionar_operacao(
     hora_abertura=None,
     hora_fechamento=None,
     status_final=None,
+    recovery_level=None,
+    stake=None,
+    pnl_sessao_apos=None,
+    orcamento_restante_apos=None,
 ):
-    """Adiciona uma operação ao histórico garantindo esquema completo e idempotência (Issue #23.B)"""
+    """Adiciona uma operação ao histórico garantindo esquema completo e idempotência (Issue #23.B / #25)"""
     global historico_operacoes, contador_operacoes, lucro_atual, saldo_atual
 
     # Idempotência por contract_id
@@ -835,8 +839,13 @@ def adicionar_operacao(
         "ativo": ativo or "1HZ75V",
         "tipo": tipo,
         "valor": float(valor),
+        "stake": float(stake if stake is not None else valor),
         "resultado_real": float(resultado),
         "lucro": float(resultado),
+        "pnl_operacao": float(resultado),
+        "pnl_sessao_apos": float(pnl_sessao_apos) if pnl_sessao_apos is not None else None,
+        "orcamento_restante_apos": float(orcamento_restante_apos) if orcamento_restante_apos is not None else None,
+        "recovery_level": recovery_level or "BASE",
         "motivo_saida": motivo_saida or ("TAKE_PROFIT" if resultado > 0 else "STOP_LOSS"),
         "status_final": status_final or ("WIN" if resultado > 0 else ("LOSS" if resultado < 0 else "EMPATE")),
     }
@@ -2346,6 +2355,13 @@ def status_robo():
             "consecutive_losses": consec_losses,
             "recovery_level": _safe_int(getattr(motor, "recovery_level", 0), 0) if motor else 0,
             "recovery_net_result": _safe_float(getattr(motor, "recovery_net_result", 0.0), 0.0) if motor else 0.0,
+            "meta_lucro_sessao": _safe_float(getattr(motor, "meta_lucro_sessao", meta_efetiva), meta_efetiva) if motor else meta_efetiva,
+            "limite_prejuizo_sessao": _safe_float(getattr(motor, "limite_prejuizo_sessao", meta_efetiva), meta_efetiva) if motor else meta_efetiva,
+            "orcamento_prejuizo_restante": _safe_float(getattr(motor, "orcamento_prejuizo_restante", max(0.0, meta_efetiva - max(0.0, -lucro_sess))), max(0.0, meta_efetiva - max(0.0, -lucro_sess))) if motor else meta_efetiva,
+            "stake_base": _safe_float(getattr(motor, "stake_base", valor_efetivo), valor_efetivo) if motor else valor_efetivo,
+            "stake_atual": _safe_float(getattr(motor, "stake_atual", valor_efetivo), valor_efetivo) if motor else valor_efetivo,
+            "stake_proximo_teorico": _safe_float(getattr(motor, "stake_proximo_teorico", valor_efetivo), valor_efetivo) if motor else valor_efetivo,
+            "stake_proximo_limitado": _safe_float(getattr(motor, "stake_proximo_limitado", valor_efetivo), valor_efetivo) if motor else valor_efetivo,
             "saldo_teorico_reconciliado": saldo_teorico,
             "lucro_realizado_sessao": lucro_sess,
             "status_operacao": str(status_operacao or "parado"),

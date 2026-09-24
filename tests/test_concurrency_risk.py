@@ -270,6 +270,7 @@ class TestSessionStopGuard(unittest.TestCase):
         self.motor.saldo_inicial = 100.0
         self.motor.meta_diaria = 20.0
         self.motor.modo_operacao = "iniciante"
+        self.motor.max_perdas_consecutivas = 1
 
     def test_session_stops_on_first_loss(self):
         contract_id = 88801

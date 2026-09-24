@@ -624,13 +624,13 @@ MICRO_SCALPER_CONFIG = {
         "volatilidade_anormal_max": float(os.getenv("REGIME_VOL_MAX", "0.05")),
     },
 
-    # 21. RECUPERAÇÃO CONTROLADA GALE 1 (Fase 11)
+    # 21. RECUPERAÇÃO GEOMÉTRICA 2X LIMITADA PELO ORÇAMENTO DE PERDA DA SESSÃO (Issue #25)
     "recuperacao_gale": {
         "ativo": True,
-        "max_recovery_level": 1,
         "multiplier": 2.0,
-        "max_exposure_percent_balance": 2.0,  # Cap de 2% da banca inicial
-        "stop_on_second_loss": True,
+        "limitar_pelo_orcamento_sessao": True,
+        "stop_on_consecutive_losses": False,  # Substituído por parada no orçamento (-meta)
+        "single_in_flight": True,
     },
 }
 

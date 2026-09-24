@@ -113,6 +113,7 @@ class TestIssue23ConsecutiveLossesRule(unittest.TestCase):
 
     def test_first_loss_continues_second_loss_stops(self):
         c1 = 11101
+        self.motor.max_perdas_consecutivas = 2
         self.motor.operacoes_abertas[c1] = {
             "id": c1,
             "ativo": "1HZ10V",

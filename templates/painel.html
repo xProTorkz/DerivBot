@@ -1000,20 +1000,28 @@
                 transition: all 0.3s ease;
             }
 
-            /* Bolinhas ativas com brilho suave */
+            /* Bolinhas ativas 100% amarelas (Issue #25 - ZERO bolinhas verdes neste componente) */
             .bolinha.ativo {
-                background: #00E676 !important;
-                border-color: #00E676 !important;
-                box-shadow: 0 0 10px rgba(0, 230, 118, 0.6) !important;
+                background: #FFD600 !important;
+                border-color: #FFD600 !important;
+                box-shadow: 0 0 10px rgba(255, 214, 0, 0.7) !important;
                 transform: scale(1.15);
             }
 
-            /* Bolinhas em processamento/transação em andamento */
+            /* Bolinhas em processamento 100% amarelas com pulso */
             .bolinha.processando {
-                background: #2196F3 !important;
-                border-color: #2196F3 !important;
-                box-shadow: 0 0 10px rgba(33, 150, 243, 0.6) !important;
+                background: #FFC107 !important;
+                border-color: #FFD600 !important;
+                box-shadow: 0 0 12px rgba(255, 214, 0, 0.85) !important;
                 animation: pulse 1s infinite;
+            }
+
+            /* Linha conectora de progresso operacional 100% amarela (Issue #25) */
+            .status-etapas::after {
+                width: var(--progresso-etapas, 0%) !important;
+                background-color: #FFD600 !important;
+                box-shadow: 0 0 8px rgba(255, 214, 0, 0.8) !important;
+                transition: width 0.4s ease-in-out !important;
             }
 
             @keyframes pulse {
@@ -1692,13 +1700,35 @@
             // 5. Operações ativas em tempo real
             renderizarOperacoesAtivas(data.operacoes_ativas || []);
 
-            // 7. Steppers do ciclo (Analisando, Abrindo, Finalizado)
+            // 7. Steppers do ciclo e barra de progresso linear 100% amarela (Issue #25)
             const bAnalisando = document.getElementById("bolinha-analisando");
             const bAbrindo = document.getElementById("bolinha-abrindo");
             const bFinalizado = document.getElementById("bolinha-finalizado");
+            const statusEtapasEl = document.querySelector(".status-etapas");
 
             const numAbertas = data.operacoes_ativas ? data.operacoes_ativas.length : 0;
             const estagio = data.ultimo_estagio_execucao || "PARADO";
+
+            let pctProgresso = 0;
+            if (botEstaAtivo) {
+              if (estagio === "SETTLED" || estagio === "FINALIZADO" || numAbertas > 0 || estagio === "BUY_CONFIRMED") {
+                pctProgresso = 100;
+              } else if (estagio === "BUY_SENT" || estagio === "PROPOSAL_SENT" || estagio === "PROPOSAL_RECEIVED" || estagio === "RISK_GATE") {
+                pctProgresso = 75;
+              } else if (estagio === "SIGNAL" || estagio === "SINAL") {
+                pctProgresso = 50;
+              } else if (estagio === "SCAN" || estagio === "ANALISANDO") {
+                pctProgresso = 20;
+              } else {
+                pctProgresso = 15;
+              }
+            } else {
+              pctProgresso = 0;
+            }
+
+            if (statusEtapasEl) {
+              statusEtapasEl.style.setProperty("--progresso-etapas", `${pctProgresso}%`);
+            }
 
             if (bAnalisando) {
               if (botEstaAtivo) {
@@ -1709,7 +1739,7 @@
             }
 
             if (bAbrindo) {
-              if (numAbertas > 0 || estagio === "BUY_SENT" || estagio === "BUY_CONFIRMED") {
+              if (numAbertas > 0 || estagio === "BUY_SENT" || estagio === "BUY_CONFIRMED" || estagio === "PROPOSAL_SENT") {
                 bAbrindo.className = "bolinha ativo processando";
               } else {
                 bAbrindo.className = "bolinha";
