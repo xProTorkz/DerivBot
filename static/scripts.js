@@ -378,6 +378,11 @@ document.addEventListener("DOMContentLoaded", function () {
         return; // Saímos aqui para não atualizar a barra
     }
 
+    // Atualiza stepper vazado moderno (Issue #25)
+    if (typeof window.definirProgressoCanaleta === "function") {
+      window.definirProgressoCanaleta(progresso, etapa);
+    }
+
     // Atualiza a barra de progresso - Versão melhorada para mobile
     if (statusEtapas) {
       // Primeiro, determina se estamos em dispositivo móvel
@@ -458,6 +463,10 @@ document.addEventListener("DOMContentLoaded", function () {
 
   // Função para resetar o progresso das bolinhas
   function resetarProgressoBolinhas() {
+    if (typeof window.definirProgressoCanaleta === "function") {
+      window.definirProgressoCanaleta(0, "parado");
+    }
+
     document.querySelectorAll(".bolinha").forEach((b) => {
       b.classList.remove("ativa");
       b.classList.remove("pisca");

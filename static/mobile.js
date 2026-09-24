@@ -405,6 +405,10 @@ document.addEventListener("DOMContentLoaded", function () {
 
     // Atualiza a barra de progresso
     atualizarBarraProgressoMobile(progresso);
+
+    if (typeof window.definirProgressoCanaleta === "function") {
+      window.definirProgressoCanaleta(progresso, "mobile");
+    }
   }
 
   // Função para atualizar a barra de progresso em dispositivos móveis

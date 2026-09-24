@@ -288,32 +288,48 @@
         <p id="status-deriv">🔄 Conectando ao servidor Deriv...</p>
       </div>
 
-      <!-- Status de Operação -->
+      <!-- Status de Operação: Canaleta Vazada Contínua e Luz Amarela Fluida (Issue #25) -->
       <div id="barra-status" role="status">
-        <div class="status-etapas">
-          <div>
-            <div
-              class="bolinha"
-              id="bolinha-analisando"
-              aria-label="Status analisando"
-            ></div>
-            <span>Analisando</span>
+        <div class="stepper-canaleta-wrapper">
+          <svg class="stepper-svg" viewBox="0 0 600 40" preserveAspectRatio="none">
+            <defs>
+              <clipPath id="luz-clip-path">
+                <rect id="progresso-luz-rect" x="0" y="0" width="0%" height="40" rx="3" />
+              </clipPath>
+              <linearGradient id="degrade-luz-amarela" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stop-color="#FFB300" />
+                <stop offset="70%" stop-color="#FFD600" />
+                <stop offset="100%" stop-color="#FFF59D" />
+              </linearGradient>
+            </defs>
+            <!-- 1. Trilha de fundo contínua vazada (lacuna oca onde a luz vai correr) -->
+            <path class="calha-fundo" d="M 52.65 17 L 287.35 17 A 13 13 0 0 1 312.65 17 L 547.35 17 A 13 13 0 1 1 547.35 23 L 312.65 23 A 13 13 0 0 1 287.35 23 L 52.65 23 A 13 13 0 1 1 52.65 17 Z" />
+            
+            <!-- 2. Luz amarela fluindo e preenchendo a calha vazada gradativamente -->
+            <path class="calha-luz" fill="url(#degrade-luz-amarela)" clip-path="url(#luz-clip-path)" d="M 52.65 17 L 287.35 17 A 13 13 0 0 1 312.65 17 L 547.35 17 A 13 13 0 1 1 547.35 23 L 312.65 23 A 13 13 0 0 1 287.35 23 L 52.65 23 A 13 13 0 1 1 52.65 17 Z" />
+            
+            <!-- 3. Ponto frontal de luz guia (lidera o fluxo ativo de luz) -->
+            <circle id="luz-ponto-frente" cx="40" cy="20" r="4.5" fill="#FFF9C4" style="opacity: 0; transition: opacity 0.3s;" />
+          </svg>
+
+          <!-- Marcadores e textos de etapa -->
+          <div class="stepper-labels-row">
+            <div class="stepper-label-item" id="item-analisando">
+              <span id="stepper-lbl-analisando">Analisando</span>
+            </div>
+            <div class="stepper-label-item" id="item-abrindo">
+              <span id="stepper-lbl-abrindo">Abrindo</span>
+            </div>
+            <div class="stepper-label-item" id="item-finalizado">
+              <span id="stepper-lbl-finalizado">Finalizado</span>
+            </div>
           </div>
-          <div>
-            <div
-              class="bolinha"
-              id="bolinha-abrindo"
-              aria-label="Status abrindo contrato"
-            ></div>
-            <span>Abrindo</span>
-          </div>
-          <div>
-            <div
-              class="bolinha"
-              id="bolinha-finalizado"
-              aria-label="Status finalizado"
-            ></div>
-            <span>Finalizado</span>
+          <!-- Elementos preservados para compatibilidade legada -->
+          <div style="display:none;" aria-hidden="true">
+            <div id="bolinha-analisando" class="bolinha"></div>
+            <div id="bolinha-abrindo" class="bolinha"></div>
+            <div id="bolinha-finalizado" class="bolinha"></div>
+            <div class="status-etapas"></div>
           </div>
         </div>
       </div>
@@ -992,6 +1008,67 @@
         // CSS dos logs
         const style = document.createElement("style");
         style.textContent = `
+            /* === STEPPER DE CANALETA VAZADA CONTÍNUA COM LUZ FLUIDA (Issue #25) === */
+            .stepper-canaleta-wrapper {
+                width: 100% !important;
+                max-width: 580px !important;
+                position: relative !important;
+                display: flex !important;
+                flex-direction: column !important;
+                align-items: center !important;
+                margin: 4px 0 8px 0 !important;
+            }
+
+            .stepper-svg {
+                width: 100% !important;
+                height: 38px !important;
+                display: block !important;
+                overflow: visible !important;
+            }
+
+            .calha-fundo {
+                fill: #16171d !important;
+                stroke: #383a45 !important;
+                stroke-width: 1.6 !important;
+                transition: all 0.3s ease !important;
+            }
+
+            .calha-luz {
+                filter: drop-shadow(0 0 6px rgba(255, 214, 0, 0.85)) drop-shadow(0 0 14px rgba(255, 214, 0, 0.5)) !important;
+            }
+
+            #progresso-luz-rect {
+                transition: width 0.35s ease-out !important;
+            }
+
+            #luz-ponto-frente {
+                filter: drop-shadow(0 0 8px #FFD600) drop-shadow(0 0 14px #FFF176) !important;
+                transition: cx 0.35s ease-out, opacity 0.3s ease !important;
+            }
+
+            .stepper-labels-row {
+                display: flex !important;
+                justify-content: space-between !important;
+                width: 100% !important;
+                margin-top: 4px !important;
+                box-sizing: border-box !important;
+            }
+
+            .stepper-label-item {
+                width: 80px !important;
+                text-align: center !important;
+                font-size: 0.75rem !important;
+                color: #7a7e8d !important;
+                font-weight: 500 !important;
+                transition: all 0.3s ease !important;
+            }
+
+            .stepper-label-item.ativo span {
+                color: #FFD600 !important;
+                font-weight: 700 !important;
+                text-shadow: 0 0 10px rgba(255, 214, 0, 0.6) !important;
+            }
+
             /* Container de cada etapa com largura fixa para alinhamento simétrico perfeito */
             .status-etapas > div {
                 width: 70px !important;
@@ -1696,6 +1773,50 @@
       }
 
       // ==============================================================
+      // CONTROLE DA CANALETA VAZADA COM LUZ FLUIDA (Issue #25)
+      // ==============================================================
+      let progressoSuaveAtual = 0;
+
+      function definirProgressoCanaleta(pctAlvo, estagio) {
+        const rectProgresso = document.getElementById("progresso-luz-rect");
+        const pontoFrente = document.getElementById("luz-ponto-frente");
+        const itemAnalisando = document.getElementById("item-analisando");
+        const itemAbrindo = document.getElementById("item-abrindo");
+        const itemFinalizado = document.getElementById("item-finalizado");
+
+        // Interpolação suave do preenchimento da luz
+        const diff = pctAlvo - progressoSuaveAtual;
+        if (Math.abs(diff) > 0.4) {
+          progressoSuaveAtual += diff * 0.3;
+        } else {
+          progressoSuaveAtual = pctAlvo;
+        }
+
+        const pct = Math.min(100, Math.max(0, progressoSuaveAtual));
+
+        if (rectProgresso) {
+          rectProgresso.setAttribute("width", `${pct.toFixed(1)}%`);
+        }
+
+        if (pontoFrente) {
+          if (pct <= 2) {
+            pontoFrente.style.opacity = "0";
+          } else {
+            pontoFrente.style.opacity = "1";
+            // Converte porcentagem para coordenada horizontal cx na viewBox de 600px
+            const cxVal = Math.min(560, Math.max(40, (pct / 100) * 600));
+            pontoFrente.setAttribute("cx", cxVal.toFixed(1));
+          }
+        }
+
+        // Ilumina os labels de etapa conforme o fluxo alcança as estações
+        if (itemAnalisando) itemAnalisando.classList.toggle("ativo", pct >= 6);
+        if (itemAbrindo) itemAbrindo.classList.toggle("ativo", pct >= 48);
+        if (itemFinalizado) itemFinalizado.classList.toggle("ativo", pct >= 94);
+      }
+      window.definirProgressoCanaleta = definirProgressoCanaleta;
+
+      // ==============================================================
       // ATUALIZAÇÃO DO STATUS GERAL & POLLING CENTRALIZADO (Issue #23)
       // ==============================================================
       let ultimoEstagioAnterior = null;
@@ -1760,7 +1881,7 @@
             // 5. Operações ativas em tempo real
             renderizarOperacoesAtivas(data.operacoes_ativas || []);
 
-            // 7. Steppers do ciclo e barra de progresso linear 100% amarela (Issue #25)
+            // 7. Steppers do ciclo: Preenchimento progressivo da canaleta vazada (Issue #25)
             const bAnalisando = document.getElementById("bolinha-analisando");
             const bAbrindo = document.getElementById("bolinha-abrindo");
             const bFinalizado = document.getElementById("bolinha-finalizado");
@@ -1769,18 +1890,27 @@
             const numAbertas = data.operacoes_ativas ? data.operacoes_ativas.length : 0;
             const estagio = data.ultimo_estagio_execucao || "PARADO";
 
+            const telemetria = data.telemetria_banner || {};
+            const scoreAtual = typeof telemetria.score === "number" ? telemetria.score : (data.micro_scalper ? data.micro_scalper.ultimo_score || 0 : 0);
+            const scoreMin = typeof telemetria.min_score === "number" ? telemetria.min_score : 85;
+            const confluenciaRatio = scoreMin > 0 ? Math.min(1, Math.max(0, scoreAtual / scoreMin)) : 0;
+
             let pctProgresso = 0;
             if (botEstaAtivo) {
               if (estagio === "SETTLED" || estagio === "FINALIZADO") {
                 pctProgresso = 100;
               } else if (numAbertas > 0 || estagio === "BUY_CONFIRMED" || estagio === "BUY_SENT" || estagio === "PROPOSAL_SENT" || estagio === "PROPOSAL_RECEIVED" || estagio === "RISK_GATE" || estagio === "SIGNAL" || estagio === "SINAL") {
-                pctProgresso = 50;
+                pctProgresso = 52;
               } else {
-                pctProgresso = 0;
+                // Em análise de mercado: preenche a primeira câmara (~9%) e flui gradativamente
+                // pela barrinha vazada em direção à bolinha 2 (até ~46%) conforme a confluência/ticks
+                pctProgresso = 9 + (confluenciaRatio * 37);
               }
             } else {
               pctProgresso = 0;
             }
+
+            definirProgressoCanaleta(pctProgresso, estagio);
 
             if (statusEtapasEl) {
               statusEtapasEl.style.setProperty("--progresso-etapas", `${pctProgresso}%`);
@@ -1795,7 +1925,7 @@
             }
 
             if (bAbrindo) {
-              if (numAbertas > 0 || estagio === "BUY_SENT" || estagio === "BUY_CONFIRMED" || estagio === "PROPOSAL_SENT") {
+              if (numAbertas > 0 || pctProgresso >= 50) {
                 bAbrindo.className = "bolinha ativo processando";
               } else {
                 bAbrindo.className = "bolinha";
