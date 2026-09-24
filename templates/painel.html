@@ -1990,10 +1990,7 @@
             const bannerTextoPrincipal = document.getElementById("banner-texto-principal");
             const bannerBarraProgresso = document.getElementById("banner-barra-progresso");
 
-            const telemetria = data.telemetria_banner || {};
             const ativoScan = telemetria.ativo || (data.ativo_atual ? data.ativo_atual.ativo : "1HZ75V");
-            const scoreAtual = typeof telemetria.score === "number" ? telemetria.score : (data.micro_scalper ? data.micro_scalper.ultimo_score || 0 : 0);
-            const scoreMin = typeof telemetria.min_score === "number" ? telemetria.min_score : 85;
             const estadoAtual = telemetria.estado || (data.micro_scalper ? data.micro_scalper.estado_atual : "NORMAL");
             const motivoAtual = telemetria.motivo || (data.micro_scalper ? data.micro_scalper.ultimo_motivo_recusa : "Aguardando confluência");
 
