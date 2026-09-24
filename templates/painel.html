@@ -291,10 +291,10 @@
       <!-- Status de Operação: Canaleta Vazada Contínua e Luz Amarela Fluida (Issue #25) -->
       <div id="barra-status" role="status">
         <div class="stepper-canaleta-wrapper">
-          <svg class="stepper-svg" viewBox="0 0 600 40" preserveAspectRatio="none">
+          <svg class="stepper-svg" viewBox="0 0 800 22">
             <defs>
               <clipPath id="luz-clip-path">
-                <rect id="progresso-luz-rect" x="0" y="0" width="0%" height="40" rx="3" />
+                <rect id="progresso-luz-rect" x="0" y="0" width="0%" height="22" />
               </clipPath>
               <linearGradient id="degrade-luz-amarela" x1="0%" y1="0%" x2="100%" y2="0%">
                 <stop offset="0%" stop-color="#FFB300" />
@@ -302,25 +302,25 @@
                 <stop offset="100%" stop-color="#FFF59D" />
               </linearGradient>
             </defs>
-            <!-- 1. Trilha de fundo contínua vazada (lacuna oca onde a luz vai correr) -->
-            <path class="calha-fundo" d="M 52.65 17 L 287.35 17 A 13 13 0 0 1 312.65 17 L 547.35 17 A 13 13 0 1 1 547.35 23 L 312.65 23 A 13 13 0 0 1 287.35 23 L 52.65 23 A 13 13 0 1 1 52.65 17 Z" />
+            <!-- 1. Trilha de fundo contínua vazada (bolinhas 16px e canaleta fininha 2.5px no padrão original) -->
+            <path class="calha-fundo" d="M 47.90 9.75 L 392.10 9.75 A 8 8 0 0 1 407.90 9.75 L 752.10 9.75 A 8 8 0 1 1 752.10 12.25 L 407.90 12.25 A 8 8 0 0 1 392.10 12.25 L 47.90 12.25 A 8 8 0 1 1 47.90 9.75 Z" />
             
             <!-- 2. Luz amarela fluindo e preenchendo a calha vazada gradativamente -->
-            <path class="calha-luz" fill="url(#degrade-luz-amarela)" clip-path="url(#luz-clip-path)" d="M 52.65 17 L 287.35 17 A 13 13 0 0 1 312.65 17 L 547.35 17 A 13 13 0 1 1 547.35 23 L 312.65 23 A 13 13 0 0 1 287.35 23 L 52.65 23 A 13 13 0 1 1 52.65 17 Z" />
+            <path class="calha-luz" fill="url(#degrade-luz-amarela)" clip-path="url(#luz-clip-path)" d="M 47.90 9.75 L 392.10 9.75 A 8 8 0 0 1 407.90 9.75 L 752.10 9.75 A 8 8 0 1 1 752.10 12.25 L 407.90 12.25 A 8 8 0 0 1 392.10 12.25 L 47.90 12.25 A 8 8 0 1 1 47.90 9.75 Z" />
             
-            <!-- 3. Ponto frontal de luz guia (lidera o fluxo ativo de luz) -->
-            <circle id="luz-ponto-frente" cx="40" cy="20" r="4.5" fill="#FFF9C4" style="opacity: 0; transition: opacity 0.3s;" />
+            <!-- 3. Ponto frontal de luz guia delicado -->
+            <circle id="luz-ponto-frente" cx="40" cy="11" r="3" fill="#FFF9C4" style="opacity: 0; transition: opacity 0.3s;" />
           </svg>
 
           <!-- Marcadores e textos de etapa -->
           <div class="stepper-labels-row">
-            <div class="stepper-label-item" id="item-analisando">
+            <div class="stepper-label-item pos-analisando" id="item-analisando">
               <span id="stepper-lbl-analisando">Analisando</span>
             </div>
-            <div class="stepper-label-item" id="item-abrindo">
+            <div class="stepper-label-item pos-abrindo" id="item-abrindo">
               <span id="stepper-lbl-abrindo">Abrindo</span>
             </div>
-            <div class="stepper-label-item" id="item-finalizado">
+            <div class="stepper-label-item pos-finalizado" id="item-finalizado">
               <span id="stepper-lbl-finalizado">Finalizado</span>
             </div>
           </div>
@@ -1008,33 +1008,31 @@
         // CSS dos logs
         const style = document.createElement("style");
         style.textContent = `
-            /* === STEPPER DE CANALETA VAZADA CONTÍNUA COM LUZ FLUIDA (Issue #25) === */
+            /* === STEPPER DE CANALETA VAZADA CONTÍNUA COM PADRÃO E TAMANHO ORIGINAL (Issue #25) === */
             .stepper-canaleta-wrapper {
                 width: 100% !important;
-                max-width: 580px !important;
                 position: relative !important;
                 display: flex !important;
                 flex-direction: column !important;
-                align-items: center !important;
-                margin: 4px 0 8px 0 !important;
+                margin: 6px 0 4px 0 !important;
             }
 
             .stepper-svg {
                 width: 100% !important;
-                height: 38px !important;
+                height: 22px !important;
                 display: block !important;
                 overflow: visible !important;
             }
 
             .calha-fundo {
-                fill: #16171d !important;
+                fill: #1a1a22 !important;
                 stroke: #383a45 !important;
-                stroke-width: 1.6 !important;
+                stroke-width: 1.2 !important;
                 transition: all 0.3s ease !important;
             }
 
             .calha-luz {
-                filter: drop-shadow(0 0 6px rgba(255, 214, 0, 0.85)) drop-shadow(0 0 14px rgba(255, 214, 0, 0.5)) !important;
+                filter: drop-shadow(0 0 4px rgba(255, 214, 0, 0.85)) drop-shadow(0 0 10px rgba(255, 214, 0, 0.5)) !important;
             }
 
             #progresso-luz-rect {
@@ -1042,25 +1040,40 @@
             }
 
             #luz-ponto-frente {
-                filter: drop-shadow(0 0 8px #FFD600) drop-shadow(0 0 14px #FFF176) !important;
+                filter: drop-shadow(0 0 6px #FFD600) drop-shadow(0 0 10px #FFF176) !important;
                 transition: cx 0.35s ease-out, opacity 0.3s ease !important;
             }
 
             .stepper-labels-row {
-                display: flex !important;
-                justify-content: space-between !important;
+                position: relative !important;
                 width: 100% !important;
-                margin-top: 4px !important;
+                height: 18px !important;
+                margin-top: 5px !important;
                 box-sizing: border-box !important;
             }
 
             .stepper-label-item {
-                width: 80px !important;
+                position: absolute !important;
+                top: 0 !important;
+                transform: translateX(-50%) !important;
                 text-align: center !important;
                 font-size: 0.75rem !important;
                 color: #7a7e8d !important;
                 font-weight: 500 !important;
                 transition: all 0.3s ease !important;
+                white-space: nowrap !important;
+            }
+
+            .stepper-label-item.pos-analisando {
+                left: 5% !important;
+            }
+
+            .stepper-label-item.pos-abrindo {
+                left: 50% !important;
+            }
+
+            .stepper-label-item.pos-finalizado {
+                left: 95% !important;
             }
 
             .stepper-label-item.ativo span {
@@ -1803,14 +1816,14 @@
             pontoFrente.style.opacity = "0";
           } else {
             pontoFrente.style.opacity = "1";
-            // Converte porcentagem para coordenada horizontal cx na viewBox de 600px
-            const cxVal = Math.min(560, Math.max(40, (pct / 100) * 600));
+            // Converte porcentagem para coordenada horizontal cx na viewBox de 800px
+            const cxVal = Math.min(760, Math.max(40, (pct / 100) * 800));
             pontoFrente.setAttribute("cx", cxVal.toFixed(1));
           }
         }
 
         // Ilumina os labels de etapa conforme o fluxo alcança as estações
-        if (itemAnalisando) itemAnalisando.classList.toggle("ativo", pct >= 6);
+        if (itemAnalisando) itemAnalisando.classList.toggle("ativo", pct >= 5);
         if (itemAbrindo) itemAbrindo.classList.toggle("ativo", pct >= 48);
         if (itemFinalizado) itemFinalizado.classList.toggle("ativo", pct >= 94);
       }
@@ -1902,9 +1915,9 @@
               } else if (numAbertas > 0 || estagio === "BUY_CONFIRMED" || estagio === "BUY_SENT" || estagio === "PROPOSAL_SENT" || estagio === "PROPOSAL_RECEIVED" || estagio === "RISK_GATE" || estagio === "SIGNAL" || estagio === "SINAL") {
                 pctProgresso = 52;
               } else {
-                // Em análise de mercado: preenche a primeira câmara (~9%) e flui gradativamente
+                // Em análise de mercado: preenche a primeira câmara (~6%) e flui gradativamente
                 // pela barrinha vazada em direção à bolinha 2 (até ~46%) conforme a confluência/ticks
-                pctProgresso = 9 + (confluenciaRatio * 37);
+                pctProgresso = 6 + (confluenciaRatio * 40);
               }
             } else {
               pctProgresso = 0;

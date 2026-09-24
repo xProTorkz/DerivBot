@@ -836,33 +836,31 @@ body {
   box-shadow: var(--sombra-padrao);
 }
 
-/* === STEPPER DE CANALETA VAZADA CONTÍNUA COM LUZ FLUIDA (Issue #25) === */
+/* === STEPPER DE CANALETA VAZADA CONTÍNUA COM PADRÃO E TAMANHO ORIGINAL (Issue #25) === */
 .stepper-canaleta-wrapper {
   width: 100%;
-  max-width: 580px;
   position: relative;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  margin: 4px 0 8px 0;
+  margin: 6px 0 4px 0;
 }
 
 .stepper-svg {
   width: 100%;
-  height: 38px;
+  height: 22px;
   display: block;
   overflow: visible;
 }
 
 .calha-fundo {
-  fill: #16171d;
+  fill: #1a1a22;
   stroke: #383a45;
-  stroke-width: 1.6;
+  stroke-width: 1.2;
   transition: all 0.3s ease;
 }
 
 .calha-luz {
-  filter: drop-shadow(0 0 6px rgba(255, 214, 0, 0.85)) drop-shadow(0 0 14px rgba(255, 214, 0, 0.5));
+  filter: drop-shadow(0 0 4px rgba(255, 214, 0, 0.85)) drop-shadow(0 0 10px rgba(255, 214, 0, 0.5));
 }
 
 #progresso-luz-rect {
@@ -870,25 +868,40 @@ body {
 }
 
 #luz-ponto-frente {
-  filter: drop-shadow(0 0 8px #FFD600) drop-shadow(0 0 14px #FFF176);
+  filter: drop-shadow(0 0 6px #FFD600) drop-shadow(0 0 10px #FFF176);
   transition: cx 0.35s ease-out, opacity 0.3s ease;
 }
 
 .stepper-labels-row {
-  display: flex;
-  justify-content: space-between;
+  position: relative;
   width: 100%;
-  margin-top: 4px;
+  height: 18px;
+  margin-top: 5px;
   box-sizing: border-box;
 }
 
 .stepper-label-item {
-  width: 80px;
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
   text-align: center;
   font-size: 0.75rem;
   color: #7a7e8d;
   font-weight: 500;
   transition: all 0.3s ease;
+  white-space: nowrap;
+}
+
+.stepper-label-item.pos-analisando {
+  left: 5%;
+}
+
+.stepper-label-item.pos-abrindo {
+  left: 50%;
+}
+
+.stepper-label-item.pos-finalizado {
+  left: 95%;
 }
 
 .stepper-label-item.ativo span {
