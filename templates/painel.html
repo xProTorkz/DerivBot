@@ -240,6 +240,7 @@
           </div>
         </div>
         <button
+          type="button"
           id="bot-control-btn"
           aria-label="Controle do robô"
           onclick="iniciarRoboSeguro()"
@@ -989,6 +990,8 @@
         window.logsAvancados = new LogsAvancados();
 
         // CSS dos logs
+        const style = document.createElement("style");
+        style.textContent = `
             /* Estilo neutro para status das bolinhas (robô parado) */
             .bolinha {
                 background: #2a2a2a;
@@ -1300,146 +1303,196 @@
         }
       }
 
-      function iniciarRoboSeguro() {
-        console.log("🚀 Iniciando robô...");
-
-        // Obtém dados do formulário
-        const modo = document.getElementById("modo").value || "iniciante";
-        const meta = parseFloat(document.getElementById("meta").value) || 20;
-        const botao = document.getElementById("bot-control-btn");
-        if (!botao || botao.disabled) return;
-        botao.disabled = true;
-
-        console.log("Dados:", { modo, meta, roboAtivo });
-
-        // Atualiza interface imediatamente
-        if (!roboAtivo) {
-          iniciandoRobo = true;
-          iniciandoRoboTimestamp = Date.now();
-          botao.innerHTML = "⏳ Iniciando...";
-
-          // Move histórico atual para histórico completo
-          moverHistoricoParaCompleto();
-
-          // Limpa histórico atual
-          const tabelaBody = document.getElementById("historico-tabela-body");
-          if (tabelaBody) {
-            tabelaBody.innerHTML = `
-              <tr id="linha-sem-operacao">
-                <td colspan="6" style="text-align: center; color: #888; padding: 12px;">Nenhuma operação em andamento</td>
-              </tr>
+      function adicionarLogInformativo(mensagem) {
+        try {
+          const logTemp = document.getElementById("log-temp");
+          if (logTemp) {
+            logTemp.textContent = mensagem;
+          }
+          const listaLogs = document.getElementById("lista-logs");
+          if (listaLogs) {
+            const logItem = document.createElement("div");
+            logItem.className = "log-item";
+            const tempo = new Date().toLocaleTimeString("pt-BR", {
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit",
+            });
+            logItem.innerHTML = `
+              <span class="log-time">${tempo}</span>
+              <span class="log-category log-categoria-sistema">SISTEMA</span>
+              <span class="log-message">${mensagem}</span>
             `;
+            listaLogs.appendChild(logItem);
+            listaLogs.scrollTop = listaLogs.scrollHeight;
           }
-
-          // Atualiza logs unificados
-          adicionarLogInformativo("🚀 Robô iniciado!");
-
-          // Adiciona logs informativos
-          setTimeout(() => {
-            adicionarLogInformativo("🔧 Configurando scanner multi-ativo...");
-            setTimeout(() => {
-              adicionarLogInformativo("📊 Monitorando pool de Volatilidade...");
-              setTimeout(() => {
-                adicionarLogInformativo("⚡ Sistema de Micro-Scalping seletivo ativo!");
-              }, 1000);
-            }, 500);
-          }, 500);
+        } catch (e) {
+          console.warn("Log informativo:", mensagem, e);
         }
-
-        // Configura stops para o modo selecionado antes de iniciar
-        fetch('/api/stops/configurar', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ modo: modo })
-        })
-        .then(response => response.json())
-        .then(data => {
-          if (data.status === 'success') {
-            console.log('Stops configurados para modo:', modo);
-            atualizarStatusStops(); // Atualiza interface imediatamente
-          }
-        })
-        .catch(error => {
-          console.error('Erro ao configurar stops:', error);
-        });
-
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 18000);
-
-        fetch("/toggle_bot", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ modo, meta }),
-          signal: controller.signal,
-        })
-          .then(async (response) => {
-            console.log("Resposta:", response.status, response.statusText);
-            const data = await response.json().catch(() => ({}));
-            if (!response.ok) {
-              const msg = data.mensagem || `HTTP ${response.status}: ${response.statusText}`;
-              throw new Error(msg);
-            }
-            return data;
-          })
-          .then((data) => {
-            console.log("Dados recebidos:", data);
-
-            // Atualiza estado do robô
-            roboAtivo = data.status === "iniciado";
-            iniciandoRobo = false;
-            iniciandoRoboTimestamp = 0;
-
-            // Atualiza botão com emoji padronizado
-            botao.innerHTML = roboAtivo ? "⛔ Parar Robô" : "🚀 Iniciar Robô";
-            botao.disabled = false;
-            botao.classList.toggle("ativo", roboAtivo);
-
-            // Transição suave: recolhe seletores e bloqueia inputs
-            const modoMetaWrapper = document.querySelector(".modo-meta-wrapper");
-            const modoSelect = document.getElementById("modo");
-            const metaInput = document.getElementById("meta");
-
-            // Mostra mensagem de sucesso e atualiza transição visual
-            if (roboAtivo) {
-              if (modoMetaWrapper) modoMetaWrapper.classList.add("recolhido");
-              if (modoSelect) modoSelect.disabled = true;
-              if (metaInput) metaInput.disabled = true;
-              console.log("✅ Robô iniciado com sucesso!");
-              adicionarLogInformativo("✅ Robô ativo - Analisando mercado nos ativos de 1s...");
-            } else {
-              if (modoMetaWrapper) modoMetaWrapper.classList.remove("recolhido");
-              if (modoSelect) modoSelect.disabled = false;
-              if (metaInput) metaInput.disabled = false;
-              console.log("⏹️ Robô parado");
-              adicionarLogInformativo("⏹️ Robô parado");
-            }
-          })
-          .catch((error) => {
-            console.error("❌ Erro:", error);
-            iniciandoRobo = false;
-            iniciandoRoboTimestamp = 0;
-
-            // Restaura botão em caso de erro
-            botao.innerHTML = "🚀 Iniciar Robô";
-            botao.disabled = false;
-
-            if (error.name === "AbortError") {
-              adicionarLogInformativo("⚠️ Tempo limite na resposta do início. Sincronizando com telemetria...");
-            } else {
-              // Mostra erro
-              adicionarLogInformativo(`❌ Erro: ${error.message}`);
-              alert("Erro ao iniciar robô: " + error.message);
-            }
-          })
-          .finally(() => {
-            clearTimeout(timeoutId);
-            iniciandoRobo = false;
-            iniciandoRoboTimestamp = 0;
-            atualizarStatusGeral();
-          });
       }
+
+      function iniciarRoboSeguro() {
+        try {
+          console.log("🚀 Iniciando robô...");
+
+          // Obtém dados do formulário de forma defensiva
+          const modoSelect = document.getElementById("modo");
+          const metaInput = document.getElementById("meta");
+          const modo = (modoSelect && modoSelect.value) ? modoSelect.value : "iniciante";
+          const meta = (metaInput && metaInput.value) ? (parseFloat(metaInput.value) || 20) : 20;
+          const botao = document.getElementById("bot-control-btn");
+          if (!botao || botao.disabled) return;
+          botao.disabled = true;
+
+          console.log("Dados:", { modo, meta, roboAtivo });
+
+          // Atualiza interface imediatamente
+          if (!roboAtivo) {
+            iniciandoRobo = true;
+            iniciandoRoboTimestamp = Date.now();
+            botao.innerHTML = "⏳ Iniciando...";
+
+            // Move histórico atual para histórico completo
+            moverHistoricoParaCompleto();
+
+            // Limpa histórico atual
+            const tabelaBody = document.getElementById("historico-tabela-body");
+            if (tabelaBody) {
+              tabelaBody.innerHTML = `
+                <tr id="linha-sem-operacao">
+                  <td colspan="6" style="text-align: center; color: #888; padding: 12px;">Nenhuma operação em andamento</td>
+                </tr>
+              `;
+            }
+
+            // Atualiza logs unificados
+            adicionarLogInformativo("🚀 Robô iniciado!");
+
+            // Adiciona logs informativos
+            setTimeout(() => {
+              adicionarLogInformativo("🔧 Configurando scanner multi-ativo...");
+              setTimeout(() => {
+                adicionarLogInformativo("📊 Monitorando pool de Volatilidade...");
+                setTimeout(() => {
+                  adicionarLogInformativo("⚡ Sistema de Micro-Scalping seletivo ativo!");
+                }, 1000);
+              }, 500);
+            }, 500);
+          } else {
+            botao.innerHTML = "⏳ Parando...";
+            adicionarLogInformativo("⏹️ Parando robô...");
+          }
+
+          // Configura stops para o modo selecionado antes de iniciar
+          fetch('/api/stops/configurar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ modo: modo })
+          })
+          .then(response => response.json())
+          .then(data => {
+            if (data.status === 'success') {
+              console.log('Stops configurados para modo:', modo);
+              if (typeof atualizarStatusStops === "function") {
+                atualizarStatusStops(); // Atualiza interface imediatamente
+              }
+            }
+          })
+          .catch(error => {
+            console.error('Erro ao configurar stops:', error);
+          });
+
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 18000);
+
+          fetch("/toggle_bot", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ modo, meta }),
+            signal: controller.signal,
+          })
+            .then(async (response) => {
+              console.log("Resposta:", response.status, response.statusText);
+              const data = await response.json().catch(() => ({}));
+              if (!response.ok) {
+                const msg = data.mensagem || `HTTP ${response.status}: ${response.statusText}`;
+                throw new Error(msg);
+              }
+              return data;
+            })
+            .then((data) => {
+              console.log("Dados recebidos:", data);
+
+              // Atualiza estado do robô
+              roboAtivo = data.status === "iniciado";
+              iniciandoRobo = false;
+              iniciandoRoboTimestamp = 0;
+
+              // Atualiza botão com emoji padronizado
+              botao.innerHTML = roboAtivo ? "⛔ Parar Robô" : "🚀 Iniciar Robô";
+              botao.disabled = false;
+              botao.classList.toggle("ativo", roboAtivo);
+
+              // Transição suave: recolhe seletores e bloqueia inputs
+              const modoMetaWrapper = document.querySelector(".modo-meta-wrapper");
+              const modoSel = document.getElementById("modo");
+              const metaIn = document.getElementById("meta");
+
+              // Mostra mensagem de sucesso e atualiza transição visual
+              if (roboAtivo) {
+                if (modoMetaWrapper) modoMetaWrapper.classList.add("recolhido");
+                if (modoSel) modoSel.disabled = true;
+                if (metaIn) metaIn.disabled = true;
+                console.log("✅ Robô iniciado com sucesso!");
+                adicionarLogInformativo("✅ Robô ativo - Analisando mercado nos ativos de 1s...");
+              } else {
+                if (modoMetaWrapper) modoMetaWrapper.classList.remove("recolhido");
+                if (modoSel) modoSel.disabled = false;
+                if (metaIn) metaIn.disabled = false;
+                console.log("⏹️ Robô parado");
+                adicionarLogInformativo("⏹️ Robô parado");
+              }
+            })
+            .catch((error) => {
+              console.error("❌ Erro:", error);
+              iniciandoRobo = false;
+              iniciandoRoboTimestamp = 0;
+
+              // Restaura botão em caso de erro
+              botao.innerHTML = "🚀 Iniciar Robô";
+              botao.disabled = false;
+
+              if (error.name === "AbortError") {
+                adicionarLogInformativo("⚠️ Tempo limite na resposta do início. Sincronizando com telemetria...");
+              } else {
+                // Mostra erro
+                adicionarLogInformativo(`❌ Erro: ${error.message}`);
+                alert("Erro ao iniciar robô: " + error.message);
+              }
+            })
+            .finally(() => {
+              clearTimeout(timeoutId);
+              iniciandoRobo = false;
+              iniciandoRoboTimestamp = 0;
+              if (typeof atualizarStatusGeral === "function") {
+                atualizarStatusGeral();
+              }
+            });
+        } catch (erroSincrono) {
+          console.error("❌ Erro síncrono em iniciarRoboSeguro:", erroSincrono);
+          const botao = document.getElementById("bot-control-btn");
+          if (botao) {
+            botao.disabled = false;
+            botao.innerHTML = roboAtivo ? "⛔ Parar Robô" : "🚀 Iniciar Robô";
+          }
+          iniciandoRobo = false;
+          iniciandoRoboTimestamp = 0;
+          alert("Erro ao acionar robô: " + erroSincrono.message);
+        }
+      }
+      window.iniciarRoboSeguro = iniciarRoboSeguro;
 
       // ==============================================================
       // CONFLUÊNCIA FINANCEIRA & ANIMAÇÃO PROGRESSIVA (Issue #23.D)
@@ -1846,6 +1899,9 @@
         console.log("🔥 DOM carregado!");
         const botao = document.getElementById("bot-control-btn");
         console.log("Botão encontrado:", botao);
+        if (botao) {
+          botao.onclick = iniciarRoboSeguro;
+        }
 
         // Atualiza status geral, saldo, operações ativas e telemetria a cada 1.5s
         setInterval(atualizarStatusGeral, 1500);
