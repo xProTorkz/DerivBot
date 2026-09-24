@@ -8,6 +8,7 @@ REPOSITORY=xProTorkz/DerivBot
 BRANCH=main
 MASTER_ISSUE=#11
 ACTIVE_ISSUE=#25
+TASK_TYPE=INTELLIGENCE
 BASELINE_SHA=e69cf585d0c5bcb91bb37cfbd00fbb17f54d610d
 NEXT_AFTER_ACTIVE=#21
 DEMO_ONLY=YES
@@ -51,9 +52,10 @@ static/style.css
 PRIMARY_SKILL=testes-validacao
 SUPPORT_SKILL=pesquisa-projeto
 CREATE_NEW_SKILL=NO
+EXECUTION_PACKET=ISSUE_TOP
 ```
 
 ## Regra de contexto mínimo
 
-Começar por este arquivo + Issue #25 + HEAD.
+Começar por `AGENTS.md` + este arquivo + EXECUTION PACKET no topo da Issue #25 + HEAD.
 Abrir outros arquivos somente quando a implementação/teste exigir.
