@@ -1289,18 +1289,14 @@
 
       let roboAtivo = false;
       window.roboAtivo = false;
+      let iniciandoRobo = false;
+      let iniciandoRoboTimestamp = 0;
 
       function moverHistoricoParaCompleto() {
         if (typeof window.carregarHistoricoCompleto === "function") {
           window.carregarHistoricoCompleto();
         } else if (typeof carregarHistoricoCompleto === "function") {
           carregarHistoricoCompleto();
-        }
-      }
-
-      function trocarAba(aba) {
-        if (typeof window.trocarAba === "function") {
-          window.trocarAba(aba);
         }
       }
 
@@ -1318,6 +1314,8 @@
 
         // Atualiza interface imediatamente
         if (!roboAtivo) {
+          iniciandoRobo = true;
+          iniciandoRoboTimestamp = Date.now();
           botao.innerHTML = "⏳ Iniciando...";
 
           // Move histórico atual para histórico completo
@@ -1365,12 +1363,16 @@
           console.error('Erro ao configurar stops:', error);
         });
 
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 18000);
+
         fetch("/toggle_bot", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ modo, meta }),
+          signal: controller.signal,
         })
           .then(async (response) => {
             console.log("Resposta:", response.status, response.statusText);
@@ -1386,14 +1388,13 @@
 
             // Atualiza estado do robô
             roboAtivo = data.status === "iniciado";
+            iniciandoRobo = false;
+            iniciandoRoboTimestamp = 0;
 
             // Atualiza botão com emoji padronizado
             botao.innerHTML = roboAtivo ? "⛔ Parar Robô" : "🚀 Iniciar Robô";
             botao.disabled = false;
             botao.classList.toggle("ativo", roboAtivo);
-
-            // Atualiza bolinhas baseado no status do robô
-            atualizarStatusBolinhas(roboAtivo);
 
             // Transição suave: recolhe seletores e bloqueia inputs
             const modoMetaWrapper = document.querySelector(".modo-meta-wrapper");
@@ -1417,15 +1418,26 @@
           })
           .catch((error) => {
             console.error("❌ Erro:", error);
+            iniciandoRobo = false;
+            iniciandoRoboTimestamp = 0;
 
             // Restaura botão em caso de erro
             botao.innerHTML = "🚀 Iniciar Robô";
             botao.disabled = false;
 
-            // Mostra erro
-            adicionarLogInformativo(`❌ Erro: ${error.message}`);
-
-            alert("Erro ao iniciar robô: " + error.message);
+            if (error.name === "AbortError") {
+              adicionarLogInformativo("⚠️ Tempo limite na resposta do início. Sincronizando com telemetria...");
+            } else {
+              // Mostra erro
+              adicionarLogInformativo(`❌ Erro: ${error.message}`);
+              alert("Erro ao iniciar robô: " + error.message);
+            }
+          })
+          .finally(() => {
+            clearTimeout(timeoutId);
+            iniciandoRobo = false;
+            iniciandoRoboTimestamp = 0;
+            atualizarStatusGeral();
           });
       }
 
@@ -1575,11 +1587,22 @@
             const botEstaAtivo = Boolean(data.ativo);
             roboAtivo = botEstaAtivo;
 
-            // 1. Botão de Controle (Icone e Estado estável)
+            // 1. Botão de Controle (Auto-recuperação e conciliação de estado)
             const botaoControle = document.getElementById("bot-control-btn");
-            if (botaoControle && !botaoControle.disabled) {
-              botaoControle.innerHTML = botEstaAtivo ? "⛔ Parar Robô" : "🚀 Iniciar Robô";
-              botaoControle.classList.toggle("ativo", botEstaAtivo);
+            if (botaoControle) {
+              if (botEstaAtivo) {
+                iniciandoRobo = false;
+                iniciandoRoboTimestamp = 0;
+                botaoControle.disabled = false;
+                botaoControle.innerHTML = "⛔ Parar Robô";
+                botaoControle.classList.add("ativo");
+              } else if (!iniciandoRobo || (Date.now() - iniciandoRoboTimestamp > 18000)) {
+                iniciandoRobo = false;
+                iniciandoRoboTimestamp = 0;
+                botaoControle.disabled = false;
+                botaoControle.innerHTML = "🚀 Iniciar Robô";
+                botaoControle.classList.remove("ativo");
+              }
             }
 
             // 2. Seletores recolhidos suavemente

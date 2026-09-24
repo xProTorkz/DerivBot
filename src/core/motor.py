@@ -998,6 +998,8 @@ class Motor:
             try:
                 contas = client.listar_contas(self.token, self.app_id)
                 self.contas_disponiveis = contas
+                self.ultimo_estagio_execucao = "ACCOUNTS_OK"
+                self.logger.info("[STARTUP] Checkpoint: ACCOUNTS_OK")
             except Exception as ex_list:
                 self.logger.error(f"Erro ao listar contas Deriv: {ex_list}")
                 self.ultimo_erro = str(ex_list)
@@ -1041,6 +1043,8 @@ class Motor:
             # 3. Solicita OTP de uso único para a conta selecionada
             try:
                 ws_url = self._obter_nova_url_ws_autenticada(account_id=account_id)
+                self.ultimo_estagio_execucao = "OTP_OK"
+                self.logger.info("[STARTUP] Checkpoint: OTP_OK")
             except Exception as ex_otp:
                 self.logger.error(f"Falha ao obter OTP da Deriv: {ex_otp}")
                 self.ultimo_erro = str(ex_otp)
@@ -1059,6 +1063,8 @@ class Motor:
             def _on_open_pat(ws):
                 self.logger.info("WebSocket PAT conectado com sucesso!")
                 self.conectado = True
+                self.ultimo_estagio_execucao = "WS_OK"
+                self.logger.info("[STARTUP] Checkpoint: WS_OK")
                 try:
                     # Assina saldo e ticks imediatamente (sem enviar authorize)
                     self.ws.send(json.dumps({"balance": 1, "subscribe": 1}))
@@ -2852,6 +2858,8 @@ class Motor:
 
         # Reinicializa a sessão para garantir que não haja travas de execuções anteriores
         self.iniciar_sessao()
+        self.ultimo_estagio_execucao = "SESSION_RESET_OK"
+        self.logger.info("[STARTUP] Checkpoint: SESSION_RESET_OK")
 
         def executar_loop_inteligente():
             """Loop principal do sistema inteligente"""
@@ -2976,7 +2984,8 @@ class Motor:
         # Inicia thread do sistema inteligente
         thread = threading.Thread(target=executar_loop_inteligente, daemon=True)
         thread.start()
-        self.logger.info("Thread do sistema inteligente iniciada")
+        self.ultimo_estagio_execucao = "THREAD_STARTED"
+        self.logger.info("[STARTUP] Checkpoint: THREAD_STARTED - Thread do sistema inteligente iniciada")
 
     def registrar_log(self, mensagem: str, tipo: str = "info"):
         """Registra um log com timestamp"""

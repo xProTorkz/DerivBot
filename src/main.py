@@ -112,6 +112,7 @@ contador_operacoes = 0
 status_operacao = "parado"
 status_motor = "desconectado"  # Status global do motor
 logs_tempo_real = []
+ultimo_estagio_startup = "PARADO"  # Checkpoint do handshake de inicialização
 
 # CONTROLE DE OPERAÇÕES PARA MODO INICIANTE
 operacoes_ativas = []  # Lista de operações em andamento
@@ -1825,7 +1826,7 @@ def toggle_bot():
             return jsonify({"status": "erro", "mensagem": "Não autenticado"}), 401
 
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
         modo = data.get("modo", "iniciante")
 
         # Configurações por modo (sincronizado com catalogador.py)
@@ -1854,7 +1855,7 @@ def toggle_bot():
 
         meta = meta_solicitada
 
-        global robo_ativo, modo_operacao, meta_diaria, status_operacao, motor
+        global robo_ativo, modo_operacao, meta_diaria, status_operacao, motor, ultimo_estagio_startup
 
         if robo_ativo:
             # Verifica proteção antes de parar
@@ -1881,8 +1882,19 @@ def toggle_bot():
                 {"status": "parado", "mensagem": "Robô parado com segurança"}
             )
         else:
+            # Checkpoint 1: Início da requisição de inicialização
+            ultimo_estagio_startup = "START_REQUEST_RECEIVED"
+            if motor:
+                motor.ultimo_estagio_execucao = "START_REQUEST_RECEIVED"
+            logger.info("[STARTUP] Checkpoint: START_REQUEST_RECEIVED")
+
             # Sincroniza tokens da licença para garantir que a sessão esteja atualizada
             sincronizar_tokens_sessao()
+            ultimo_estagio_startup = "TOKEN_SYNC_OK"
+            if motor:
+                motor.ultimo_estagio_execucao = "TOKEN_SYNC_OK"
+            logger.info("[STARTUP] Checkpoint: TOKEN_SYNC_OK")
+
             token_sessao = session.get("token", "")
             if not token_sessao or token_sessao == "a1b2c3d4e5f6g7h8":
                 return (
@@ -1897,7 +1909,10 @@ def toggle_bot():
 
             # Verifica se o motor está conectado; se não, tenta inicializar com o token da sessão
             if not motor or not getattr(motor, "conectado", False):
-                logger.info("[MOTOR] Motor desconectado ao iniciar robô. Inicializando com token da sessão...")
+                ultimo_estagio_startup = "RECONNECT_STARTED"
+                if motor:
+                    motor.ultimo_estagio_execucao = "RECONNECT_STARTED"
+                logger.info("[STARTUP] Checkpoint: RECONNECT_STARTED - Motor desconectado ao iniciar robô. Inicializando com token da sessão...")
                 try:
                     inicializar_api(
                         token_sessao,
@@ -1907,6 +1922,10 @@ def toggle_bot():
                     time.sleep(1.0)
                 except Exception as e:
                     logger.error(f"[MOTOR] Erro ao reconectar motor para toggle_bot: {e}")
+            else:
+                ultimo_estagio_startup = "MOTOR_ALREADY_CONNECTED"
+                motor.ultimo_estagio_execucao = "MOTOR_ALREADY_CONNECTED"
+                logger.info("[STARTUP] Checkpoint: MOTOR_ALREADY_CONNECTED")
 
             if not motor or not getattr(motor, "conectado", False):
                 erro_detalhe = getattr(motor, "ultimo_erro", "") if motor else ""
@@ -1970,13 +1989,8 @@ def toggle_bot():
                 motor.modo_operacao = modo
                 motor.meta_diaria = meta
 
-                # Reinicia a sessão formalmente e reseta session_stopped
-                if hasattr(motor, "iniciar_sessao"):
-                    motor.iniciar_sessao()
-
-                # iniciar_sistema_inteligente() já cria a própria thread interna.
-                # Chamamos diretamente para capturar falhas imediatas e não devolver
-                # um falso "iniciado" para a interface.
+                # iniciar_sistema_inteligente() já chama iniciar_sessao() internamente
+                # e inicia a thread daemon com checkpoint THREAD_STARTED.
                 if hasattr(motor, "iniciar_sistema_inteligente"):
                     motor.iniciar_sistema_inteligente()
                     logger.info("SISTEMA INTELIGENTE INICIADO")
@@ -2011,6 +2025,12 @@ def toggle_bot():
                     ),
                     500,
                 )
+
+            # Checkpoint final: resposta de sucesso enviada
+            ultimo_estagio_startup = "START_RESPONSE_SENT"
+            if motor:
+                motor.ultimo_estagio_execucao = "START_RESPONSE_SENT"
+            logger.info("[STARTUP] Checkpoint: START_RESPONSE_SENT")
 
             return jsonify(
                 {
@@ -2225,7 +2245,7 @@ def status_robo():
         motor_session_stopped = bool(motor and getattr(motor, "session_stopped", False))
         motor_stop_reason = getattr(motor, "session_stop_reason", None) if motor else None
         ultimo_erro_deriv = getattr(motor, "ultimo_erro_deriv", getattr(motor, "ultimo_erro", None)) if motor else None
-        ultimo_estagio = getattr(motor, "ultimo_estagio_execucao", "PARADO") if motor else "PARADO"
+        ultimo_estagio = getattr(motor, "ultimo_estagio_execucao", ultimo_estagio_startup) if motor else ultimo_estagio_startup
         contadores_funil = getattr(motor, "contadores_funil", {
             "SCAN": 0, "SIGNAL": 0, "RISK_GATE": 0,
             "PROPOSAL_SENT": 0, "PROPOSAL_RECEIVED": 0, "BUY_SENT": 0, "BUY_CONFIRMED": 0
